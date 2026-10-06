@@ -45,7 +45,7 @@
     "@nestjs/terminus": "^11.0.0",
     "@nestjs/throttler": "^6.7.1",
     "@nestjs/typeorm": "^11.0.0",
-    "@nestjs/websockets": "^11.2.1",
+    "@nestjs/websockets": "^12.1.2",
     "@sentry/node": "^10.71.0",
     "@stellar/stellar-sdk": "^16.0.0",
     "axios": "^1.20.0",
