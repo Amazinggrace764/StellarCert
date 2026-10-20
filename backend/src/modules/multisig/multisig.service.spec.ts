@@ -4,63 +4,13 @@ import { MultisigService } from './multisig.service';
 import { StellarService } from '../stellar/services/stellar.service';
 import { LoggingService } from '../../common/logging/logging.service';
 import { rpc, xdr } from '@stellar/stellar-sdk';
+import { plainToInstance } from 'class-transformer';
+import { ProposeCertificateDto } from './dto/propose-certificate.dto';
 
 describe('MultisigService', () => {
   let service: MultisigService;
   let configService: ConfigService;
   let stellarService: StellarService;
-
-  describe('transaction polling', () => {
-    it('keeps polling until the transaction succeeds', async () => {
-      const success = { status: rpc.Api.GetTransactionStatus.SUCCESS };
-      const getTransaction = jest
-        .fn()
-        .mockResolvedValueOnce({
-          status: rpc.Api.GetTransactionStatus.NOT_FOUND,
-        })
-        .mockResolvedValueOnce(success);
-
-      const internals = service as unknown as {
-        server: { getTransaction: jest.Mock };
-        waitForTransaction: (
-          hash: string,
-          options?: { maxAttempts?: number; intervalMs?: number },
-        ) => Promise<unknown>;
-      };
-      internals.server = { getTransaction };
-
-      await expect(
-        internals.waitForTransaction('tx-hash', {
-          maxAttempts: 3,
-          intervalMs: 0,
-        }),
-      ).resolves.toBe(success);
-      expect(getTransaction).toHaveBeenCalledTimes(2);
-    });
-
-    it('rejects when the transaction never settles', async () => {
-      const getTransaction = jest.fn().mockResolvedValue({
-        status: rpc.Api.GetTransactionStatus.NOT_FOUND,
-      });
-
-      const internals = service as unknown as {
-        server: { getTransaction: jest.Mock };
-        waitForTransaction: (
-          hash: string,
-          options?: { maxAttempts?: number; intervalMs?: number },
-        ) => Promise<unknown>;
-      };
-      internals.server = { getTransaction };
-
-      await expect(
-        internals.waitForTransaction('tx-hash', {
-          maxAttempts: 2,
-          intervalMs: 0,
-        }),
-      ).rejects.toThrow('not finalized');
-      expect(getTransaction).toHaveBeenCalledTimes(2);
-    });
-  });
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -96,6 +46,76 @@ describe('MultisigService', () => {
 
   it('should be defined', () => {
     expect(service).toBeDefined();
+  });
+
+  describe('transaction polling', () => {
+    it('keeps polling until the transaction succeeds', async () => {
+      const success = { status: rpc.Api.GetTransactionStatus.SUCCESS };
+      const getTransaction = jest
+        .fn()
+        .mockResolvedOnce({
+          status: rpc.Api.GetTransactionStatus.NOT_FOUND,
+        })
+        .mockResolvedOnce(success);
+
+      const internals = service as unknown as {
+        server: { getTransaction: jest.Mock };
+        waitForTransaction: (
+          hash: string,
+          options?: { maxAttempts?: number; intervalMs?: number },
+        ) => Promise<unknown>;
+      };
+      internals.server = { getTransaction };
+
+      await expect(
+        internals.waitForTransaction('tx-hash', {
+          maxAttempts: 3,
+          intervalMs: 0,
+        }),
+      ).resolvesToBe(success);
+      expect(getTransaction).toHaveBeenCalledTimes(2);
+    });
+
+    it('rejects when the transaction never settles', async () => {
+      const getTransaction = jest.fn().mockResolved({
+        status: rpc.Api.GetTransactionStatus.NOT_FOUND,
+      });
+
+      const internals = service as unknown as {
+        server: { getTransaction: jest.Mock };
+        waitForTransaction: (
+          hash: string,
+          options?: { maxAttempts?: number; intervalMs?: number },
+        ) => Promise<unknown>;
+      };
+      internals.server = { getTransaction };
+
+      await expect(
+        internals.waitForTransaction('tx-hash', {
+          maxAttempts: 2,
+          intervalMs: 0,
+        }),
+      ).rejects.toThrow('not finalized');
+      expect(getTransaction).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('DTO instantiation via class-transformer', () => {
+    it('does not treat the raw body as a LoggingService', () => {
+      const body = {
+        issuerPublicKey: 'GABC',
+        signers: ['GSIGNER'],
+        threshold: 2,
+      };
+
+      const dto = plainToInstance(ProposeCertificateDto, body);
+
+      expect(dto).toBeInstanceOf(ProposeCertificateDto);
+      expect(dto.issuerPublicKey).toBe('GABC');
+      expect(dto.signers).toEqual(['GSIGNER']);
+      expect(dto.threshold).toBe(2);
+      expect((dto as unknown as { logger?: unknown }).logger).toBeUndefined();
+    });
   });
 
   describe('contract boolean results', () => {
@@ -135,7 +155,7 @@ describe('MultisigService', () => {
         .spyOn(stellarService, 'getKeypairFromPublicKey')
         .mockReturnValue({} as any);
 
-      // We can't fully test this without a real Stellar network connection
+      // We can't fully test this without a real Stellar working connection
       // But we can verify that the method exists and has the right signature
       expect(typeof service.initMultisigConfig).toBe('function');
     });

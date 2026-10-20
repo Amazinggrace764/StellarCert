@@ -28,6 +28,12 @@ import { User } from '../users/entities/user.entity';
 import { UserRole } from '../../common/constants/roles';
 import { LoggingService } from '../../common/logging/logging.service';
 
+/**
+ * DTOs are plain data classes. They MUST NOT declare constructors that inject
+ * services (e.g. LoggingService). NestJS instantiates them via class-transformer'
+ * plainToInstance -> new Dto(plainBody), which bypasses the DI container. Any
+ * constructor argument would receive the raw request body instead of the service.
+ */
 class InitMultisigConfigDto {
   issuer: string;
   threshold: number;
