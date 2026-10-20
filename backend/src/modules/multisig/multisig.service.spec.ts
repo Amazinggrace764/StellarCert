@@ -151,11 +151,76 @@ describe('MultisigService', () => {
     it('should propose a new certificate for multi-sig issuance', () => {
       expect(typeof service.proposeCertificate).toBe('function');
     });
+
+    it('returns the contract boolean result instead of a mock object', async () => {
+      const internals = service as unknown as {
+        buildAndSubmitTransaction: jest.Mock;
+        parseBooleanResult: (value: xdr.ScVal | undefined) => boolean;
+      };
+      internals.buildAndSubmitTransaction = jest
+        .fn()
+        .mockResolvedValue(xdr.ScVal.scvBool(true));
+
+      await expect(
+        service.proposeCertificate({
+          issuer: 'issuer',
+          certificateId: 'cert-1',
+          signers: ['signer-1'],
+          threshold: 1,
+        } as never),
+      ).resolves.toBe(true);
+      expect(internals.buildAndSubmitTransaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('propagates contract failures', async () => {
+      const internals = service as unknown as {
+        buildAndSubmitTransaction: jest.Mock;
+      };
+      internals.buildAndSubmitTransaction = jest
+        .fn()
+        .mockRejectedValue(new Error('contract call failed'));
+
+      await expect(
+        service.proposeCertificate({
+          issuer: 'issuer',
+          certificateId: 'cert-1',
+          signers: ['signer-1'],
+          threshold: 1,
+        } as never),
+      ).rejects.toThrow('contract call failed');
+    });
   });
 
   describe('approveRequest', () => {
     it('should approve a pending certificate request', () => {
       expect(typeof service.approveRequest).toBe('function');
+    });
+
+    it('returns the contract boolean result instead of a mock success result', async () => {
+      const internals = service as unknown as {
+        buildAndSubmitTransaction: jest.Mock;
+      };
+      internals.buildAndSubmitTransaction = jest
+        .fn()
+        .mockResolvedValue(xdr.ScVal.scvBool(true));
+
+      await expect(
+        service.approveRequest({ requestId: 'req-1', signer: 'signer-1' } as never),
+      ).resolves.toBe(true);
+      expect(internals.buildAndSubmitTransaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects when the contract returns a non-boolean result', async () => {
+      const internals = service as unknown as {
+        buildAndSubmitTransaction: jest.Mock;
+      };
+      internals.buildAndSubmitTransaction = jest
+        .fn()
+        .mockResolvedValue(xdr.ScVal.scvU32(1));
+
+      await expect(
+        service.approveRequest({ requestId: 'req-1', signer: 'signer-1' } as never),
+      ).rejects.toThrow('Invalid boolean response from contract');
     });
   });
 

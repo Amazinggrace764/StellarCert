@@ -1,5 +1,5 @@
 /**
- * Issue #721 / #722 – polling and real result handling helpers.
+ * Issue #721 / #722 - polling and real result handling helpers.
  */
 describe('MultisigService waitForTransaction behavior', () => {
   it('documents that getTransaction must not run in the same tick as sendTransaction', () => {
@@ -8,11 +8,11 @@ describe('MultisigService waitForTransaction behavior', () => {
     const fs = require('fs');
     const path = require('path');
     const src = fs.readFileSync(path.join(__dirname, 'multisig.service.ts'), 'utf8');
-    expect(src).toContain('waitForTransaction');
+    expect(src).toContain('private async waitForTransaction');
     // No remaining same-tick getTransaction after send without wait
     const withoutHelper = src.replace(/private async waitForTransaction[\s\S]*?^\s{2}\S/m, '');
     // All PENDING branches should call waitForTransaction
-    const pendingBlocks = src.match(/response\.status === 'PENDING'[\s\S]{0,120}/g) || [];
+    const pendingBlocks = src.match(/response\.status === 'PENDING'[\s\S]{0,120}/g) ?? [];
     for (const block of pendingBlocks) {
       expect(block).toMatch(/waitForTransaction/);
     }
@@ -24,6 +24,14 @@ describe('MultisigService waitForTransaction behavior', () => {
     const src = fs.readFileSync(path.join(__dirname, 'multisig.service.ts'), 'utf8');
     expect(src).not.toMatch(/Return a mock object/);
     expect(src).toContain('getPendingRequest(requestId)');
+  });
+
+  it('approveRequest parses the real contract boolean result', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const src = fs.readFileSync(path.join(__dirname, 'multisig.service.ts'), 'utf8');
+    expect(src).not.toMatch(/mock success result/i);
+    expect(src).toContain('parseBooleanResult');
   });
 });
 
