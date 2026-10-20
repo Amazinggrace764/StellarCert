@@ -73,11 +73,65 @@ export interface PaginatedResult {
   has_next: boolean;
 }
 
+/**
+ * Response DTOs for multisig controller endpoints.
+ *
+ * These interfaces give the controller handlers compile-time shape safety
+ * instead of `Promise<any>`. They intentionally mirror the existing runtime
+ * payloads so the API contract is preserved.
+ */
+export interface InitMultisigConfigResponseDto {
+  transactionHash: string;
+}
+
+export interface UpdateMultisigConfigResponseDto {
+  transactionHash: string;
+}
+
+export interface ProposeCertificateResponseDto {
+  request: PendingRequest;
+}
+
+export interface SignatureResponseDto {
+  success: boolean;
+  message: string;
+  final_status?: RequestStatus;
+}
+
+export interface IssueCertificateResponseDto {
+  issued: boolean;
+}
+
+export interface CancelRequestResponseDto {
+  cancelled: boolean;
+}
+
+export interface RequestExpiredResponseDto {
+  expired: boolean;
+}
+
+export interface MultisigConfigResponseDto {
+  config: MultisigConfig;
+}
+
+export interface PendingRequestResponseDto {
+  request: PendingRequest;
+}
+
+export interface PendingRequestsResponseDto {
+  data: PendingRequest[];
+  total: number;
+  page: number;
+  limit: number;
+  has_next: boolean;
+}
+
 @Injectable()
 export class MultisigService {
   private contractId: string;
   private server: rpc.Server;
   private networkPassphrase: string;
+
 
   constructor(
     private readonly configService: ConfigService,
@@ -149,7 +203,7 @@ export class MultisigService {
     threshold: number,
     signers: string[],
     maxSigners: number,
-  ): Promise<string> {
+  ): Promise<InitMultisigConfigResponseDto> {
     try {
       const adminKeyPair =
         this.stellarService.getKeypairFromPublicKey(adminPublicKey);
@@ -194,7 +248,7 @@ export class MultisigService {
         const txResponse = await this.waitForTransaction(response.hash);
         if (txResponse.status === rpc.Api.GetTransactionStatus.SUCCESS) {
           this.logger.log(`Multisig config initialized for issuer: ${issuer}`);
-          return response.hash;
+          return { transactionHash: response.hash };
         }
       }
 
@@ -217,7 +271,7 @@ export class MultisigService {
     newThreshold?: number,
     newSigners?: string[],
     newMaxSigners?: number,
-  ): Promise<string> {
+  ): Promise<UpdateMultisigConfigResponseDto> {
     try {
       const adminKeyPair =
         this.stellarService.getKeypairFromPublicKey(adminPublicKey);
@@ -270,7 +324,7 @@ export class MultisigService {
         const txResponse = await this.waitForTransaction(response.hash);
         if (txResponse.status === rpc.Api.GetTransactionStatus.SUCCESS) {
           this.logger.log(`Multisig config updated for issuer: ${issuer}`);
-          return response.hash;
+          return { transactionHash: response.hash };
         }
       }
 
@@ -294,7 +348,7 @@ export class MultisigService {
     recipient: string,
     metadata: string,
     expirationDays: number,
-  ): Promise<PendingRequest> {
+  ): Promise<ProposeCertificateResponseDto> {
     try {
       const requesterKeyPair =
         this.stellarService.getKeypairFromPublicKey(requesterPublicKey);
@@ -339,24 +393,27 @@ export class MultisigService {
           this.logger.log(`Certificate proposed with request ID: ${requestId}`);
           // Parse actual on-chain pending request after the tx finalizes (#722)
           try {
-            return await this.getPendingRequest(requestId);
+            const { request } = await this.getPendingRequest(requestId);
+            return { request };
           } catch (fetchErr) {
             this.logger.warn(
               `Transaction succeeded but could not fetch pending request ${requestId}; returning minimal result`,
               fetchErr,
             );
             return {
-              id: requestId,
-              issuer,
-              recipient,
-              metadata,
-              proposer: requesterPublicKey,
-              approvals: [],
-              rejections: [],
-              created_at: Math.floor(Date.now() / 1000),
-              expires_at:
-                Math.floor(Date.now() / 1000) + expirationDays * 24 * 60 * 60,
-              status: RequestStatus.Pending,
+              request: {
+                id: requestId,
+                issuer,
+                recipient,
+                metadata,
+                proposer: requesterPublicKey,
+                approvals: [],
+                rejections: [],
+                created_at: Math.floor(Date.now() / 1000),
+                expires_at:
+                  Math.floor(Date.now() / 1000) + expirationDays * 24 * 60 * 60,
+                status: RequestStatus.Pending,
+              },
             };
           }
         }
@@ -378,7 +435,7 @@ export class MultisigService {
   async approveRequest(
     approverPublicKey: string,
     requestId: string,
-  ): Promise<SignatureResult> {
+  ): Promise<SignatureResponseDto> {
     try {
       const approverKeyPair =
         this.stellarService.getKeypairFromPublicKey(approverPublicKey);
@@ -416,7 +473,7 @@ export class MultisigService {
           // Use on-chain request status after finalization (#722)
           let final_status: RequestStatus | undefined;
           try {
-            const pending = await this.getPendingRequest(requestId);
+            const { request: pending } = await this.getPendingRequest(requestId);
             final_status = pending.status;
           } catch {
             // request may have moved off the pending list after threshold met
@@ -444,7 +501,7 @@ export class MultisigService {
     rejectorPublicKey: string,
     requestId: string,
     reason?: string,
-  ): Promise<SignatureResult> {
+  ): Promise<SignatureResponseDto> {
     try {
       const rejectorKeyPair =
         this.stellarService.getKeypairFromPublicKey(rejectorPublicKey);
@@ -489,7 +546,7 @@ export class MultisigService {
           );
           let final_status: RequestStatus | undefined;
           try {
-            const pending = await this.getPendingRequest(requestId);
+            const { request: pending } = await this.getPendingRequest(requestId);
             final_status = pending.status;
           } catch {
             final_status = RequestStatus.Rejected;
@@ -515,7 +572,7 @@ export class MultisigService {
   async issueApprovedCertificate(
     requesterPublicKey: string,
     requestId: string,
-  ): Promise<boolean> {
+  ): Promise<IssueCertificateResponseDto> {
     try {
       const requesterKeyPair =
         this.stellarService.getKeypairFromPublicKey(requesterPublicKey);
@@ -550,7 +607,7 @@ export class MultisigService {
           this.logger.log(
             `Approved certificate issued for request: ${requestId}`,
           );
-          return true;
+          return { issued: true };
         }
       }
 
@@ -571,7 +628,7 @@ export class MultisigService {
   async cancelRequest(
     requesterPublicKey: string,
     requestId: string,
-  ): Promise<boolean> {
+  ): Promise<CancelRequestResponseDto> {
     try {
       const requesterKeyPair =
         this.stellarService.getKeypairFromPublicKey(requesterPublicKey);
@@ -606,7 +663,7 @@ export class MultisigService {
           this.logger.log(
             `Request ${requestId} cancelled by ${requesterPublicKey}`,
           );
-          return true;
+          return { cancelled: true };
         }
       }
 
@@ -621,7 +678,7 @@ export class MultisigService {
   /**
    * Get multisig configuration for an issuer
    */
-  async getMultisigConfig(issuer: string): Promise<MultisigConfig> {
+  async getMultisigConfig(issuer: string): Promise<MultisigConfigResponseDto> {
     try {
       const contract = new Contract(this.contractId);
 
@@ -644,7 +701,8 @@ export class MultisigService {
 
       if (rpc.Api.isSimulationSuccess(response)) {
         if (response.result) {
-          return this.parseMultisigConfig(response.result.retval);
+          const config = this.parseMultisigConfig(response.result.retval);
+          return { config };
         }
       }
 
@@ -662,7 +720,7 @@ export class MultisigService {
   /**
    * Get pending request by ID
    */
-  async getPendingRequest(requestId: string): Promise<PendingRequest> {
+  async getPendingRequest(requestId: string): Promise<PendingRequestResponseDto> {
     try {
       const contract = new Contract(this.contractId);
 
@@ -685,7 +743,8 @@ export class MultisigService {
 
       if (rpc.Api.isSimulationSuccess(response)) {
         if (response.result) {
-          return this.parsePendingRequest(response.result.retval);
+          const request = this.parsePendingRequest(response.result.retval);
+          return { request };
         }
       }
 
@@ -700,7 +759,7 @@ export class MultisigService {
   /**
    * Check if a request is expired
    */
-  async isRequestExpired(requestId: string): Promise<boolean> {
+  async isRequestExpired(requestId: string): Promise<RequestExpiredResponseDto> {
     try {
       const contract = new Contract(this.contractId);
 
@@ -724,7 +783,8 @@ export class MultisigService {
       if (rpc.Api.isSimulationSuccess(response)) {
         const simResult = response.result;
         if (simResult) {
-          return this.parseBooleanResult(simResult.retval);
+          const expired = this.parseBooleanResult(simResult.retval);
+          return { expired };
         }
       }
 
@@ -745,7 +805,7 @@ export class MultisigService {
   async getPendingRequestsForIssuer(
     issuer: string,
     pagination: Pagination,
-  ): Promise<PaginatedResult> {
+  ): Promise<PendingRequestsResponseDto> {
     try {
       const contract = new Contract(this.contractId);
 
@@ -805,7 +865,7 @@ export class MultisigService {
   async getPendingRequestsForSigner(
     signer: string,
     pagination: Pagination,
-  ): Promise<PaginatedResult> {
+  ): Promise<PendingRequestsResponseDto> {
     try {
       const contract = new Contract(this.contractId);
 
