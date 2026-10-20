@@ -53,10 +53,22 @@ describe("IssueCertificate", () => {
 
     expect(
       await screen.findByText("Recipient name is required"),
-    ).toBeInTheDocument();
+    ).toBeInDocument();
     expect(
       screen.getByText("Stellar wallet address is required"),
-    ).toBeInTheDocument();
+    ).toBeInDocument();
     expect(alertSpy).not.toHaveBeenCalled();
+  });
+
+  it("accepts a user object without firstName without accessing a missing field", () => {
+    // Regression guard for the 'firstName' in user' consistency issue:
+    // the component must render for a user shape that lacks firstName.
+    const userWithoutFirstName = {
+      email: "jane@example.com",
+      walletAddress: "G" + "A".repeat(55),
+    } as unknown as React.ComponentProps<typeof IssueCertificate>["user"];
+
+    expect(() => render(<IssueCertificate user={userWithoutFirstName} />)).not.toThrow();
+    expect(screen.getByLabelText(/Full Name/i)).toBeInTheDocument();
   });
 });

@@ -1,4 +1,5 @@
 import {
+  type QueryClient,
   keepPreviousData,
   useMutation,
   useQuery,
@@ -14,6 +15,7 @@ import type {
   ProfileUpdateData,
   RejectTransferDto,
   User,
+  UserProfile,
   VerifyEmailRequest,
 } from "./types";
 import {
@@ -92,6 +94,39 @@ export type CertificateListParams = {
 
 export type DateRangeParams = { startDate?: string; endDate?: string };
 
+// ── User normalization ─────────────────────────────────────────────────────
+
+/**
+ * The API returns users in several shapes: a bare `User`, a `UserProfile`
+ * (which always carries `firstName`/`lastName`), or a paginated envelope
+ * (`{ users: [...] }` / `{ data: [...] }`). Normalize once at this boundary so
+ * every consumer receives a `User` whose name fields are guaranteed present.
+ */
+export const normalizeUser = (raw: User | UserProfile): User => {
+  const candidate = raw as User & Partial<UserProfile> & { name?: string };
+  const name = typeof candidate.name === "string" ? candidate.name : undefined;
+  const firstName =
+    candidate.firstName ?? (name ? name.split(" ")[0] : "") ?? "";
+  const lastName =
+    candidate.lastName ??
+    (name ? name.split(" ").slice(1).join(" ") : "");
+  return { ...candidate, firstName, lastName };
+};
+
+const normalizeUserList = (
+  data: User[] | { users: User[] } | { data: User[] },
+): User[] => {
+  const list = Array.isArray(data)
+    ? data
+    : "users" in data && Array.isArray(data.users)
+      ? data.users
+      : data.data;
+  return list.map(normalizeUser);
+};
+
+export const seedSessionUser = (queryClient: QueryClient, user: User | UserProfile) =>
+  queryClient.setQueryData(queryKeys.session(), normalizeUser(user));
+
 // ── Session ────────────────────────────────────────────────────────────────
 
 /**
@@ -103,7 +138,7 @@ export type DateRangeParams = { startDate?: string; endDate?: string };
 export const useSessionQuery = (enabled: boolean) =>
   useQuery({
     queryKey: queryKeys.session(),
-    queryFn: () => authApi.refresh(),
+    queryFn: async () => normalizeUser(await authApi.refresh()),
     enabled,
     staleTime: Infinity,
     gcTime: Infinity,
@@ -203,7 +238,7 @@ export const useAuditSearchQuery = (
 export const useUserProfileQuery = () =>
   useQuery({
     queryKey: queryKeys.session(),
-    queryFn: () => userApi.getProfile(),
+    queryFn: async () => normalizeUser(await userApi.getProfile()),
   });
 
 export const useUserListQuery = (params: Record<string, string | number | boolean>) =>
@@ -211,9 +246,7 @@ export const useUserListQuery = (params: Record<string, string | number | boolea
     queryKey: queryKeys.users.list(params),
     queryFn: async (): Promise<User[]> => {
       const data = await userApi.getAll(params);
-      if (Array.isArray(data)) return data;
-      if ("users" in data && Array.isArray(data.users)) return data.users;
-      return data.data;
+      return normalizeUserList(data);
     },
   });
 
@@ -363,7 +396,7 @@ export const useUpdateIssuerProfileMutation = () => {
       issuerProfileApi.updateProfile(profile),
     onSuccess: async (profile) => {
       // The profile form and the header both render the authenticated user.
-      queryClient.setQueryData(queryKeys.users.profile(), profile);
+      seedSessionUser(queryClient, profile);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.users.root }),
         queryClient.invalidateQueries({ queryKey: queryKeys.issuer.root }),
