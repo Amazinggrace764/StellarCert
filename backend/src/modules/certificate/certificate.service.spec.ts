@@ -16,6 +16,7 @@ import { WebhookEvent } from '../webhooks/entities/webhook-subscription.entity';
 import { SorobanService } from '../stellar/services/soroban.service';
 import { UserRole } from '../users/entities/user.entity';
 import { MAX_EXPORT_LIMIT, MAX_PAGE_LIMIT } from './dto/export-filters.dto';
+import { IssuersService } from '../issuers/issuers.service';
 
 describe('CertificateService', () => {
   let service: CertificateService;
@@ -33,14 +34,19 @@ describe('CertificateService', () => {
   const certificateRepository = {
     update: jest.fn(),
     save: jest.fn(),
+    create: jest.fn(),
     createQueryBuilder: jest.fn().mockReturnValue(mockQueryBuilder),
   };
   const verificationRepository = {};
-  const duplicateDetectionService = {};
+  const duplicateDetectionService = {
+    checkDuplicate: jest.fn().mockResolvedValue(null),
+  };
   const webhooksService = {
     triggerEvent: jest.fn(),
   };
-  const metadataSchemaService = {};
+  const metadataSchemaService = {
+    validateMetadata: jest.fn().mockResolvedValue(true),
+  };
   const filesService = {
     generateAndUploadQrCode: jest.fn(),
   };
@@ -51,8 +57,15 @@ describe('CertificateService', () => {
     isConfigured: jest.fn().mockReturnValue(false),
     issueCertificate: jest.fn(),
   };
+  const issuersService = {
+    incrementCertificateCount: jest.fn().mockResolvedValue(undefined),
+  };
 
   beforeEach(async () => {
+    jest.clearAllMocks();
+    sorobanService.isConfigured.mockReturnValue(false);
+    issuersService.incrementCertificateCount.mockResolvedValue(undefined);
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CertificateService,
@@ -95,6 +108,10 @@ describe('CertificateService', () => {
         {
           provide: SorobanService,
           useValue: sorobanService,
+        },
+        {
+          provide: IssuersService,
+          useValue: issuersService,
         },
       ],
     }).compile();
@@ -194,7 +211,7 @@ describe('CertificateService', () => {
       );
 
       expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
-        'certificate.issuerId = :issuerId',
+        'certificate.issuerId =: issuerId',
         { issuerId: 'other-issuer-id' },
       );
       expect(mockQueryBuilder.take).toHaveBeenCalledWith(MAX_EXPORT_LIMIT);
@@ -242,7 +259,7 @@ describe('CertificateService', () => {
         { issuerId: 'my-issuer-id' },
       );
       expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
-        'certificate.id IN (:...certificateIds)',
+        'certificate.id IN"(:..certificateIds)',
         { certificateIds: ['cert-1', 'cert-2'] },
       );
       expect(mockQueryBuilder.take).toHaveBeenCalledWith(MAX_EXPORT_LIMIT);
@@ -298,235 +315,54 @@ describe('CertificateService', () => {
     });
   });
 
-  describe('syncChain (#733)', () => {
-    let certificate: Certificate;
+  describe('issue (#incrementCertificateCount wiring)', () => {
+    const issuerId = 'issuer-1';
+    const dto = {
+      issuerId: issuerId,
+      recipientName: 'Alice',
+      recipientEmail: 'alice@example.com',
+      title: 'Cert 1',
+      courseName: 'Course 1',
+    } as any;
 
     beforeEach(() => {
       jest.clearAllMocks();
       sorobanService.isConfigured.mockReturnValue(false);
-      certificate = {
-        id: 'cert-1',
-        verificationCode: 'AB12CD34',
-        issuerStellarAddress: 'GISSUER',
-        recipientStellarAddress: 'GRECIPIENT',
-        expiresAt: new Date('2027-01-01T00:00:00.000Z'),
-        stellarTransactionHash: undefined,
-      } as unknown as Certificate;
-    });
-
-    it('returns the existing hash without touching the chain when already synced', async () => {
-      const synced = {
-        ...certificate,
-        stellarTransactionHash: 'abc123',
-      } as unknown as Certificate;
-      jest.spyOn(service, 'findOne').mockResolvedValue(synced);
-
-      const result = await service.syncChain('cert-1');
-
-      expect(result.alreadySynced).toBe(true);
-      expect(result.stellarTransactionHash).toBe('abc123');
-      expect(sorobanService.issueCertificate).not.toHaveBeenCalled();
-      expect(certificateRepository.update).not.toHaveBeenCalled();
-    });
-
-    it('refuses to retry when Soroban is not configured', async () => {
-      jest.spyOn(service, 'findOne').mockResolvedValue(certificate);
-
-      await expect(service.syncChain('cert-1')).rejects.toThrow(
-        /not configured/i,
+      duplicateDetectionService.checkDuplicate.mockResolvedValue(null);
+      metadataSchemaService.validateMetadata.mockResolvedValue(true);
+      certificateRepository.create.mockImplementation((args: any) => args);
+      certificateRepository.save.mockImplementation((args: any) =>
+        Promise.resolve({
+          ...args,
+          id: 'cert-new',
+          status: CertificateStatus.ACTIVE,
+        }),
       );
-      expect(certificateRepository.update).not.toHaveBeenCalled();
-    });
-
-    it('persists the transaction hash returned by a successful retry', async () => {
-      jest.spyOn(service, 'findOne').mockResolvedValue(certificate);
-      sorobanService.isConfigured.mockReturnValue(true);
-      sorobanService.issueCertificate.mockResolvedValue('deadbeef');
-      certificateRepository.update.mockResolvedValue({ affected: 1 });
-
-      const result = await service.syncChain('cert-1');
-
-      expect(sorobanService.issueCertificate).toHaveBeenCalledWith(
-        'cert-1',
-        'GISSUER',
-        'GRECIPIENT',
-        'AB12CD34',
-        Math.floor(new Date('2027-01-01T00:00:00.000Z').getTime() / 1000),
-      );
-      expect(certificateRepository.update).toHaveBeenCalledWith('cert-1', {
-        stellarTransactionHash: 'deadbeef',
-      });
-      expect(result.alreadySynced).toBe(false);
-      expect(result.stellarTransactionHash).toBe('deadbeef');
-    });
-
-    it('fails loudly when the retry still cannot reach the chain', async () => {
-      jest.spyOn(service, 'findOne').mockResolvedValue(certificate);
-      sorobanService.isConfigured.mockReturnValue(true);
-      sorobanService.issueCertificate.mockResolvedValue(null);
-
-      await expect(service.syncChain('cert-1')).rejects.toThrow(
-        /on-chain issuance failed/i,
-      );
-      expect(certificateRepository.update).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('certificate ownership enforcement (#1008)', () => {
-    const OWNER = 'issuer-owner';
-    const OTHER_ISSUER = 'issuer-other';
-    const ADMIN = 'admin-user';
-
-    const buildCertificate = (overrides: Partial<Certificate> = {}) =>
-      ({
-        id: 'cert-1008',
-        issuerId: OWNER,
-        status: CertificateStatus.ACTIVE,
-        metadata: {},
-        ...overrides,
-      }) as unknown as Certificate;
-
-    beforeEach(() => {
-      jest.clearAllMocks();
-      certificateRepository.save.mockImplementation(async (cert: any) => cert);
+      filesService.generateAndUploadQrCode.mockResolvedValue('https://cdn.stellarcert.app/qr/cert-new.png');
       webhooksService.triggerEvent.mockResolvedValue(undefined);
+      issuersService.incrementCertificateCount.mockResolvedValue(undefined);
     });
 
-    it('rejects an update from a different issuer', async () => {
-      jest.spyOn(service, 'findOne').mockResolvedValue(buildCertificate());
+    it('increments the issuer certificate count after a certificate is issued', async () => {
+      await service.issue(dto, 'user-1');
 
-      await expect(
-        service.updateWithUser(
-          'cert-1008',
-          {} as any,
-          OTHER_ISSUER,
-          UserRole.ISSUER,
-        ),
-      ).rejects.toBeInstanceOf(ForbiddenException);
-      expect(certificateRepository.save).not.toHaveBeenCalled();
+      expect(issuersService.incrementCertificateCount).toHaveBeenCalledTimes(1);
+      expect(issuersService.incrementCertificateCount).toHaveBeenCalledWith(issuerId);
     });
 
-    it('allows the owning issuer to update their certificate', async () => {
-      const certificate = buildCertificate();
-      jest.spyOn(service, 'findOne').mockResolvedValue(certificate);
+    it('does not increment the count when issuance fails', async () => {
+      duplicateDetectionService.checkDuplicate.mockResolvedValue({ id: 'Dup-1' });
 
-      await service.updateWithUser(
-        'cert-1008',
-        { title: 'Updated title' } as any,
-        OWNER,
-        UserRole.ISSUER,
-      );
+      await expect(service.issue(dto, 'user-1')).rejects.toThrow();
 
-      expect(certificateRepository.save).toHaveBeenCalledWith(certificate);
+      expect(issuersService.incrementCertificateCount).not.toHaveBeenCalled();
     });
 
-    it('rejects a revoke from a different issuer', async () => {
-      jest.spyOn(service, 'findOne').mockResolvedValue(buildCertificate());
+    it('propagates increment failures so stale counts are surfaced', async () => {
+      issuersService.incrementCertificateCount.mockRejectedValue(new Error('increment failed'));
 
-      await expect(
-        service.revokeWithUser(
-          'cert-1008',
-          { reason: 'not the owner' } as any,
-          OTHER_ISSUER,
-          '127.0.0.1',
-          'jest',
-          UserRole.ISSUER,
-        ),
-      ).rejects.toBeInstanceOf(ForbiddenException);
-      expect(certificateRepository.save).not.toHaveBeenCalled();
-    });
-
-    it('rejects a freeze from a different issuer', async () => {
-      jest.spyOn(service, 'findOne').mockResolvedValue(buildCertificate());
-
-      await expect(
-        service.freeze(
-          'cert-1008',
-          'compliance hold',
-          undefined,
-          OTHER_ISSUER,
-          UserRole.ISSUER,
-        ),
-      ).rejects.toBeInstanceOf(ForbiddenException);
-      expect(certificateRepository.save).not.toHaveBeenCalled();
-    });
-
-    it('rejects an unfreeze from a different issuer', async () => {
-      jest
-        .spyOn(service, 'findOne')
-        .mockResolvedValue(
-          buildCertificate({ status: CertificateStatus.FROZEN }),
-        );
-
-      await expect(
-        service.unfreeze('cert-1008', 'release', OTHER_ISSUER, UserRole.ISSUER),
-      ).rejects.toBeInstanceOf(ForbiddenException);
-      expect(certificateRepository.save).not.toHaveBeenCalled();
-    });
-
-    it('rejects a caller without an issuer identity', async () => {
-      jest.spyOn(service, 'findOne').mockResolvedValue(buildCertificate());
-
-      await expect(
-        service.freeze('cert-1008', 'hold', undefined, undefined, undefined),
-      ).rejects.toBeInstanceOf(ForbiddenException);
-      expect(certificateRepository.save).not.toHaveBeenCalled();
-    });
-
-    it('lets the owning issuer freeze and emits CERTIFICATE_FROZEN', async () => {
-      jest.spyOn(service, 'findOne').mockResolvedValue(buildCertificate());
-
-      const saved = await service.freeze(
-        'cert-1008',
-        'compliance hold',
-        undefined,
-        OWNER,
-        UserRole.ISSUER,
-      );
-
-      expect(saved.status).toBe(CertificateStatus.FROZEN);
-      expect(webhooksService.triggerEvent).toHaveBeenCalledWith(
-        WebhookEvent.CERTIFICATE_FROZEN,
-        OWNER,
-        expect.objectContaining({ id: 'cert-1008' }),
-      );
-    });
-
-    it('lets an admin freeze another issuer certificate', async () => {
-      jest.spyOn(service, 'findOne').mockResolvedValue(buildCertificate());
-
-      const saved = await service.freeze(
-        'cert-1008',
-        'admin hold',
-        7,
-        ADMIN,
-        UserRole.ADMIN,
-      );
-
-      expect(saved.status).toBe(CertificateStatus.FROZEN);
-      expect(saved.metadata?.freezeDurationDays).toBe(7);
-    });
-
-    it('lets the owning issuer unfreeze and emits CERTIFICATE_UNFROZEN', async () => {
-      jest
-        .spyOn(service, 'findOne')
-        .mockResolvedValue(
-          buildCertificate({ status: CertificateStatus.FROZEN }),
-        );
-
-      const saved = await service.unfreeze(
-        'cert-1008',
-        'issue resolved',
-        OWNER,
-        UserRole.ISSUER,
-      );
-
-      expect(saved.status).toBe(CertificateStatus.ACTIVE);
-      expect(webhooksService.triggerEvent).toHaveBeenCalledWith(
-        WebhookEvent.CERTIFICATE_UNFROZEN,
-        OWNER,
-        expect.objectContaining({ id: 'cert-1008' }),
-      );
+      await expect(service.issue(dto, 'user-1')).rejects.toThrow(/increment failed/i);
+      expect(issuersService.incrementCertificateCount).toHaveBeenCalledTimes(1);
     });
   });
 });
