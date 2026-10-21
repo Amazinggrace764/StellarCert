@@ -26,7 +26,8 @@ function queryBuilderStub() {
     qb[method] = jest.fn(() => qb);
   }
   qb.getRawMany = jest.fn(async () => []);
-  qb.getCount = jest.fn(async () => 0);
+  qb.getCount = jest.fn();
+  qb.getCount.mockResolvedValue(0);
   qb.getOne = jest.fn(async () => null);
   return qb;
 }
@@ -91,6 +92,32 @@ describe('AdminAnalyticsService cache TTL unit (#731)', () => {
     const result = await service.getAnalytics({});
 
     expect(result).toBe(cached);
+    expect(cacheManager.set).not.toHaveBeenCalled();
+  });
+
+  it('serves the dashboard stats from the same analytics payload and cache key', async () => {
+    // Regression for the duplicate dashboard endpoints: the dashboard stats
+    // must be derived from the single canonical analytics flow, not a
+    // second independent query/cache path.
+    const canonical = {
+      totalUsers: 3,
+      totalCertificates: 5,
+      totalIssuers: 2,
+      totalVerifications: 4,
+    };
+    cacheManager.get.mockResolvedValue(canonical);
+
+    const result = await service.getDashboardStats();
+
+    expect(cacheManager.get).called('admin-analytics');
+    expect(cacheManager.set).not.toHaveBeenCalled();
+    expect(result).toEqual(canonical);
+  });
+
+  it('propagates a cache read failure instead of silently returning stale data', async () => {
+    cacheManager.get.mockRejectedValue(new Error('cache unavailable'));
+
+    await expect(service.getAnalytics({})).rejects.toThrow('cache unavailable');
     expect(cacheManager.set).not.toHaveBeenCalled();
   });
 });
