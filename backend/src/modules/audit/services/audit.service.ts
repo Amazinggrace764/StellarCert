@@ -133,6 +133,7 @@ export class AuditService {
 
   async search(
     searchDto: AuditSearchDto,
+    maxTake = 500,
   ): Promise<{ data: AuditLog[]; total: number }> {
     const query = this.auditLogRepository.createQueryBuilder('audit');
 
@@ -195,7 +196,7 @@ export class AuditService {
     query.orderBy('audit.timestamp', 'DESC');
 
     const skip = searchDto.skip || 0;
-    const take = Math.min(searchDto.take || 50, 500); // Max 500 records per request
+    const take = Math.min(searchDto.take || 50, maxTake);
 
     query.skip(skip).take(take);
 
@@ -347,7 +348,10 @@ export class AuditService {
   }
 
   async exportToCsv(searchDto: AuditSearchDto): Promise<string> {
-    const { data } = await this.search({ ...searchDto, skip: 0, take: 50000 });
+    const { data } = await this.search(
+      { ...searchDto, skip: 0, take: 50000 },
+      50000,
+    );
 
     if (data.length === 0) {
       return 'No audit logs found';
