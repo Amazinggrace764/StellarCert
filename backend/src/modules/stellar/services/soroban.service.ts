@@ -314,6 +314,60 @@ export class SorobanService implements OnModuleInit {
   }
 
   /**
+   * Freeze a certificate on-chain.
+   *
+   * The contract verifies that the stored issuer is still present in the
+   * authorized-issuers list (`DataKey::Issuer(cert.issuer) == true`) before
+   * allowing the freeze, so issuers removed via `remove_issuer()` can no
+   * longer freeze certificates they previously issued.
+   */
+  async freezeCertificate(
+    id: string,
+    issuerAddress: string,
+    reason: string,
+  ): Promise<boolean> {
+    try {
+      if (!this.certificateContractId) {
+        throw new Error('Certificate contract ID not configured.');
+      }
+
+      const contract = new Contract(this.certificateContractId);
+
+      const issuerKeypair = this.getIssuerKeypair(issuerAddress);
+      const sourceAccount = await this.server.getAccount(
+        issuerKeypair.publicKey(),
+      );
+
+      const args = [nativeToScVal(id), nativeToScVal(reason)];
+
+      const transaction = new TransactionBuilder(sourceAccount, {
+        fee: '100',
+        networkPassphrase: this.networkPassphrase,
+      })
+        .addOperation(contract.call('freeze_certificate', ...args))
+        .setTimeout(30)
+        .build();
+
+      transaction.sign(issuerKeypair);
+
+      const result = await this.server.sendTransaction(transaction);
+
+      if (result.status !== 'PENDING') {
+        throw new Error(`Transaction failed: ${result.status}`);
+      }
+
+      // Poll until the ledger confirms the transaction
+      const txResponse = await this.pollTransaction(result.hash);
+
+      return txResponse.status === 'SUCCESS';
+    } catch (error: any) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Certificate freeze failed: ${message}`);
+      return false;
+    }
+  }
+
+  /**
    * Revoke a certificate on-chain
    */
   async revokeCertificate(
