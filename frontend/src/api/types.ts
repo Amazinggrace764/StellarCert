@@ -1,4 +1,4 @@
-/**
+/*
  * User roles in the system
  */
 export enum UserRole {
@@ -118,6 +118,18 @@ export interface CertificateTransfer {
   createdAt: string;
   updatedAt: string;
   certificate?: Certificate;
+}
+
+/**
+ * Event payload emitted when a certificate transfer is initiated.
+ * Mirrors the on-chain `TransferInitiatedEvent` so off-chain indexers and
+ * the intended new owner can react to a pending transfer.
+ */
+export interface TransferInitiatedEvent {
+  transferId: string;
+  certificateId: string;
+  fromOwner: string;
+  toOwner: string;
 }
 
 export interface InitiateTransferDto {
@@ -391,22 +403,4 @@ export interface ProfileUpdateData {
   phone?: string;
   organization?: string;
   profilePicture?: string;
-  stellarPublicKey?: string;
-  [key: string]: unknown;
-}
-
-// Password reset/request types
-
-export interface ForgotPasswordRequest {
-  email: string;
-}
-
-export interface ResetPasswordRequest {
-  token: string;
-  newPassword: string;
-  confirmPassword: string;
-}
-
-export interface VerifyEmailRequest {
-  token: string;
 }
