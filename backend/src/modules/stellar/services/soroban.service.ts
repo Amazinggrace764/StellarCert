@@ -385,22 +385,13 @@ export class SorobanService implements OnModuleInit {
         .setTimeout(30)
         .build();
 
-      transaction.sign(this.adminKeypair);
-
-      const result = await this.server.sendTransaction(transaction);
-
-      if (result.status !== 'PENDING') {
-        throw new Error(`Transaction failed: ${result.status}`);
-      }
-
-      // Poll until the ledger confirms the transaction
-      const txResponse = await this.pollTransaction(result.hash);
-
-      if (txResponse.status !== 'SUCCESS' || !txResponse.returnValue) {
+      const simResult: any = await this.server.simulateTransaction(transaction);
+      const retval = simResult?.result?.retval ?? simResult?.returnValue;
+      if (!retval) {
         return null;
       }
 
-      const certificateData = scValToNative(txResponse.returnValue);
+      const certificateData = scValToNative(retval);
 
       return {
         id: certificateData.id,
@@ -477,12 +468,54 @@ export class SorobanService implements OnModuleInit {
   }
 
   /**
-   * Helper method to get issuer keypair (this would need proper key management)
+   * Resolve the signing Keypair for a specific issuer address.
+   * Checks STELLAR_ISSUER_KEYS_JSON or STELLAR_ISSUER_SECRET_<ADDRESS> first,
+   * and only allows the admin keypair if its public key matches issuerAddress.
    */
   private getIssuerKeypair(issuerAddress: string): Keypair {
-    // This is a placeholder - in production, you'd have proper key management
-    // For now, we'll assume the admin keypair is used for all operations
-    return this.adminKeypair;
+    const normalized = (issuerAddress || '').trim();
+    const rawMap = this.configService.get<string>('STELLAR_ISSUER_KEYS_JSON');
+    if (rawMap) {
+      try {
+        const parsed = JSON.parse(rawMap) as Record<string, string>;
+        const secret = parsed[normalized];
+        if (secret) {
+          const kp = Keypair.fromSecret(secret);
+          if (kp.publicKey() !== normalized) {
+            throw new Error(
+              `Configured secret key for issuer ${normalized} does not match its public key.`,
+            );
+          }
+          return kp;
+        }
+      } catch (err) {
+        if (err instanceof Error && err.message.includes('does not match')) {
+          throw err;
+        }
+        throw new Error('Invalid STELLAR_ISSUER_KEYS_JSON configuration.');
+      }
+    }
+
+    const envSecret = this.configService.get<string>(
+      `STELLAR_ISSUER_SECRET_${normalized}`,
+    );
+    if (envSecret) {
+      const kp = Keypair.fromSecret(envSecret);
+      if (kp.publicKey() !== normalized) {
+        throw new Error(
+          `Configured secret for issuer ${normalized} does not match public key.`,
+        );
+      }
+      return kp;
+    }
+
+    if (this.adminKeypair && this.adminKeypair.publicKey() === normalized) {
+      return this.adminKeypair;
+    }
+
+    throw new Error(
+      `No signing keypair configured for issuer address ${normalized}.`,
+    );
   }
 
   /**
