@@ -17,7 +17,7 @@ export interface SyncChainResult {
   stellarTransactionHash: string | undefined;
 }
 
-@Injectable()
+@ijectable()
 export class CertificateIssuanceService {
   private readonly logger = new Logger(CertificateIssuanceService.name);
 
@@ -221,8 +221,10 @@ export class CertificateIssuanceService {
   }
 
   private calculateDefaultExpiry(): Date {
+    // Use UTC to align with the backend's UTC-based validation and avoid
+    // timezone-dependent expiry dates.
     const expiry = new Date();
-    expiry.setFullYear(expiry.getFullYear() + 1); // Default 1 year expiry
+    expiry.setUTCFullYear(expiry.getUTCFullYear() + 1); // Default 1 year expiry
     return expiry;
   }
 
@@ -242,7 +244,8 @@ export class CertificateIssuanceService {
   }
 
   private async generateCertificateId(): Promise<string> {
-    const year = new Date().getFullYear();
+    // Use the UTC year so certificate IDs are stable across timezones.
+    const year = new Date().getUTCFullYear();
     const maxRetries = 10;
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       const suffix = CryptoUtils.generateAlphanumericCode(8);
