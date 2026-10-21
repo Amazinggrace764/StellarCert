@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   rpc,
@@ -74,7 +74,7 @@ export interface PaginatedResult {
 }
 
 @Injectable()
-export class MultisigService {
+export class MultisigService implements OnModuleInit {
   private contractId: string;
   private server: rpc.Server;
   private networkPassphrase: string;
@@ -84,10 +84,16 @@ export class MultisigService {
     private readonly stellarService: StellarService,
     private readonly logger: LoggingService,
   ) {
+    // Initialization is deferred to onModuleInit so that the module can be
+    // imported into AppModule without failing at construction time when
+    // configuration is absent (e.g. in tests or environments without multisig).
+  }
+
+  onModuleInit(): void {
     this.initializeMultisig();
   }
 
-  private initializeMultisig() {
+  private initializeMultisig(): void {
     const contractId = this.configService.get<string>('MULTISIG_CONTRACT_ID');
     const horizonUrl = this.configService.get<string>('STELLAR_HORIZON_URL');
     const network = this.configService.get<string>('STELLAR_NETWORK');
@@ -110,6 +116,19 @@ export class MultisigService {
   }
 
   /**
+   * Guard against use before configuration has been supplied. Throwing a
+   * clear error here is preferable to a cryptic `undefined` dereference on
+   * `this.server` / `this.contractId` deep inside a transaction builder.
+   */
+  private assertInitialized(): void {
+    if (!this.server || !this.contractId) {
+      throw new Error(
+        'MultisigService is not configured: MULTISIG_CONTRACT_ID, STELLAR_HORIZON_URL and STELLAR_NETWORK must be set',
+      );
+    }
+  }
+
+  /**
    * Initialize multisig configuration for an issuer
    */
 
@@ -122,6 +141,7 @@ export class MultisigService {
     hash: string,
     options?: { maxAttempts?: number; intervalMs?: number },
   ): Promise<rpc.Api.GetTransactionResponse> {
+    this.assertInitialized();
     const maxAttempts = options?.maxAttempts ?? 30;
     const intervalMs = options?.intervalMs ?? 2000;
 
@@ -135,7 +155,7 @@ export class MultisigService {
       ) {
         return last;
       }
-      // NOT_FOUND / PENDING – wait and retry
+      // NOT_FOUND / PENDING - wait and retry
       await new Promise((resolve) => setTimeout(resolve, intervalMs));
     }
     throw new Error(
@@ -151,6 +171,7 @@ export class MultisigService {
     maxSigners: number,
   ): Promise<string> {
     try {
+      this.assertInitialized();
       const adminKeyPair =
         this.stellarService.getKeypairFromPublicKey(adminPublicKey);
       const rpcAccount = await this.server.getAccount(adminPublicKey);
@@ -219,6 +240,7 @@ export class MultisigService {
     newMaxSigners?: number,
   ): Promise<string> {
     try {
+      this.assertInitialized();
       const adminKeyPair =
         this.stellarService.getKeypairFromPublicKey(adminPublicKey);
       const accountResponse = await this.server.getAccount(adminPublicKey);
@@ -296,6 +318,7 @@ export class MultisigService {
     expirationDays: number,
   ): Promise<PendingRequest> {
     try {
+      this.assertInitialized();
       const requesterKeyPair =
         this.stellarService.getKeypairFromPublicKey(requesterPublicKey);
       const accountResponse = await this.server.getAccount(requesterPublicKey);
@@ -380,6 +403,7 @@ export class MultisigService {
     requestId: string,
   ): Promise<SignatureResult> {
     try {
+      this.assertInitialized();
       const approverKeyPair =
         this.stellarService.getKeypairFromPublicKey(approverPublicKey);
       const accountResponse = await this.server.getAccount(approverPublicKey);
@@ -446,6 +470,7 @@ export class MultisigService {
     reason?: string,
   ): Promise<SignatureResult> {
     try {
+      this.assertInitialized();
       const rejectorKeyPair =
         this.stellarService.getKeypairFromPublicKey(rejectorPublicKey);
       const accountResponse = await this.server.getAccount(rejectorPublicKey);
@@ -517,6 +542,7 @@ export class MultisigService {
     requestId: string,
   ): Promise<boolean> {
     try {
+      this.assertInitialized();
       const requesterKeyPair =
         this.stellarService.getKeypairFromPublicKey(requesterPublicKey);
       const accountResponse = await this.server.getAccount(requesterPublicKey);
@@ -573,6 +599,7 @@ export class MultisigService {
     requestId: string,
   ): Promise<boolean> {
     try {
+      this.assertInitialized();
       const requesterKeyPair =
         this.stellarService.getKeypairFromPublicKey(requesterPublicKey);
       const accountResponse = await this.server.getAccount(requesterPublicKey);
@@ -623,6 +650,7 @@ export class MultisigService {
    */
   async getMultisigConfig(issuer: string): Promise<MultisigConfig> {
     try {
+      this.assertInitialized();
       const contract = new Contract(this.contractId);
 
       // Convert parameters to ScVal
@@ -664,6 +692,7 @@ export class MultisigService {
    */
   async getPendingRequest(requestId: string): Promise<PendingRequest> {
     try {
+      this.assertInitialized();
       const contract = new Contract(this.contractId);
 
       // Convert parameters to ScVal
@@ -702,6 +731,7 @@ export class MultisigService {
    */
   async isRequestExpired(requestId: string): Promise<boolean> {
     try {
+      this.assertInitialized();
       const contract = new Contract(this.contractId);
 
       // Convert parameters to ScVal
@@ -747,6 +777,7 @@ export class MultisigService {
     pagination: Pagination,
   ): Promise<PaginatedResult> {
     try {
+      this.assertInitialized();
       const contract = new Contract(this.contractId);
 
       // Convert parameters to ScVal
@@ -807,6 +838,7 @@ export class MultisigService {
     pagination: Pagination,
   ): Promise<PaginatedResult> {
     try {
+      this.assertInitialized();
       const contract = new Contract(this.contractId);
 
       // Convert parameters to ScVal
@@ -919,3 +951,4 @@ export class MultisigService {
     };
   }
 }
+
