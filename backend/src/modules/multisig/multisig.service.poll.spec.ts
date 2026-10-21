@@ -28,6 +28,14 @@ describe('MultisigService waitForTransaction behavior', () => {
     expect(src).not.toMatch(/Return a mock object/);
     expect(src).toContain('getPendingRequest(requestId)');
   });
+
+  it('approveRequest parses the real contract boolean result', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const src = fs.readFileSync(path.join(__dirname, 'multisig.service.ts'), 'utf8');
+    expect(src).not.toMatch(/mock success result/i);
+    expect(src).toContain('parseBooleanResult');
+  });
 });
 
 describe('Multisig DTOs (issue #720)', () => {

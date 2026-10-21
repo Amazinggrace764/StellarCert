@@ -309,6 +309,7 @@ export class MultisigService implements OnModuleInit {
   /**
    * Propose a new certificate for multi-sig issuance
    */
+  // #722: return the actual on-chain pending request, not a fabricated object.
   async proposeCertificate(
     requesterPublicKey: string,
     requestId: string,
@@ -360,7 +361,7 @@ export class MultisigService implements OnModuleInit {
         const txResponse = await this.waitForTransaction(response.hash);
         if (txResponse.status === rpc.Api.GetTransactionStatus.SUCCESS) {
           this.logger.log(`Certificate proposed with request ID: ${requestId}`);
-          // Parse actual on-chain pending request after the tx finalizes (#722)
+          // Parse actual on-chain pending request after the tx finalizes (#722).
           try {
             return await this.getPendingRequest(requestId);
           } catch (fetchErr) {
@@ -368,19 +369,11 @@ export class MultisigService implements OnModuleInit {
               `Transaction succeeded but could not fetch pending request ${requestId}; returning minimal result`,
               fetchErr,
             );
-            return {
-              id: requestId,
-              issuer,
-              recipient,
-              metadata,
-              proposer: requesterPublicKey,
-              approvals: [],
-              rejections: [],
-              created_at: Math.floor(Date.now() / 1000),
-              expires_at:
-                Math.floor(Date.now() / 1000) + expirationDays * 24 * 60 * 60,
-              status: RequestStatus.Pending,
-            };
+            throw new Error(
+              `Transaction ${response.hash} succeeded but pending request ${requestId} could not be read from the contract: ${
+                fetchErr instanceof Error ? fetchErr.message : String(fetchErr)
+              }`,
+            );
           }
         }
       }
@@ -437,15 +430,11 @@ export class MultisigService implements OnModuleInit {
           this.logger.log(
             `Request ${requestId} approved by ${approverPublicKey}`,
           );
-          // Use on-chain request status after finalization (#722)
-          let final_status: RequestStatus | undefined;
-          try {
-            const pending = await this.getPendingRequest(requestId);
-            final_status = pending.status;
-          } catch {
-            // request may have moved off the pending list after threshold met
-            final_status = RequestStatus.Approved;
-          }
+          // Use on-chain request status after finalization (#722).
+          const final_status = await this.resolveFinalStatus(
+            requestId,
+            RequestStatus.Approved,
+          );
           return {
             success: true,
             message: `Request approved by ${approverPublicKey}`,
@@ -512,13 +501,10 @@ export class MultisigService implements OnModuleInit {
           this.logger.log(
             `Request ${requestId} rejected by ${rejectorPublicKey}`,
           );
-          let final_status: RequestStatus | undefined;
-          try {
-            const pending = await this.getPendingRequest(requestId);
-            final_status = pending.status;
-          } catch {
-            final_status = RequestStatus.Rejected;
-          }
+          const final_status = await this.resolveFinalStatus(
+            requestId,
+            RequestStatus.Rejected,
+          );
           return {
             success: true,
             message: `Request rejected by ${rejectorPublicKey}`,
@@ -531,6 +517,28 @@ export class MultisigService implements OnModuleInit {
     } catch (error) {
       this.logger.error(`Failed to reject request ${requestId}`, error);
       throw error;
+    }
+  }
+
+  /**
+   * Resolve the authoritative status of a request after a signature tx
+   * finalizes. The contract may have removed the request from the pending
+   * list once the threshold was met, so we fall back to the expected
+   * terminal status only when the contract confirms the request is gone.
+   */
+  private async resolveFinalStatus(
+    requestId: string,
+    expectedTerminal: RequestStatus,
+  ): Promise<RequestStatus> {
+    try {
+      const pending = await this.getPendingRequest(requestId);
+      return pending.status;
+    } catch (err) {
+      this.logger.warn(
+        `Could not read pending request ${requestId} after finalization; assuming terminal status ${expectedTerminal}`,
+        err,
+      );
+      return expectedTerminal;
     }
   }
 
