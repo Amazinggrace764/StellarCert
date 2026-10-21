@@ -11,6 +11,18 @@ import { isValidStellarPublicKey } from './utils/stellar';
 import { IssuerPaginationQueryDto, IPaginatedResult } from './dto/pagination.dto';
 import { IssuerTier } from '../../common/rate-limiting/rate-limit.types';
 
+const DEFAULT_PAGE = 1;
+const DEFAULT_LIMIT = 20;
+const MAX_LIMIT = 100;
+const ALLOWED_SORT_FIELDS = [
+  'createdAt',
+  'updatedAt',
+  'name',
+  'stellarPublicKey',
+  'tier',
+  'certificateCount',
+];
+
 @Injectable()
 export class IssuersService {
   constructor(
@@ -33,36 +45,40 @@ export class IssuersService {
   }
 
   async listIssuers(query: IssuerPaginationQueryDto): Promise<IPaginatedResult<Issuer>> {
-    const { page = 1, limit = 20, sortBy = 'createdAt', sortOrder = 'DESC', isActive, search, tier } = query;
+    const page = this.normalizePositiveInteger(query.page, DEFAULT_PAGE);
+    const limit = Math.min(
+      this.normalizePositiveInteger(query.limit, DEFAULT_LIMIT),
+      MAX_LIMIT,
+    );
+    const sortBy = query.sortBy && ALLOWED_SORT_FIELDS.includes(query.sortBy) ? query.sortBy : 'createdAt';
+    const sortOrder = query.sortOrder === 'ASC' ? 'ASC' : 'DESC';
     const skip = (page - 1) * limit;
 
-    const queryBuilder = this.issuerRepo.createQueryBuilder('issuer');
+    const queryBuilder = this.issuerRepo.createQueryBuilder('Issuer');
 
-    if (isActive !== undefined) {
-      queryBuilder.andWhere('issuer.isActive = :isActive', { isActive });
+    if (query.isActive !== undefined) {
+      queryBuilder.andWhere('issuer.isActive = :isActive', { isActive: query.isActive });
     }
 
-    if (search) {
+    if (query.search) {
       queryBuilder.andWhere(
         '(issuer.name ILIKE :search OR issuer.stellarPublicKey ILIKE :search)',
         { search: `%${search}%%` },
       );
     }
 
-    if (tier) {
-      queryBuilder.andWhere('issuer.tier = :tier', { tier: tier as IssuerTier });
+    if (query.tier) {
+      queryBuilder.andWhere('issuer.tier = :tier', { tier: query.tier as IssuerTier });
     }
 
-    const allowedSortFields = ['createdAt', 'updatedAt', 'name', 'stellarPublicKey', 'tier', 'certificateCount'];
-    const sortField = allowedSortFields.includes(sortBy) ? sortBy : 'createdAt';
-    queryBuilder.orderBy(`issuer.${sortField}`, sortOrder);
+    queryBuilder.orderBy(`issuer.${sortBy}`, sortOrder);
 
     const [data, total] = await queryBuilder
       .skip(skip)
       .take(limit)
       .getManyAndCount();
 
-    const totalPages = Math.ceil(total / limit);
+    const totalPages = total === 0 ? 0 : Math.ceil(total / limit);
 
     return {
       data,
@@ -92,5 +108,13 @@ export class IssuersService {
       ? manager.getRepository(Issuer)
       : this.issuerRepo;
     await repo.increment({ id: issuerId }, 'certificateCount', 1);
+  }
+
+  private normalizePositiveInteger(value: unknown, fallback: number): number {
+    const parsed = typeof value === 'number' ? value : Number(value);
+    if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 1) {
+      return fallback;
+    }
+    return parsed;
   }
 }

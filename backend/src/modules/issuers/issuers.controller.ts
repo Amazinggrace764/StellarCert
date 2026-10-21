@@ -8,6 +8,8 @@ import {
   Query,
   UseGuards,
   UseInterceptors,
+  UsePipes,
+  ValidationPipe,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { IssuersService } from './issuers.service';
@@ -46,7 +48,7 @@ export class IssuersController {
   @ApiQuery({ name: 'isActive', required: false, type: Boolean, example: true })
   @ApiQuery({ name: 'search', required: false, type: String, example: 'example' })
   @ApiQuery({ name: 'tier', required: false, enum: ['FREE', 'BASIC', 'PRO', 'ENTERPRISE'], example: 'FREE' })
-  async list(@Query() query: IssuerPaginationQueryDto) {
+  async list(@Query(new ValidationPipe({ transform: true, whitelist: true })) query: IssuerPaginationQueryDto) {
     return this.issuersService.listIssuers(query);
   }
 }
