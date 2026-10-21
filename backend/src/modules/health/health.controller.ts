@@ -43,7 +43,6 @@ export class HealthController {
         {
           status: HttpStatus.SERVICE_UNAVAILABLE,
           message: 'Application is unhealthy',
-          error,
         },
         HttpStatus.SERVICE_UNAVAILABLE,
       );
@@ -80,7 +79,6 @@ export class HealthController {
         {
           status: HttpStatus.SERVICE_UNAVAILABLE,
           message: 'Application is not ready',
-          error,
         },
         HttpStatus.SERVICE_UNAVAILABLE,
       );
@@ -130,7 +128,6 @@ export class HealthController {
         {
           status: HttpStatus.SERVICE_UNAVAILABLE,
           message: 'Database is unavailable',
-          error,
         },
         HttpStatus.SERVICE_UNAVAILABLE,
       );
@@ -160,7 +157,6 @@ export class HealthController {
         {
           status: HttpStatus.SERVICE_UNAVAILABLE,
           message: 'Stellar network is unavailable',
-          error,
         },
         HttpStatus.SERVICE_UNAVAILABLE,
       );
@@ -190,7 +186,6 @@ export class HealthController {
         {
           status: HttpStatus.SERVICE_UNAVAILABLE,
           message: 'Redis is unavailable',
-          error,
         },
         HttpStatus.SERVICE_UNAVAILABLE,
       );
