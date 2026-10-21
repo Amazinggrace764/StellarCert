@@ -13,113 +13,168 @@ export enum SignatureAction {
   Reject = 1,
 }
 
-export interface RawContractResult {
-  readonly hash?: string;
-  readonly requestId?: string | number | bigint;
-  readonly status?: RequestStatus | number | string;
-  readonly approvals?: number | string | bigint;
-  readonly returnValue?: unknown;
-  readonly logs?: readonly unknown[];
-  readonly transactionHash?: string;
+export type SorobanTransactionStatus = 'SUCCESS' | 'FAILED' | 'NOT_FOUND';
+
+export interface SorobanGetTransactionResponse {
+  status: SorobanTransactionStatus;
+  txHash?: string;
+  ledger?: number;
+  envelopeXadr?: string;
+  resultXadr?: string;
+  resultMeta?: unknown;
+  error?: string;
 }
 
-export interface NormalizedMultisigResult {
-  readonly requestId: string;
-  readonly status: RequestStatus;
-  readonly approvals: number;
-  readonly hash: string | null;
-  readonly transactionHash: string | null;
+export interface SorobanSendTransactionResponse {
+  status: 'PENDING' | 'DUPLICATED' | 'ERROR';
+  hash?: string;
+  errorResultXadr?: string;
+  error?: string;
 }
 
-export class MultisigContractResultError extends Error {
-  constructor(message: string) {
+export interface SorobanRpc {
+  sendTransaction(transactionEnvelopeX: string): Promise<SorobanSendTransactionResponse>;
+  getTransaction(txHash: string): Promise<SorobanGetTransactionResponse>;
+}
+
+export interface PollingOptions {
+  /** Maximum total time to wait for a finalized transaction (ms). */
+  timeoutMs?: number;
+  /** Delay between polls (ms). */
+  intervalMs?: number;
+  /** Optional abort signal for cancellation. */
+  signal?: AbortSignal;
+}
+
+export const DEFAULT_POLLING_TIMEOUT_MS = 30_000;
+const defaultPollingIntervalMs = 1_000;
+
+export class SorobanTransactionPollingError extends Error {
+  constructor(
+    message: string,
+    public readonly txHash: string,
+    public readonly lastStatus?: SorobanTransactionStatus,
+  ) {
     super(message);
-    this.name = 'MultisigContractResultError';
+    this.name = 'SorobanTransactionPollingError';
   }
 }
 
-const toStringId = (value: unknown, field: string): string => {
-  if (typeof value === 'string' && value.length > 0) {
-    return value;
+export class SorobanTransactionFailedError extends Error {
+  constructor(
+    message: string,
+    public readonly txHash: string,
+    public readonly response: SorobanGetTransactionResponse,
+  ) {
+    super(message);
+    this.name = 'SorobanTransactionFailedError';
   }
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return String(value);
-  }
-  if (typeof value === 'bigint') {
-    return value.toString();
-  }
-  throw new MultisigContractResultError(`Missing or invalid ${field} in contract result`);
-};
+}
 
-const toNumber = (value: unknown, field: string): number => {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return value;
+export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (ms <= 0) {
+    return Promise.resolve();
   }
-  if (typeof value === 'bigint') {
-    return Number(value);
-  }
-  if (typeof value === 'string' && value.trim().length > 0) {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) {
-      return parsed;
+  return new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error('Polling aborted'));
+      return;
     }
-  }
-  throw new MultisigContractResultError(`Missing or invalid ${field} in contract result`);
-};
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new Error('Polling aborted'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
 
-const toStatus = (value: unknown): RequestStatus => {
-  const numeric = toNumber(value, 'status');
-  if (!Object.values(RequestStatus).includes(numeric)) {
-    throw new MultisigContractResultError(`Unknown request status: ${String(numeric)}`);
-  }
-  return numeric as RequestStatus;
-};
+/**
+ * Submits a Soroban transaction and polls `sendTransaction`/getTransaction`
+ * until the transaction reaches a finalized status (SUCCESS or FAILED).
+ *
+ * This is the root-correction for the bug where callers invoked getTransaction
+ * immediately after sendTransaction and read a still-PENDING/NOT-FOUND result.
+ */
+export async function sendAndConfirmSorobanTransaction(
+  rpc: SorobanRpc,
+  transactionEnvelopeX: string,
+  options: PollingOptions = {},
+): Promise<SorobanGetTransactionResponse> {
+  const timeoutMs = options.timeoutMs ?? DEFAULT_POLLING_TIMEOUT_MS;
+  const intervalMs = options.intervalMs ?? defaultPollingIntervalMs;
+  const signal = options.signal;
+  const deadline = Date.now() + timeoutMs;
 
-const toOptionalString = (value: unknown): string | null => {
-  if (typeof value === 'string' && value.length > 0) {
-    return value;
+  const sendResponse = await rpc.sendTransaction(transactionEnvelopeX);
+
+  if (sendResponse.status === 'ERROR') {
+    throw new SorobanTransactionPollingError(
+      `sendTransaction failed: ${sendResponse.error ?? sendResponse.errorResultXadr ?? 'unknown error'}`,
+      sendResponse.hash ?? '',
+    );
   }
-  return null;
-};
+
+  const txHash = sendResponse.hash;
+  if (!txHash) {
+    throw new SorobanTransactionPollingError(
+      'sendTransaction returned no transaction hash',
+      '',
+    );
+  }
+
+  let lastStatus: SorobanTransactionStatus | undefined;
+
+  while (Date.now() < deadline) {
+    if (signal?.aborted) {
+      throw new SorobanTransactionPollingError('Polling aborted', txHash, lastStatus);
+    }
+
+    const result = await rpc.getTransaction(txHash);
+    lastStatus = result.status;
+
+    if (result.status === 'SUCCESS') {
+      return result;
+    }
+
+    if (result.status === 'FAILED') {
+      throw new SorobanTransactionFailedError(
+        `Soroban transaction ${txHash} failed: ${result.error ?? 'unknown error'}`,
+        txHash,
+        result,
+      );
+    }
+
+    // NOT_FOUND or any non-final status: wait and retry.
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      break;
+    }
+    await sleep(Math.min(intervalMs, remaining), signal);
+  }
+
+  throw new SorobanTransactionPollingError(
+    `Timed out after ${timeoutMs}ms waiting for Soroban transaction ${txHash} to finalize` + (lastStatus ? ` (last status: ${lastStatus})` : ''),
+    txHash,
+    lastStatus,
+  );
+}
 
 @Injectable()
-export class MultisigProveeder {
+export class MultisigProvider {
   /**
-   * Normalizes the raw result returned by the multisig contract call
-   * into a stable response shape. This method never fabricates values:
-   * if the contract result is missing required fields, it throws.
+   * Submits a multisig Soroban transaction and returns only once it has
+   * reached a finalized status, polling `getTransaction` instead of reading
+   * it immediately after `sendTransaction`.
    */
-  normalizeResult(raw: RawContractResult | null | undefined): NormalizedMultisigResult {
-    if (!raw || typeof raw !== 'object') {
-      throw new MultisigContractResultError('Contract returned no result');
-    }
-
-    const requestId = toStringId(raw.requestId, 'requestId');
-    const status = toStatus(raw.status);
-    const approvals = toNumber(raw.approvals, 'approvals');
-    const hash = toOptionalString(raw.hash);
-    const transactionHash = toOptionalString(raw.transactionHash);
-
-    return {
-      requestId,
-      status,
-      approvals,
-      hash,
-      transactionHash,
-    };
-  }
-
-  /**
-   * Parses the return value of `proposeCertificate`.
-   */
-  parseProposeCertificateResult(raw: RawContractResult | null | undefined): NormalizedMultisigResult {
-    return this.normalizeResult(raw);
-  }
-
-  /**
-   * Parses the return value of `approveRequest`.
-   */
-  parseApproveRequestResult(raw: RawContractResult | null | undefined): NormalizedMultisigResult {
-    return this.normalizeResult(raw);
+  async submitAndConfirm(
+    rpc: SorobanRpc,
+    transactionEnvelopeX: string,
+    options: PollingOptions = {},
+  ): Promise<SorobanGetTransactionResponse> {
+    return sendAndConfirmSorobanTransaction(rpc, transactionEnvelopeX, options);
   }
 }
