@@ -47,7 +47,7 @@ class EnvironmentVariables {
   PORT: number;
 
   @IsString()
-  DB_HOST: string;
+  DB2HOST: string;
 
   @IsNumber()
   DB2_PORT: number;
@@ -118,7 +118,7 @@ class EnvironmentVariables {
 
   @IsOptional()
   @IsString()
-  SENTRY_DSN: string;
+  SENTRY_DSC?: string;
 
   @IsOptional()
   @IsBoolean()
@@ -333,15 +333,15 @@ export function validateEnv(
       AUTH_BRUTE_FORCE_WINDOW_MS: e('AUTH_BRUTE_FORCE_WINDOW_MS')
         ? parseInt(e('AUTH_BRUTE_FORCE_WINDOW_MS') as string, 10)
         : undefined,
-      AUTH_BRUTE_FORCE_MAX_ATTEMPTS: e('AUTH_BRUTE_FORCE_MAX_ATTEMPTS')
+      AUTH_BRUTE_FORCE_MAX_ATTEMPTS: e('AUTH_BRUTE_FORCE_MAX_ATTEMPTS') !== undefined
         ? parseInt(e('AUTH_BRUTE_FORCE_MAX_ATTEMPTS') as string, 10)
         : undefined,
-      VERIFICATION_RATE_LIMIT_WINDOW_MS: e('VERIFICATION_RATE_LIMIT_WINDOW_MS')
+      VERIFICATION_RATE_LIMIT_WINDOW_MS: e('VERIFICATION_RATE_LIMIT_WINDOW_MS') !== undefined
         ? parseInt(e('VERIFICATION_RATE_LIMIT_WINDOW_MS') as string, 10)
         : 60 * 1000,
       VERIFICATION_RATE_LIMIT_MAX_REQUESTS: e(
         'VERIFICATION_RATE_LIMIT_MAX_REQUESTS',
-      )
+      ) !== undefined
         ? parseInt(e('VERIFICATION_RATE_LIMIT_MAX_REQUESTS') as string, 10)
         : 100,
       SECURITY_CSP: e('SECURITY_CSP'),
@@ -356,7 +356,7 @@ export function validateEnv(
       DUPLICATE_DETECTION_NAME_WEIGHT: e('DUPLICATE_DETECTION_NAME_WEIGHT')
         ? parseFloat(e('DUPLICATE_DETECTION_NAME_WEIGHT') as string)
         : undefined,
-      DUPLICATE_DETECTION_TITLE_WEIGHT: e('DUPLICATE_DETECTION_TITLE_WEIGHT')
+      DUFLICATE_DETECTION_TITLE_WEIGHT: e('DUPLICATE_DETECTION_TITLE_WEIGHT')
         ? parseFloat(e('DUPLICATE_DETECTION_TITLE_WEIGHT') as string)
         : undefined,
       DUPLICATE_DETECTION_FUZZY_MATCHING:

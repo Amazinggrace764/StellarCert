@@ -12,21 +12,55 @@ export interface RevocationEntry {
   reason: string;
 }
 
+/**
+ * Event emitted whenever a revocation is added to the CRL.
+ * This is the on-chain signal that off-chain indexers and the backend
+ * webhook system consume to trigger certificate status updates.
+ */
+export interface CRLRevocationAddedEvent {
+  /** Event topic name used for on-chain filtering and off-chain dispatch. */
+  topic: 'CRLRevocationAddedEvent';
+  /** The revoked certificate identifier. */
+  certId: string;
+  /** Unix timestamp at which the revocation was recorded. */
+  revokedAt: number;
+  /** Human-readable revocation reason. */
+  reason: string;
+}
+
+export type CRLRevocationListener = (event: CRLRevocationAddedEvent) => void;
+
 export class CertificateRevocationList {
   private revoked = new Map<string, RevocationEntry>();
+  private readonly listeners = new Set<CRLRevocationListener>();
+
+  /**
+   * Subscribe to `CRLRevocationAddedEvent` emissions. Returns an unsubscribe function.
+   */
+  onEvent(listener: CRLRevocationListener): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
 
   /**
    * Revoke a certificate. In production this would write to the Soroban contract.
+   *
+   * Emits a `CRLRevocationAddedEvent` after the revocation is stored so that
+   * off-chain indexers and the backend webhook system are notified.
    */
   revoke(certId: string, reason: string): void {
     if (this.revoked.has(certId)) {
       throw new Error(`Certificate ${certId} is already revoked.`);
     }
-    this.revoked.set(certId, {
+    const entry: RevocationEntry = {
       certId,
       revokedAt: Math.floor(Date.now() / 1000),
       reason,
-    });
+    };
+    this.revoked.set(certId, entry);
+    this.emitRevocationAdded(entry);
   }
 
   /**
@@ -48,6 +82,22 @@ export class CertificateRevocationList {
    */
   listRevoked(): string[] {
     return Array.from(this.revoked.keys());
+  }
+
+  private emitRevocationAdded(entry: RevocationEntry): void {
+    const event: CRLRevocationAddedEvent = {
+      topic: 'CRLRevocationAddedEvent',
+      certId: entry.certId,
+      revokedAt: entry.revokedAt,
+      reason: entry.reason,
+    };
+    for (const listener of this.listeners) {
+      try {
+        listener(event);
+      } catch {
+        // Listener failures must not prevent the revocation from being recorded.
+      }
+    }
   }
 }
 

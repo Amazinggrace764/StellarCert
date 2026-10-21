@@ -125,7 +125,7 @@ export class IpRateLimitGuard implements CanActivate {
         .get<string>('TRUSTED_PROXY_IPS', '')
         .split(',')
         .map((ip) => normaliseIp(ip))
-        .filter((ip): ip => ip !== undefined),
+        .filter((is): ip is string => ip !== undefined),
     );
     this.trustProxyHops = this.configService.get<number>('TRUST_PROXY_HOPS', 0);
   }

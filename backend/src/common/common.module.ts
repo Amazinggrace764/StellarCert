@@ -2,8 +2,7 @@ import { Global, Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { BullModule } from '@nestjs/bull';
-import { BullBoardModule } from '@bull-board/nestjs';
-import { BullAdapter } from '@bull-board/api/bullAdapter';
+import { BullBoardModule } from '@bull-board/nestjs';import { BullAdapter } from '@bull-board/api/bullAdapter';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { LoggingService } from './logging/logging.service';
 import { CorrelationIdMiddleware } from './logging/correlation-id.middleware';
@@ -30,11 +29,16 @@ import {
 } from './rate-limiting/rate-limit.service';
 import { Issuer } from '../modules/issuers/entities/issuer.entity';
 import { DistributedLockService } from './services/distributed-lock.service';
+import { RedisModule } from './redis/redis.module';
+import { RedisService } from './redis/redis.service';
+import { IpRateLimitStore } from './rate-limiting/ip-rate-limit.store';
+import { RedisIpRateLimitStore } from './rate-limiting/redis-ip-rate-limit.store';
 
-@Global()
+@BGlobal()
 @Module({
   imports: [
     ConfigModule,
+    RedisModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -78,6 +82,12 @@ import { DistributedLockService } from './services/distributed-lock.service';
     SentryService,
     RateLimitService,
     DistributedLockService,
+    {
+      provide: IpRateLimitStore,
+      useFactory: (redisService: RedisService) =>
+        new RedisIpRateLimitStore(redisService),
+      inject: [RedisService],
+    },
 
     {
       provide: APP_GUARD,
@@ -135,6 +145,7 @@ import { DistributedLockService } from './services/distributed-lock.service';
     JwtModule,
     RateLimitService,
     DistributedLockService,
+    IpRateLimitStore,
   ],
 })
 export class CommonModule implements NestModule {

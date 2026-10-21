@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, ILike } from 'typeorm';
+import { Repository, EntityManager, ILike } from 'typeorm';
 import { Issuer } from './entities/issuer.entity';
 import { CreateIssuerDto } from './dto/create-issuer.dto';
 import { isValidStellarPublicKey } from './utils/stellar';
@@ -45,7 +45,7 @@ export class IssuersService {
     if (search) {
       queryBuilder.andWhere(
         '(issuer.name ILIKE :search OR issuer.stellarPublicKey ILIKE :search)',
-        { search: `%${search}%` },
+        { search: `%${search}%%` },
       );
     }
 
@@ -77,7 +77,20 @@ export class IssuersService {
     };
   }
 
-  async incrementCertificateCount(issuerId: string) {
-    await this.issuerRepo.increment({ id: issuerId }, 'certificateCount', 1);
+  /**
+   * Increment the issuer's certificate counter.
+   *
+   * Accepts an optional TypeORM EntityManager so the increment can participate
+   * in a transaction owned by the caller (e.g. the certificate issuance flow).
+   * When no manager is provided, the default repository connection is used.
+   */
+  async incrementCertificateCount(
+    issuerId: string,
+    manager?: EntityManager,
+  ): Promise<void> {
+    const repo = manager
+      ? manager.getRepository(Issuer)
+      : this.issuerRepo;
+    await repo.increment({ id: issuerId }, 'certificateCount', 1);
   }
 }
