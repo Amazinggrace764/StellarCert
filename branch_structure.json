@@ -1,0 +1,24 @@
+{
+  "default_branch": "main",
+  "branches": [
+    "feat/issue-138-implement-a-durable-soroban-event-indexer-with",
+    "fix/issue-137-the-contract-crate-builds-with-43-warnings-and",
+    "fix/issue-139-generate-and-enforce-a-typed-api-contract",
+    "main",
+    "origin"
+  ],
+  "parent": {
+    "feat/issue-138-implement-a-durable-soroban-event-indexer-with": "main",
+    "fix/issue-137-the-contract-crate-builds-with-43-warnings-and": "main",
+    "fix/issue-139-generate-and-enforce-a-typed-api-contract": "main",
+    "main": null,
+    "origin": "main"
+  },
+  "order": [
+    "main",
+    "feat/issue-138-implement-a-durable-soroban-event-indexer-with",
+    "fix/issue-137-the-contract-crate-builds-with-43-warnings-and",
+    "fix/issue-139-generate-and-enforce-a-typed-api-contract",
+    "origin"
+  ]
+}

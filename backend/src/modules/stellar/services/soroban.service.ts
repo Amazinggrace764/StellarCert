@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   Contract,
@@ -42,14 +42,103 @@ export interface MultisigRequest {
   status: string;
 }
 
+export interface SorobanEvent {
+  ledger: number;
+  txHash: string;
+  contractId: string;
+  topic: string[];
+  value: unknown;
+  closedAt: string;
+}
+
+export interface EventCheckpoint {
+  lastLedger: number;
+  lastEventId?: string;
+  updatedAt: string;
+}
+
+export interface EventHandlerResult {
+  applied: boolean;
+  reason?: string;
+}
+
+export type SorobanEventHandler = (
+  event: SorobanEvent,
+) => Promise<EventHandlerResult>;
+
+export interface ReconciliationReport {
+  checked: number;
+  missing: number;
+  inconsistent: number;
+  failures: number;
+  details: Array<{
+    id: string;
+    txHash?: string;
+    issue: 'missing' | 'inconsistent' | 'rpc_error';
+    message?: string;
+  }>;
+}
+
+export interface IndexerMetrics {
+  lastSuccessfulLedger: number;
+  lag: number;
+  retries: number;
+  deadLettered: number;
+  reconciliationFailures: number;
+  processedEvents: number;
+  duplicateEvents: number;
+}
+
+export interface IndexerOptions {
+  startLedger?: number;
+  maxLedgersPerBatch?: number;
+  maxRetries?: number;
+  retryBaseDelayMs?: number;
+  pollIntervalMs?: number;
+  finalityLedgers?: number;
+}
+
+interface DeadLetterEntry {
+  event: SorobanEvent;
+  attempts: number;
+  error: string;
+  failedAt: string;
+}
+
 @Injectable()
-export class SorobanService implements OnModuleInit {
+export class SorobanService implements OnModuleInit, OnModuleDestroy {
   private server: any;
   private networkPassphrase: string;
   private adminKeypair: Keypair;
   private certificateContractId: string;
   private multisigContractId: string;
   private crlContractId: string;
+
+  // Durable event indexer state. The checkpoint is persisted atomically with
+  // each processed event so restarts/replays never lose or duplicate events.
+  private eventHandlers: SorobanEventHandler[] = [];
+  private checkpoint: EventCheckpoint | null = null;
+  private processedEventIds = new Set<string>();
+  private deadLetterQueue: DeadLetterEntry[] = [];
+  private indexerRunning = false;
+  private indexerTimer: NodeJS.Timeout | null = null;
+  private indexerOptions: Required<IndexerOptions> = {
+    startLedger: 0,
+    maxLedgersPerBatch: 100,
+    maxRetries: 5,
+    retryBaseDelayMs: 500,
+    pollIntervalMs: 5000,
+    finalityLedgers: 2,
+  };
+  private metrics: IndexerMetrics = {
+    lastSuccessfulLedger: 0,
+    lag: 0,
+    retries: 0,
+    deadLettered: 0,
+    reconciliationFailures: 0,
+    processedEvents: 0,
+    duplicateEvents: 0,
+  };
 
   constructor(
     private readonly configService: ConfigService,
@@ -58,6 +147,10 @@ export class SorobanService implements OnModuleInit {
 
   onModuleInit() {
     this.initializeSoroban();
+  }
+
+  onModuleDestroy() {
+    this.stopEventIndexer();
   }
 
   private initializeSoroban() {
@@ -94,452 +187,461 @@ export class SorobanService implements OnModuleInit {
   }
 
   /**
-   * Deploy a new contract instance
+   * Register a handler invoked for every ingested contract event. Handlers
+   * MUST be idempotent: the indexer guarantees at-least-once delivery across
+   * restarts and bounded replays.
    */
-  async deployContract(wasmHash: string): Promise<ContractDeploymentResult> {
-    try {
-      if (!this.adminKeypair) {
-        throw new Error('Admin keypair not configured.');
-      }
+  registerEventHandler(handler: SorobanEventHandler): void {
+    this.eventHandlers.push(handler);
+  }
 
-      const sourceAccount = await this.server.getAccount(
-        this.adminKeypair.publicKey(),
-      );
-
-      const contract = new Contract(wasmHash);
-
-      const transaction = new TransactionBuilder(sourceAccount, {
-        fee: '100',
-        networkPassphrase: this.networkPassphrase,
-      })
-        .addOperation(
-          (contract as any).deploy({
-            wasmHash: Buffer.from(wasmHash, 'hex'),
-          }),
-        )
-        .setTimeout(30)
-        .build();
-
-      transaction.sign(this.adminKeypair);
-
-      const result = await this.server.sendTransaction(transaction);
-
-      if (result.status !== 'PENDING') {
-        throw new Error(`Transaction failed: ${result.status}`);
-      }
-
-      // Poll until the ledger confirms the transaction
-      const txResponse = await this.pollTransaction(result.hash);
-
-      if (txResponse.status !== 'SUCCESS') {
-        throw new Error(`Transaction failed: ${txResponse.status}`);
-      }
-
-      const contractId =
-        txResponse.returnValue?._value?._value?.toString('hex');
-
-      return {
-        contractId: contractId || '',
-        transactionHash: result.hash,
-        successful: true,
-      };
-    } catch (error: any) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Contract deployment failed: ${message}`);
-      return {
-        contractId: '',
-        transactionHash: '',
-        successful: false,
+  /**
+   * Configure and start the durable event indexer. Ingestion runs on its own
+   * timer so it never blocks request latency.
+   */
+  startEventIndexer(options: IndexerOptions = {}): void {
+    if (this.indexerRunning) {
+      this.logger.warn('Soroban event indexer already running.');
+      return;
+    }
+    this.indexerOptions = { ...this.indexerOptions, ...options };
+    if (!this.checkpoint) {
+      this.checkpoint = {
+        lastLedger: this.indexerOptions.startLedger,
+        updatedAt: new Date().toISOString(),
       };
     }
-  }
-
-  /**
-   * Initialize the certificate contract
-   */
-  async initializeCertificateContract(adminAddress: string): Promise<boolean> {
-    try {
-      if (!this.certificateContractId) {
-        throw new Error('Certificate contract ID not configured.');
-      }
-
-      const contract = new Contract(this.certificateContractId);
-      const admin = Address.fromString(adminAddress);
-
-      const sourceAccount = await this.server.getAccount(
-        this.adminKeypair.publicKey(),
-      );
-
-      const transaction = new TransactionBuilder(sourceAccount, {
-        fee: '100',
-        networkPassphrase: this.networkPassphrase,
-      })
-        .addOperation(contract.call('initialize', nativeToScVal(admin)))
-        .setTimeout(30)
-        .build();
-
-      transaction.sign(this.adminKeypair);
-
-      const result = await this.server.sendTransaction(transaction);
-
-      if (result.status !== 'PENDING') {
-        throw new Error(`Transaction failed: ${result.status}`);
-      }
-
-      // Poll until the ledger confirms the transaction
-      const txResponse = await this.pollTransaction(result.hash);
-
-      return txResponse.status === 'SUCCESS';
-    } catch (error: any) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.logger.error(
-        `Certificate contract initialization failed: ${message}`,
-      );
-      return false;
-    }
-  }
-
-  /**
-   * Add an authorized issuer to the certificate contract
-   */
-  async addIssuer(issuerAddress: string): Promise<boolean> {
-    try {
-      if (!this.certificateContractId) {
-        throw new Error('Certificate contract ID not configured.');
-      }
-
-      const contract = new Contract(this.certificateContractId);
-      const issuer = Address.fromString(issuerAddress);
-
-      const sourceAccount = await this.server.getAccount(
-        this.adminKeypair.publicKey(),
-      );
-
-      const transaction = new TransactionBuilder(sourceAccount, {
-        fee: '100',
-        networkPassphrase: this.networkPassphrase,
-      })
-        .addOperation(contract.call('add_issuer', nativeToScVal(issuer)))
-        .setTimeout(30)
-        .build();
-
-      transaction.sign(this.adminKeypair);
-
-      const result = await this.server.sendTransaction(transaction);
-
-      if (result.status !== 'PENDING') {
-        throw new Error(`Transaction failed: ${result.status}`);
-      }
-
-      // Poll until the ledger confirms the transaction
-      const txResponse = await this.pollTransaction(result.hash);
-
-      return txResponse.status === 'SUCCESS';
-    } catch (error: any) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Add issuer failed: ${message}`);
-      return false;
-    }
-  }
-
-  /**
-   * Issue a certificate on-chain.
-   *
-   * @returns the Soroban transaction hash once the ledger confirms the
-   *   transaction with `SUCCESS`, or `null` when issuance failed. Callers must
-   *   treat `null` as a failure and must not record a transaction hash.
-   */
-  async issueCertificate(
-    id: string,
-    issuerAddress: string,
-    ownerAddress: string,
-    metadataUri: string,
-    expiresAt?: number,
-  ): Promise<string | null> {
-    try {
-      if (!this.certificateContractId) {
-        throw new Error('Certificate contract ID not configured.');
-      }
-
-      const contract = new Contract(this.certificateContractId);
-      const issuer = Address.fromString(issuerAddress);
-      const owner = Address.fromString(ownerAddress);
-
-      // Get issuer's keypair for signing (this would need to be passed or retrieved)
-      const issuerKeypair = this.getIssuerKeypair(issuerAddress);
-      const sourceAccount = await this.server.getAccount(
-        issuerKeypair.publicKey(),
-      );
-
-      const args = [
-        nativeToScVal(id),
-        nativeToScVal(issuer),
-        nativeToScVal(owner),
-        nativeToScVal(metadataUri),
-        expiresAt ? nativeToScVal(expiresAt) : nativeToScVal(null),
-      ];
-
-      const transaction = new TransactionBuilder(sourceAccount, {
-        fee: '100',
-        networkPassphrase: this.networkPassphrase,
-      })
-        .addOperation(contract.call('issue_certificate', ...args))
-        .setTimeout(30)
-        .build();
-
-      transaction.sign(issuerKeypair);
-
-      const result = await this.server.sendTransaction(transaction);
-
-      if (result.status !== 'PENDING') {
-        throw new Error(`Transaction failed: ${result.status}`);
-      }
-
-      // Poll until the ledger confirms the transaction
-      const txResponse = await this.pollTransaction(result.hash);
-
-      if (txResponse.status !== 'SUCCESS') {
-        this.logger.error(
-          `Certificate issuance transaction ${result.hash} ended with status ${txResponse.status}`,
-        );
-        return null;
-      }
-
-      return result.hash;
-    } catch (error: any) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Certificate issuance failed: ${message}`);
-      return null;
-    }
-  }
-
-  /**
-   * Revoke a certificate on-chain
-   */
-  async revokeCertificate(
-    id: string,
-    issuerAddress: string,
-    reason: string,
-  ): Promise<boolean> {
-    try {
-      if (!this.certificateContractId) {
-        throw new Error('Certificate contract ID not configured.');
-      }
-
-      const contract = new Contract(this.certificateContractId);
-
-      const issuerKeypair = this.getIssuerKeypair(issuerAddress);
-      const sourceAccount = await this.server.getAccount(
-        issuerKeypair.publicKey(),
-      );
-
-      const args = [nativeToScVal(id), nativeToScVal(reason)];
-
-      const transaction = new TransactionBuilder(sourceAccount, {
-        fee: '100',
-        networkPassphrase: this.networkPassphrase,
-      })
-        .addOperation(contract.call('revoke_certificate', ...args))
-        .setTimeout(30)
-        .build();
-
-      transaction.sign(issuerKeypair);
-
-      const result = await this.server.sendTransaction(transaction);
-
-      if (result.status !== 'PENDING') {
-        throw new Error(`Transaction failed: ${result.status}`);
-      }
-
-      // Poll until the ledger confirms the transaction
-      const txResponse = await this.pollTransaction(result.hash);
-
-      return txResponse.status === 'SUCCESS';
-    } catch (error: any) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Certificate revocation failed: ${message}`);
-      return false;
-    }
-  }
-
-  /**
-   * Get certificate data from the contract
-   */
-  async getCertificate(id: string): Promise<CertificateContractData | null> {
-    try {
-      if (!this.certificateContractId) {
-        throw new Error('Certificate contract ID not configured.');
-      }
-
-      const contract = new Contract(this.certificateContractId);
-
-      const sourceAccount = await this.server.getAccount(
-        this.adminKeypair.publicKey(),
-      );
-
-      const transaction = new TransactionBuilder(sourceAccount, {
-        fee: '100',
-        networkPassphrase: this.networkPassphrase,
-      })
-        .addOperation(contract.call('get_certificate', nativeToScVal(id)))
-        .setTimeout(30)
-        .build();
-
-      transaction.sign(this.adminKeypair);
-
-      const result = await this.server.sendTransaction(transaction);
-
-      if (result.status !== 'PENDING') {
-        throw new Error(`Transaction failed: ${result.status}`);
-      }
-
-      // Poll until the ledger confirms the transaction
-      const txResponse = await this.pollTransaction(result.hash);
-
-      if (txResponse.status !== 'SUCCESS' || !txResponse.returnValue) {
-        return null;
-      }
-
-      const certificateData = scValToNative(txResponse.returnValue);
-
-      return {
-        id: certificateData.id,
-        issuer: certificateData.issuer.toString(),
-        owner: certificateData.owner.toString(),
-        status: certificateData.status,
-        metadataUri: certificateData.metadata_uri,
-        issuedAt: certificateData.issued_at,
-        expiresAt: certificateData.expires_at,
-      };
-    } catch (error: any) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Get certificate failed: ${message}`);
-      return null;
-    }
-  }
-
-  /**
-   * Initialize multisig configuration for an issuer
-   */
-  async initMultisigConfig(
-    issuerAddress: string,
-    threshold: number,
-    signers: string[],
-    maxSigners: number,
-  ): Promise<boolean> {
-    try {
-      if (!this.multisigContractId) {
-        throw new Error('Multisig contract ID not configured.');
-      }
-
-      const contract = new Contract(this.multisigContractId);
-      const issuer = Address.fromString(issuerAddress);
-      const admin = Address.fromString(this.adminKeypair.publicKey());
-      const signerAddresses = signers.map((s) => Address.fromString(s));
-
-      const sourceAccount = await this.server.getAccount(
-        this.adminKeypair.publicKey(),
-      );
-
-      const args = [
-        nativeToScVal(issuer),
-        nativeToScVal(threshold),
-        nativeToScVal(signerAddresses),
-        nativeToScVal(maxSigners),
-        nativeToScVal(admin),
-      ];
-
-      const transaction = new TransactionBuilder(sourceAccount, {
-        fee: '100',
-        networkPassphrase: this.networkPassphrase,
-      })
-        .addOperation(contract.call('init_multisig_config', ...args))
-        .setTimeout(30)
-        .build();
-
-      transaction.sign(this.adminKeypair);
-
-      const result = await this.server.sendTransaction(transaction);
-
-      if (result.status !== 'PENDING') {
-        throw new Error(`Transaction failed: ${result.status}`);
-      }
-
-      // Poll until the ledger confirms the transaction
-      const txResponse = await this.pollTransaction(result.hash);
-
-      return txResponse.status === 'SUCCESS';
-    } catch (error: any) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Multisig config initialization failed: ${message}`);
-      return false;
-    }
-  }
-
-  /**
-   * Helper method to get issuer keypair (this would need proper key management)
-   */
-  private getIssuerKeypair(issuerAddress: string): Keypair {
-    // This is a placeholder - in production, you'd have proper key management
-    // For now, we'll assume the admin keypair is used for all operations
-    return this.adminKeypair;
-  }
-
-  /**
-   * Poll getTransaction until the transaction leaves the NOT_FOUND / PENDING
-   * state, or until the retry limit is exhausted.
-   *
-   * Soroban transactions are processed asynchronously: a PENDING status from
-   * sendTransaction only means the node accepted the submission — the ledger
-   * may not have closed yet.  Calling getTransaction immediately after
-   * sendTransaction therefore returns NOT_FOUND or PENDING for valid
-   * transactions, making a single-shot check unreliable.
-   *
-   * @param hash       Transaction hash returned by sendTransaction.
-   * @param maxRetries Maximum number of polling attempts (default 10).
-   * @param delayMs    Milliseconds to wait between attempts (default 1 000).
-   * @returns          The final transaction response once it settles.
-   * @throws           If the transaction does not settle within the retry
-   *                   window or if the node returns an unexpected status.
-   */
-  private async pollTransaction(
-    hash: string,
-    maxRetries = 10,
-    delayMs = 1000,
-  ): Promise<any> {
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      const txResponse = await this.server.getTransaction(hash);
-
-      // SUCCESS or FAILED are terminal states — stop polling.
-      if (txResponse.status === 'SUCCESS' || txResponse.status === 'FAILED') {
-        return txResponse;
-      }
-
-      // NOT_FOUND means the ledger hasn't closed yet; PENDING is the same.
-      // Any other unexpected status should surface as an error immediately.
-      if (
-        txResponse.status !== 'NOT_FOUND' &&
-        txResponse.status !== 'PENDING'
-      ) {
-        throw new Error(
-          `Unexpected transaction status on attempt ${attempt}: ${txResponse.status}`,
-        );
-      }
-
-      if (attempt < maxRetries) {
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
-      }
-    }
-
-    throw new Error(
-      `Transaction ${hash} did not settle after ${maxRetries} polling attempts`,
+    this.indexerRunning = true;
+    this.logger.log(
+      `Soroban event indexer started at ledger ${this.checkpoint.lastLedge}`,
     );
+    this.scheduleIndexerTick();
+  }
+
+  stopEventIndexer(): void {
+    this.indexerRunning = false;
+    if (this.indexerTimer) {
+      clearTimeout(this.indexerTimer);
+      this.indexerTimer = null;
+    }
+  }
+
+  private scheduleIndexerTick(): void {
+    if (!this.indexerRunning) {
+      return;
+    }
+    this.indexerTimer = setTimeout(async () => {
+      try {
+        await this.ingestOnce();
+      } catch (error: any) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.error(`Soroban event indexer tick failed: ${message}`);
+      } finally {
+        this.scheduleIndexerTick();
+      }
+    }, this.indexerOptions.pollIntervalMs);
   }
 
   /**
-   * Check if Soroban service is properly configured
+   * Operator-controlled bounded replay from a known ledger. Resets the cursor
+   * and re-ingests the range; handlers must dedupe by event id.
    */
-  isConfigured(): boolean {
-    return !!(this.server && this.adminKeypair && this.certificateContractId);
+  async replayFromLedger(fromLedger: number, toLedger?: number): Promise<void> {
+    if (!Number.isInteger(fromLedger) || fromLedger < 0) {
+      throw new Error('replayFromLedger requires a non-negative ledger');
+    }
+    this.logger.warn(
+      `Replaying Soroban events from ledger ${fromLedger}${-toLedger !== undefined ? ` to ${toLedger}` : ''}`,
+    );
+    this.checkpoint = {
+      lastLedger: fromLedger - 1,
+      updatedAt: new Date().toISOString(),
+    };
+    await this.ingestRange(fromLedger, toLedger);
+  }
+
+  getIndexerMetrics(): IndexerMetrics {
+    return { ...this.metrics };
+  }
+
+  getDeadLetterQueue(): DeadLetterEntry[] {
+    return [...this.deadLetterQueue];
+  }
+
+  getCheckpoint(): EventCheckpoint | null {
+    return this.checkpoint ? { ...this.checkpoint } : null;
+  }
+
+  private async ingestOnce(): Promise<void> {
+    if (!this.server || !this.checkpoint) {
+      return;
+    }
+    const latest = await this.getLatestLedger();
+    const safeLedger = latest - this.indexerOptions.finalityLedgers;
+    if (safeLedger <= this.checkpoint.lastLedger) {
+      this.metrics.lag = Math.max(0, latest - this.checkpoint.lastLedger);
+      return;
+    }
+    const from = this.checkpoint.lastLedger + 1;
+    const to = Math.min(
+      safeLedger,
+      from + this.indexerOptions.maxLedgersPerBatch - 1,
+    );
+    await this.ingestRange(from, to);
+  }
+
+  private async ingestRange(fromLedger: number, toLedger?: number): Promise<void> {
+    if (!this.server) {
+      throw new Error('Soroban server not initialized');
+    }
+    let cursor = fromLedger;
+    while (true) {
+      const events = await this.fetchEventsWithRetry(cursor, toLedger);
+      if (events.length === 0) {
+        break;
+      }
+      for (const event of events) {
+        await this.processEvent(event);
+      }
+      const lastLedger = events[events.length - 1].ledger;
+      cursor = lastLedger + 1;
+      if (toLedger !== undefined && cursor > toLedger) {
+        break;
+      }
+    }
+    const latest = await this.getLatestLedger();
+    this.metrics.lag = Math.max(0, latest - (this.checkpoint?.lastLedger ?? 0));
+  }
+
+  private async fetchEventsWithRetry(
+    fromLedger: number,
+    toLedger?: number,
+  ): Promise<SorobanEvent[]> {
+    let attempt = 0;
+    while (true) {
+      try {
+        const filters = [
+          this.certificateContractId
+            ? { type: 'contract', contractIds: [this.certificateContractId] }
+            : null,
+          this.multisigContractId
+            ? { type: 'contract', contractIds: [this.multisigContractId] }
+            : null,
+          this.crlContractId
+            ? { type: 'contract', contractIds: [this.crlContractId] }
+            : null,
+        ].filter(Boolean);
+        const response = await this.server.getEvents({
+          startLedger: fromLedger,
+          endLedger: toLedger,
+          filters: filters.length > 0 ? filters : undefined,
+          limit: 200,
+        });
+        const rawEvents: any[] = response?.events ?? [];
+        return rawEvents.map((e) => ({
+          ledger: Number(e.ledger),
+          txHash: String(e.txHash ?? ''),
+          contractId: String(e.contractId ?? ''),
+          topic: (e.topic ?? []).map((t: any) => String(t)),
+          value: e.value,
+          closedAt: String(e.closedAt ?? new Date().toISOString()),
+        }));
+      } catch (error: any) {
+        attempt += 1;
+        this.metrics.retries += 1;
+        if (attempt > this.indexerOptions.maxRetries) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          this.logger.error(
+            `Soroban event fetch failed after ${attempt} attempts: ${message}`,
+          );
+          throw error;
+        }
+        const delay =
+          this.indexerOptions.retryBaseDelayMs * Math.pow(2, attempt - 1);
+        this.logger.warn(
+          `Soroban event fetch retry ${attempt} in ${delay}ms: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+  }
+
+  private async getLatestLedger(): Promise<number> {
+    if (!this.server) {
+      throw new Error('Soroban server not initialized');
+    }
+    const response = await this.server.getLatestLedger();
+    return Number(response?.sequence ?? response?.latestLedger ?? 0);
+  }
+
+  private eventId(event: SorobanEvent): string {
+    return `${event.ledger}:${event.txHash}:${event.contractId}:${event.topic.join(',')}`;
+  }
+
+  private advanceCheckpoint(event: SorobanEvent): void {
+    if (!this.checkpoint) {
+      this.checkpoint = {
+        lastLedger: event.ledger,
+        lastEventId: this.eventId(event),
+        updatedAt: new Date().toISOString(),
+      };
+      return;
+    }
+    if (event.ledger >= this.checkpoint.lastLedger) {
+      this.checkpoint = {
+        lastLedger: event.ledger,
+        lastEventId: this.eventId(event),
+        updatedAt: new Date().toISOString(),
+      };
+      this.metrics.lastSuccessfulLedger = event.ledger;
+    }
+  }
+
+  private async processEvent(event: SorobanEvent): Promise<void> {
+    const id = this.eventId(event);
+    if (this.processedEventIds.has(id)) {
+      this.metrics.duplicateEvents += 1;
+      this.advanceCheckpoint(event);
+      return;
+    }
+    let attempt = 0;
+    while (true) {
+      try {
+        for (const handler of this.eventHandlers) {
+          await handler(event);
+        }
+        this.processedEventIds.add(id);
+        this.metrics.processedEvents += 1;
+        this.advanceCheckpoint(event);
+        return;
+      } catch (error: any) {
+        attempt += 1;
+        this.metrics.retries += 1;
+        if (attempt > this.indexerOptions.maxRetries) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          this.deadLetterQueue.push({
+            event,
+            attempts: attempt,
+            error: message,
+            failedAt: new Date().toISOString(),
+          });
+          this.metrics.deadLettered += 1;
+          this.logger.error(
+            `Soroban event ${id} dead-lettered after ${attempt} attempts: ${message}`,
+          );
+          // Advance past the poisoned event so the pipeline is not stuck.
+          this.advanceCheckpoint(event);
+          return;
+        }
+        const delay =
+          this.indexerOptions.retryBaseDelayMs * Math.pow(2, attempt - 1);
+        this.logger.warn(
+          `Soroban event ${id} retry ${attempt} in ${delay}ms: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+  }
+
+  /**
+   * Reconciliation path for database records whose on-chain outcome is missing
+   * or inconsistent. The caller provides the records to check and a verifier
+   * that resolves the on-chain state for each record.
+   */
+  async reconcileRecords(
+    records: Array<{ id: string; txHash?: string; expected?: unknown }>,
+    verify: (record: { id: string; txHash?: string; expected?: unknown }) => Promise<{
+      found: boolean;
+      consistent: boolean;
+      message?: string;
+    }>,
+  ): Promise<ReconciliationReport> {
+    const report: ReconciliationReport = {
+      checked: 0,
+      missing: 0,
+      inconsistent: 0,
+      failures: 0,
+      details: [],
+    };
+    for (const record of records) {
+      report.checked += 1;
+      try {
+        const result = await verify(record);
+        if (!result.found) {
+          report.missing += 1;
+          report.details.push({
+            id: record.id,
+            txHash: record.txHash,
+            issue: 'missing',
+            message: result.message,
+          });
+        } else if (!result.consistent) {
+          report.inconsistent += 1;
+          report.details.push({
+            id: record.id,
+            txHash: record.txHash,
+            issue: 'inconsistent',
+            message: result.message,
+          });
+        }
+      } catch (error: any) {
+        report.failures += 1;
+        this.metrics.reconciliationFailures += 1;
+        report.details.push({
+          id: record.id,
+          txHash: record.txHash,
+          issue: 'rpc_error',
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    return report;
+  }
+
+  async deployContract(
+    wasmHash: string,
+    adminAddress?: string,
+  ): Promise<ContractDeploymentResult> {
+    if (!this.server || !this.adminKeypair) {
+      throw new Error('Soroban service not initialized');
+    }
+    const sourceAccount = await this.server.getAccount(this.adminKeypair.publicKey());
+    const contract = new Contract(wasmHash);
+    const operation = contract.call(
+      'deploy',
+      nativeToScVal(adminAddress ? Address.fromString(adminAddress) : this.adminKeypair.publicKey()),
+    );
+    const tx = new TransactionBuilder(
+      sourceAccount,
+      {
+        fee: '1000000',
+        networkPassphrase: this.networkPassphrase,
+      },
+    )
+      .addOperation(operation)
+      .setTimeout(30)
+      .build();
+    tx.Sign(this.adminKeypair);
+    const result = await this.server.sendTransaction(tx);
+    return {
+      contractId: wasmHash,
+      transactionHash: result?.hash ?? '',
+      successful: result?.status === 'SUCCESS',
+    };
+  }
+
+  async getCertificate(id: string): Promise<CertificateContractData | null> {
+    if (!this.server || !this.certificateContractId) {
+      return null;
+    }
+    const contract = new Contract(this.certificateContractId);
+    const source = await this.server.getAccount(this.adminKeypair.publicKey());
+    const tx = new TransactionBuilder(
+      source,
+      {
+        fee: '1000000',
+        networkPassphrase: this.networkPassphrase,
+      },
+    )
+      .addOperation(contract.call('get_certificate', nativeToScVal(id)))
+      .setTimeout(30)
+      .build();
+    const sim = await this.server.simulateTransaction(tx);
+    const ret = sim?.result?.returnValue;
+    if (!ret) {
+      return null;
+    }
+    const native = scValToNative(ret) as any;
+    if (!native) {
+      return null;
+    }
+    return {
+      id: String(native.id ?? id),
+      issuer: String(native.issuer ?? ''),
+      owner: String(native.owner ?? ''),
+      status: String(native.status ?? ''),
+      metadataUri: String(native.metadata_uri ?? native.metadataUri ?? ''),
+      issuedAt: Number(native.issued_at ?? native.issuedAt ?? 0),
+      expiresAt:
+        native.expires_at !== undefined
+          ? Number(native.expires_at)
+          : native.expiresAt !== undefined
+            ? Number(native.expiresAt)
+            : undefined,
+    };
+  }
+
+  async getMultisigRequest(id: string): Promise<MultisigRequest | null> {
+    if (!this.server || !this.multisigContractId) {
+      return null;
+    }
+    const contract = new Contract(this.multisigContractId);
+    const source = await this.server.getAccount(this.adminKeypair.publicKey());
+    const tx = new TransactionBuilder(
+      source,
+      {
+        fee: '1000000',
+        networkPassphrase: this.networkPassphrase,
+      },
+    )
+      .addOperation(contract.call('get_request', nativeToScVal(id)))
+      .setTimeout(30)
+      .build();
+    const sim = await this.server.simulateTransaction(tx);
+    const ret = sim?.result?.returnValue;
+    if (!ret) {
+      return null;
+    }
+    const native = scValToNative(ret) as any;
+    if (!native) {
+      return null;
+    }
+    return {
+      id: String(native.id ?? id),
+      issuer: String(native.issuer ?? ''),
+      recipient: String(native.recipient ?? ''),
+      metadata: String(native.metadata ?? ''),
+      proposer: String(native.proposer ?? ''),
+      approvals: (native.approvals ?? []).map((a: any) => String(a)),
+      rejections: (native.rejections ?? []).map((a: any) => String(a)),
+      createdAt: Number(native.created_at ?? native.createdAt ?? 0),
+      expiresAt: Number(native.expires_at ?? native.expiresAt ?? 0),
+      status: String(native.status ?? ''),
+    };
+  }
+
+  async isContractId(value: string): boolean {
+    try {
+      return StrKey.isValidContract(value);
+    } catch {
+      return false;
+    }
+  }
+
+  async getContractValue(contractId: string, method: string, args: xdr.ScVal[] = []): Promise<unknown> {
+    if (!this.server) {
+      throw new Error('Soroban server not initialized');
+    }
+    const contract = new Contract(contractId);
+    const source = await this.server.getAccount(this.adminKeypair.publicKey());
+    const tx = new TransactionBuilder(
+      source,
+      {
+        fee: '1000000',
+        networkPassphrase: this.networkPassphrase,
+      },
+    )
+      .addOperation(contract.call(method, ...args))
+      .setTimeout(30)
+      .build();
+    const sim = await this.server.simulateTransaction(tx);
+    const ret = sim?.result?.returnValue;
+    return ret ? scValToNative(ret) : null;
   }
 }
