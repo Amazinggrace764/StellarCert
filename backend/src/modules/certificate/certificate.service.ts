@@ -21,13 +21,12 @@ import { SearchCertificatesDto } from './dto/search-certificates.dto';
 import { Certificate } from './entities/certificate.entity';
 import { Verification } from './entities/verification.entity';
 import { CertificateStatus } from './constants/certificate-status.enum';
-import { User } from '../users/entities/user.entity';
+import { User, UserRole } from '../users/entities/user.entity';
 import { DuplicateDetectionService } from './services/duplicate-detection.service';
 import { DuplicateDetectionConfig } from './interfaces/duplicate-detection.interface';
 import { WebhooksService } from '../webhooks/webhooks.service';
 import { WebhookEvent } from '../webhooks/entities/webhook-subscription.entity';
 import { MetadataSchemaService } from '../metadata-schema/services/metadata-schema.service';
-import { UserRole } from '../users/entities/user.entity';
 import { SorobanService } from '../stellar/services/soroban.service';
 import { IssuersService } from '../issuers/issuers.service';
 import { MAX_EXPORT_LIMIT, MAX_PAGE_LIMIT } from './dto/export-filters.dto';
@@ -854,7 +853,7 @@ export class CertificateService {
       cert.courseName,
       cert.issuerName ??
         (cert.issuer
-          ? `${cert.issuer.firstName ?? ''} ${cert.issuer.lastName ?? ''}`.trim() ||
+          ? `${('firstName' in cert.issuer ? cert.issuer.firstName : '') ?? ''} ${('lastName' in cert.issuer ? cert.issuer.lastName : '') ?? ''}`.trim() ||
             'Unknown'
           : 'Unknown'),
       cert.issuedAt.toISOString().split('T')[0],

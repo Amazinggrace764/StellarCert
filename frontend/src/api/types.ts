@@ -12,12 +12,18 @@ export enum UserRole {
 
 /**
  * Basic User profile information
+ *
+ * Note: `firstName` and `lastName` are optional because not every
+ * authentication flow (e.g. Stellar-only sign-in, invite acceptance, or
+ * legacy accounts migrated from an email-only store) knows the user's name.
+ * Consumers must not assume these fields are present; use `getUserDisplayName`
+ * (or an explicit `'firstName' in user` guard) instead of accessing them directly.
  */
 export interface User {
   id: string;
   email: string;
-  firstName: string;
-  lastName: string;
+  firstName?: string;
+  lastName?: string;
   role: UserRole;
   isEmailVerified?: boolean;
   stellarPublicKey?: string;
@@ -28,6 +34,38 @@ export interface User {
   profilePicture?: string;
   createdAt?: string;
   updatedAt?: string;
+}
+
+/**
+ * Return a human-readable display name for a user, falling back through
+ * username -> email local-part -> email when the first/last name are not
+ * available. This is the single source of truth for displaying a user's name
+ * and replaces ad-hoc `'firstName' in user` guards scattered across the app.
+ */
+export function getUserDisplayName(
+  user: Pick<User, "email" | "firstName" | "lastName" | "username"> | null | undefined,
+): string {
+  if (!user) {
+    return "";
+  }
+
+  const first = typeof user.firstName === "string" ? user.firstName.trim() : "";
+  const last = typeof user.lastName === "string" ? user.lastName.trim() : "";
+  const full = [first, last].filter(Boolean).join(" ");
+  if (full) {
+    return full;
+  }
+
+  if (user.username && user.username.trim()) {
+    return user.username.trim();
+  }
+
+  if (user.email) {
+    const [localPart] = user.email.split("@");
+    return localPart || user.email;
+  }
+
+  return "";
 }
 
 /**
@@ -57,7 +95,7 @@ export interface Certificate {
   status: "active" | "revoked" | "expired" | "frozen";
   pdfUrl?: string; // Link to certificate file
   txHash?: string; // Stellar transaction hash
-  cid?: string; // IPFS CID for certificate file/metadata
+  cid?: string; // IPFS cID for certificate file/metadata
   metadata?: Record<string, unknown>;
   frozenAt?: string;
   freezeReason?: string;
@@ -358,6 +396,7 @@ export interface ProfileUpdateData {
 }
 
 // Password reset/request types
+
 export interface ForgotPasswordRequest {
   email: string;
 }
@@ -370,62 +409,4 @@ export interface ResetPasswordRequest {
 
 export interface VerifyEmailRequest {
   token: string;
-}
-
-export interface DailyVerificationStats {
-  count: number;
-}
-
-export interface TotalCertificatesStats {
-  total: number;
-}
-
-export interface TotalActiveUsersStats {
-  total: number;
-}
-
-export interface IssuerStats {
-  totalCertificates: number;
-  activeCertificates: number;
-  revokedCertificates: number;
-  expiredCertificates: number;
-  totalVerifications: number;
-  lastLogin: string;
-}
-
-export interface ActivityLogItem {
-  id: string;
-  action: string;
-  description: string;
-  ipAddress?: string;
-  userAgent?: string;
-  timestamp: string;
-}
-
-export interface PaginatedActivityLog {
-  activities: ActivityLogItem[];
-  meta: {
-    total: number;
-    page: number;
-    limit: number;
-    totalPages: number;
-  };
-}
-
-export type NotificationType = "info" | "success" | "error";
-
-export interface Notification {
-  id: string;
-  type: NotificationType;
-  title: string;
-  message: string;
-  isRead: boolean;
-  createdAt: string;
-}
-
-export interface NotificationPreferences {
-  inAppEnabled: boolean;
-  infoEnabled: boolean;
-  successEnabled: boolean;
-  errorEnabled: boolean;
 }

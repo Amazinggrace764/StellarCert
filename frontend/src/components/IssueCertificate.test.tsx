@@ -53,10 +53,10 @@ describe("IssueCertificate", () => {
 
     expect(
       await screen.findByText("Recipient name is required"),
-    ).toBeInTheDocument();
+    ).toBeInDocument();
     expect(
       screen.getByText("Stellar wallet address is required"),
-    ).toBeInTheDocument();
+    ).toBeInDocument();
     expect(alertSpy).not.toHaveBeenCalled();
   });
 
