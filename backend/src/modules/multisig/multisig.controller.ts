@@ -27,44 +27,10 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { User } from '../users/entities/user.entity';
 import { UserRole } from '../../common/constants/roles';
 import { LoggingService } from '../../common/logging/logging.service';
-
-class InitMultisigConfigDto {
-  issuer: string;
-  threshold: number;
-  signers: string[];
-  maxSigners: number;
-}
-
-class UpdateMultisigConfigDto {
-  threshold?: number;
-  signers?: string[];
-  maxSigners?: number;
-}
-
-class ProposeCertificateDto {
-  requestId: string;
-  issuer: string;
-  recipient: string;
-  metadata: string;
-  expirationDays: number;
-}
-
-class ApproveRequestDto {
-  requestId: string;
-}
-
-class RejectRequestDto {
-  requestId: string;
-  reason?: string;
-}
-
-class IssueCertificateDto {
-  requestId: string;
-}
-
-class CancelRequestDto {
-  requestId: string;
-}
+import { InitMultisigConfigDto } from './dto/init-multisig-config.dto';
+import { UpdateMultisigConfigDto } from './dto/update-multisig-config.dto';
+import { ProposeCertificateDto } from './dto/propose-certificate.dto';
+import { RejectRequestDto } from './dto/reject-request.dto';
 
 @Controller('multisig')
 @UseGuards(JwtAuthGuard, RolesGuard)

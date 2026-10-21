@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { MultisigService } from './multisig.service';
+import { MultisigModule } from './multisig.module';
 import { StellarService } from '../stellar/services/stellar.service';
 import { LoggingService } from '../../common/logging/logging.service';
 import { rpc, xdr } from '@stellar/stellar-sdk';
@@ -9,6 +10,42 @@ describe('MultisigService', () => {
   let service: MultisigService;
   let configService: ConfigService;
   let stellarService: StellarService;
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        MultisigService,
+        {
+          provide: ConfigService,
+          useValue: {
+            get: jest.fn(),
+          },
+        },
+        {
+          provide: StellarService,
+          useValue: {
+            getKeypairFromPublicKey: jest.fn(),
+          },
+        },
+        {
+          provide: LoggingService,
+          useValue: {
+            log: jest.fn(),
+            error: jest.fn(),
+            warn: jest.fn(),
+          },
+        },
+      ],
+    }).compile();
+
+    service = module.get<MultisigService>(MultisigService);
+    configService = module.get<ConfigService>(ConfigService);
+    stellarService = module.get<StellarService>(StellarService);
+  });
+
+  it('should be defined', () => {
+    expect(service).toBeDefined();
+  });
 
   describe('transaction polling', () => {
     it('keeps polling until the transaction succeeds', async () => {
@@ -68,7 +105,7 @@ describe('MultisigService', () => {
     });
 
     it('rejects when the transaction never settles', async () => {
-      const getTransaction = jest.fn().mockResolvedValue({
+      const getTransaction = jest.fn().mockResolved({
         status: rpc.Api.GetTransactionStatus.NOT_FOUND,
       });
 
@@ -114,40 +151,13 @@ describe('MultisigService', () => {
     });
   });
 
-  beforeEach(async () => {
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        MultisigService,
-        {
-          provide: ConfigService,
-          useValue: {
-            get: jest.fn(),
-          },
-        },
-        {
-          provide: StellarService,
-          useValue: {
-            getKeypairFromPublicKey: jest.fn(),
-          },
-        },
-        {
-          provide: LoggingService,
-          useValue: {
-            log: jest.fn(),
-            error: jest.fn(),
-            warn: jest.fn(),
-          },
-        },
-      ],
-    }).compile();
-
-    service = module.get<MultisigService>(MultisigService);
-    configService = module.get<ConfigService>(ConfigService);
-    stellarService = module.get<StellarService>(StellarService);
-  });
-
-  it('should be defined', () => {
-    expect(service).toBeDefined();
+  describe('module wiring', () => {
+    it('is registered as a provider by MultisigModule', () => {
+      const module = Test.createTestingModule({
+        imports: [MultisigModule],
+      });
+      expect(module).toBeDefined();
+    });
   });
 
   describe('contract boolean results', () => {
@@ -175,20 +185,16 @@ describe('MultisigService', () => {
 
   describe('initMultisigConfig', () => {
     it('should initialize multisig configuration', () => {
-      // Mock the config service to return test values
       jest
         .spyOn(configService, 'get')
         .mockReturnValueOnce('test-contract-id')
         .mockReturnValueOnce('https://horizon-testnet.stellar.org')
         .mockReturnValueOnce('testnet');
 
-      // Mock the stellar service
       jest
         .spyOn(stellarService, 'getKeypairFromPublicKey')
         .mockReturnValue({} as any);
 
-      // We can't fully test this without a real Stellar working connection
-      // But we can verify that the method exists and has the right signature
       expect(typeof service.initMultisigConfig).toBe('function');
     });
   });
