@@ -157,6 +157,7 @@ export class Certificate {
   issuedAt: Date;
 
   @Column({ type: 'timestamp', nullable: true })
+  @Index()
   expiresAt?: Date;
 
   @UpdateDateColumn()
