@@ -1,6 +1,6 @@
 import {
-  Injectable,
   BadRequestException,
+  BadGatewayException,
   ConflictException,
   ForbiddenException,
   Logger,
@@ -8,6 +8,7 @@ import {
   InternalServerErrorException,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import * as QRCode from 'qrcode';

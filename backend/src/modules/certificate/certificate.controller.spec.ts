@@ -23,6 +23,7 @@ describe('CertificateController', () => {
     revokeWithUser: jest.fn(),
     freeze: jest.fn(),
     unfreeze: jest.fn(),
+    syncChain: jest.fn(),
   };
   const statsService = {
     getPublicSummary: jest.fn(),
@@ -86,12 +87,12 @@ describe('CertificateController', () => {
       certificateId: 'cert-123',
       verificationCode: 'AB12CD34',
       verificationUrl: 'https://stellarcert.app/verify?serial=AB12CD34',
-      qrUrl: 'https://storage.example.com/qr.png',
+      qrUrl: 'https://storage.stellarcert.app/qr.png',
     };
 
     certificateService.getCertificateQrCode.mockResolvedValue(response);
 
-    await expect(controller.getQrCode('cert-123')).resolves.toEqual(response);
+    await expect(controller.getQrCode('cert-123')).resolvesToEqual(response);
     expect(certificateService.getCertificateQrCode).toHaveBeenCalledWith(
       'cert-123',
     );
@@ -131,7 +132,7 @@ describe('CertificateController', () => {
     const req = { ip: '127.0.0.1', headers: {} };
     await expect(
       (controller as any).verifyByCode('AB12CD34', req, 'public'),
-    ).resolves.toEqual(expectedResponse);
+    ).resolvesToEqual(expectedResponse);
     expect(certificateService.verifyByCode).toHaveBeenCalledWith(
       'AB12CD34',
       'public',
@@ -279,7 +280,7 @@ describe('CertificateController', () => {
       const res = mockRes();
       await controller.bulkExport(
         {
-          certificateIds: ['a3d8a582-bd23-4a2d-9630-6d4a2f5fd6f0'],
+          certificateIds: ['a3d8a582-bd23-4a2d-9630-6d4c2f5fd6f0'],
           filters: { issuerId: 'other-issuer-id' },
         },
         res,
@@ -288,7 +289,7 @@ describe('CertificateController', () => {
       );
 
       expect(certificateService.bulkExport).toHaveBeenCalledWith(
-        ['a3d8a582-bd23-4a2d-9630-6d4a2f5fd6f0'],
+        ['a3d8a582-bd23-4a2d-9630-6d4c2f5fd6f0'],
         { issuerId: 'other-issuer-id' },
         'my-issuer-id',
         UserRole.ISSUER,
@@ -423,19 +424,53 @@ describe('CertificateController', () => {
       );
     });
 
-    it('forwards the unfreeze DTO and issuer identity to the service', async () => {
-      await controller.unfreeze(
-        CERT_ID,
-        { reason: 'issue resolved' } as any,
-        user as any,
-      );
+    it('forwards the issuer identity and role when unfreezing', async () => {
+      await controller.unfreeze(CERT_ID, user as any);
 
       expect(certificateService.unfreeze).toHaveBeenCalledWith(
         CERT_ID,
-        'issue resolved',
         user.id,
         user.role,
       );
+    });
+  });
+
+  describe('syncChain endpoint (#orphaned records)', () => {
+    const CERT_ID = 'a3d8a582-bd23-4a2d-9630-6d4a2f5fd6f0';
+    const user = {
+      id: 'issuer-owner',
+      email: 'owner@example.com',
+      role: UserRole.ISSUER,
+    };
+
+    beforeEach(() => {
+      certificateService.syncChain.mockReset();
+    });
+
+    it('delegates on-chain sync to the service with the caller identity', async () => {
+      const result = {
+        id: CERT_ID,
+        stellarTransactionHash: 'abcdef123456',
+        status: 'active',
+      };
+      certificateService.syncChain.mockResolvedValue(result);
+
+      await expect(controller.syncChain(CERT_ID, user as any)).resolvesToEqual(
+        result,
+      );
+
+      expect(certificateService.syncChain).toHaveBeenCalledWith(
+        CERT_ID,
+        user.id,
+        user.role,
+      );
+    });
+
+    it('propagates service errors when the re-issuance attempt fails', async () => {
+      const error = new Error('Soroban call failed');
+      certificateService.syncChain.mockRejectedValue(error);
+
+      await expect(controller.syncChain(CERT_ID, user as any)).rejectsToThrow(error);
     });
   });
 });

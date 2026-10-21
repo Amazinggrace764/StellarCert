@@ -1,4 +1,4 @@
-import { Injectable, ConflictException, Logger } from '@nestjs/common';
+import { Injectable, ConflictException, Logger, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { CreateCertificateDto } from '../dto/create-certificate.dto';
@@ -9,6 +9,13 @@ import { WebhooksService } from '../../webhooks/webhooks.service';
 import { WebhookEvent } from '../../webhooks/entities/webhook-subscription.entity';
 import { MetadataSchemaService } from '../../metadata-schema/services/metadata-schema.service';
 import { CryptoUtils } from '../../../common/utils/crypto.utils';
+import { SorobanService } from '../../stellar/services/soroban.service';
+
+export interface SyncChainResult {
+  id: string;
+  alreadySynced: boolean;
+  stellarTransactionHash: string | undefined;
+}
 
 @Injectable()
 export class CertificateIssuanceService {
@@ -21,6 +28,7 @@ export class CertificateIssuanceService {
     private readonly webhooksService: WebhooksService,
     private readonly metadataSchemaService: MetadataSchemaService,
     private readonly dataSource: DataSource,
+    private readonly sorobanService: SorobanService,
   ) {}
 
   async issue(
@@ -76,6 +84,8 @@ export class CertificateIssuanceService {
     await queryRunner.connect();
     await queryRunner.startTransaction();
 
+    let savedCertificate: Certificate;
+
     try {
       const certificateId = await this.generateCertificateId();
       const verificationCode =
@@ -90,16 +100,44 @@ export class CertificateIssuanceService {
         isDuplicate: false,
       });
 
-      const savedCertificate = await queryRunner.manager.save(certificate);
+      savedCertificate = await queryRunner.manager.save(certificate);
 
       // If this was an override, mark it appropriately
       if (overrideReason) {
         savedCertificate.isDuplicate = true;
         savedCertificate.overrideReason = overrideReason;
-        await queryRunner.manager.save(savedCertificate);
+        savedCertificate = await queryRunner.manager.save(savedCertificate);
       }
 
-      // Commit the transaction
+      // Attempt on-chain issuance BEFORE committing so a failure can
+      // be rolled back and never leaves an orphaned record.
+      if (this.sorobanService?.isConfigured()) {
+        try {
+          const txHash = await this.sorobanService.issueCertificate(
+            savedCertificate.id,
+            savedCertificate.issuerStellarAddress,
+            savedCertificate.recipientStellarAddress,
+            savedCertificate.verificationCode,
+            Math.floor(new Date(savedCertificate.expiresAt).getTime() / 1000),
+          );
+          savedCertificate.stellarTransactionHash = txHash;
+          savedCertificate = await queryRunner.manager.save(savedCertificate);
+        } catch (chainError) {
+          // Rollback the database record so no orphan remains.
+          await queryRunner.rollbackTransaction();
+          this.logger.error(
+            `On-chain issuance failed for certificate ${savedCertificate.id}; DB rolled back: ${chainError.message}`,
+            chainError.stack,
+          );
+          throw new ServiceUnavailableException({
+            message:
+              'Failed to issue certificate on-chain; no certificate record was persisted',
+            cause: chainError.message,
+          });
+        }
+      }
+
+      // Commit the transaction only after the on-chain call succeeds
       await queryRunner.commitTransaction();
 
       this.logger.log(
@@ -122,8 +160,10 @@ export class CertificateIssuanceService {
 
       return savedCertificate;
     } catch (error) {
-      // Rollback transaction on error
-      await queryRunner.rollbackTransaction();
+      // Rollback transaction on error if it is still active
+      if (queryRunner.isTransactionActive) {
+        await queryRunner.rollbackTransaction();
+      }
       this.logger.error(
         `Failed to issue certificate: ${error.message}`,
         error.stack,
@@ -133,6 +173,51 @@ export class CertificateIssuanceService {
       // Release the QueryRunner
       await queryRunner.release();
     }
+  }
+
+  /**
+   * Re-attempt on-chain issuance for a certificate that is missing a
+   * `stellarTransactionHash` (e.g. an orphaned record from a prior failure).
+   */
+  async syncChain(id: string): Promise<SyncChainResult> {
+    const certificate = await this.certificateRepository.findOne({ where: { id } });
+    if (!certificate) {
+      throw new NotFoundException(`Certificate ${id} not found`);
+    }
+
+    if (certificate.stellarTransactionHash) {
+      return {
+        id,
+        alreadySynced: true,
+        stellarTransactionHash: certificate.stellarTransactionHash,
+      };
+    }
+
+    if (!this.sorobanService?.isConfigured()) {
+      throw new ServiceUnavailableException(
+        'Soroban is not configured; cannot sync chain issuance',
+      );
+    }
+
+    const txHash = await this.sorobanService.issueCertificate(
+      certificate.id,
+      certificate.issuerStellarAddress,
+      certificate.recipientStellarAddress,
+      certificate.verificationCode,
+      Math.floor(new Date(certificate.expiresAt).getTime() / 1000),
+    );
+
+    await this.certificateRepository.update(id, {
+      stellarTransactionHash: txHash,
+    });
+
+    this.logger.log($`Synched certificate ${id} to chain ${txHash}`);
+
+    return {
+      id,
+      alreadySynced: false,
+      stellarTransactionHash: txHash,
+    };
   }
 
   private calculateDefaultExpiry(): Date {
@@ -161,7 +246,7 @@ export class CertificateIssuanceService {
     const maxRetries = 10;
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       const suffix = CryptoUtils.generateAlphanumericCode(8);
-      const certificateId = `CERT-${year}-${suffix}`;
+      const certificateId = `CERT-4{year}-${suffix}`;
       const exists = await this.certificateRepository.findOne({
         where: { certificateId },
         select: ['id'],
