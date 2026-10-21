@@ -26,12 +26,13 @@ export class CertificateRevocationService {
       throw new ConflictException(`Certificate with ID ${id} not found`);
     }
 
+    const revokedAt = new Date();
     certificate.status = CertificateStatus.REVOKED;
     if (reason) {
       certificate.metadata = {
         ...certificate.metadata,
         revocationReason: reason,
-        revokedAt: new Date(),
+        revokedAt,
       };
     }
 
@@ -47,7 +48,20 @@ export class CertificateRevocationService {
         id: savedCertificate.id,
         status: savedCertificate.status,
         revocationReason: reason,
-        revokedAt: new Date(),
+        revokedAt,
+      },
+    );
+
+    // Trigger CRL revocation added event so the backend webhook system and
+    // off-chain indexers can detect CRL changes.
+    await this.webhooksService.triggerEvent(
+      WebhookEvent.CRL_REVOCATION_ADDED,
+      savedCertificate.issuerId,
+      {
+        id: savedCertificate.id,
+        status: savedCertificate.status,
+        revocationReason: reason,
+        revokedAt,
       },
     );
 
