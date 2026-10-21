@@ -29,6 +29,7 @@ import { WebhookEvent } from '../webhooks/entities/webhook-subscription.entity';
 import { MetadataSchemaService } from '../metadata-schema/services/metadata-schema.service';
 import { UserRole } from '../users/entities/user.entity';
 import { SorobanService } from '../stellar/services/soroban.service';
+import { IssuersService } from '../issuers/issuers.service';
 import { MAX_EXPORT_LIMIT, MAX_PAGE_LIMIT } from './dto/export-filters.dto';
 import { ConfigService } from '@nestjs/config';
 import { CryptoUtils } from '../../common/utils/crypto.utils';
@@ -52,6 +53,7 @@ export class CertificateService {
     private readonly dataSource: DataSource,
     private readonly sorobanService: SorobanService,
     private readonly configService: ConfigService,
+    private readonly issuersService: IssuersService,
   ) {}
 
   async create(
@@ -232,6 +234,28 @@ export class CertificateService {
         );
       }
       // ── End on-chain issuance ─────────────────────────────────────────────
+
+      // ── Increment issuer certificate counter ──────────────────────────────
+      // Wire the issuance flow to the issuer stats counter so the UI reflects
+      // the real number of certificates issued. This runs after the DB row is
+      // committed; a counter failure must not fail the issuance (the
+      // certificate already exists), so it is logged and swallowed.
+      if (savedCertificate.issuerId) {
+        try {
+          await this.issuersService.incrementCertificateCount(
+            savedCertificate.issuerId,
+          );
+        } catch (counterError: any) {
+          this.logger.error(
+            `Failed to increment certificate count for issuer ${savedCertificate.issuerId}: ${counterError.message}`,
+            counterError.stack,
+          );
+        }
+      } else {
+        this.logger.warn(
+          `Certificate ${savedCertificate.id} has no issuerId — issuer certificate count not incremented`,
+        );
+      }
 
       // Trigger webhook event (outside transaction)
       await this.webhooksService.triggerEvent(

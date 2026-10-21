@@ -16,6 +16,7 @@ import { WebhookEvent } from '../webhooks/entities/webhook-subscription.entity';
 import { SorobanService } from '../stellar/services/soroban.service';
 import { UserRole } from '../users/entities/user.entity';
 import { MAX_EXPORT_LIMIT, MAX_PAGE_LIMIT } from './dto/export-filters.dto';
+import { IssuersService } from '../issuers/issuers.service';
 
 describe('CertificateService', () => {
   let service: CertificateService;
@@ -33,14 +34,19 @@ describe('CertificateService', () => {
   const certificateRepository = {
     update: jest.fn(),
     save: jest.fn(),
+    create: jest.fn(),
     createQueryBuilder: jest.fn().mockReturnValue(mockQueryBuilder),
   };
   const verificationRepository = {};
-  const duplicateDetectionService = {};
+  const duplicateDetectionService = {
+    checkDuplicate: jest.fn().mockResolvedValue(null),
+  };
   const webhooksService = {
     triggerEvent: jest.fn(),
   };
-  const metadataSchemaService = {};
+  const metadataSchemaService = {
+    validateMetadata: jest.fn().mockResolvedValue(true),
+  };
   const filesService = {
     generateAndUploadQrCode: jest.fn(),
   };
@@ -51,8 +57,15 @@ describe('CertificateService', () => {
     isConfigured: jest.fn().mockReturnValue(false),
     issueCertificate: jest.fn(),
   };
+  const issuersService = {
+    incrementCertificateCount: jest.fn().mockResolvedValue(undefined),
+  };
 
   beforeEach(async () => {
+    jest.clearAllMocks();
+    sorobanService.isConfigured.mockReturnValue(false);
+    issuersService.incrementCertificateCount.mockResolvedValue(undefined);
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CertificateService,
@@ -95,6 +108,10 @@ describe('CertificateService', () => {
         {
           provide: SorobanService,
           useValue: sorobanService,
+        },
+        {
+          provide: IssuersService,
+          useValue: issuersService,
         },
       ],
     }).compile();
@@ -242,7 +259,7 @@ describe('CertificateService', () => {
         { issuerId: 'my-issuer-id' },
       );
       expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
-        'certificate.id IN (:...certificateIds)',
+        'certificate.id IN"(:..certificateIds)',
         { certificateIds: ['cert-1', 'cert-2'] },
       );
       expect(mockQueryBuilder.take).toHaveBeenCalledWith(MAX_EXPORT_LIMIT);
@@ -298,8 +315,15 @@ describe('CertificateService', () => {
     });
   });
 
-  describe('syncChain (#733)', () => {
-    let certificate: Certificate;
+  describe('issue (#incrementCertificateCount wiring)', () => {
+    const issuerId = 'issuer-1';
+    const dto = {
+      issuerId: issuerId,
+      recipientName: 'Alice',
+      recipientEmail: 'alice@example.com',
+      title: 'Cert 1',
+      courseName: 'Course 1',
+    } as any;
 
     beforeEach(() => {
       jest.clearAllMocks();
