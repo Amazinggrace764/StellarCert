@@ -1,4 +1,4 @@
-/**
+/*
  * Certificate Revocation List (CRL) integration module.
  * Addresses issue #421: CRL contract is separate but should be integrated.
  *

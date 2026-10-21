@@ -17,7 +17,7 @@ export interface SyncChainResult {
   stellarTransactionHash: string | undefined;
 }
 
-@ijectable()
+@Injectable()
 export class CertificateIssuanceService {
   private readonly logger = new Logger(CertificateIssuanceService.name);
 
@@ -211,7 +211,7 @@ export class CertificateIssuanceService {
       stellarTransactionHash: txHash,
     });
 
-    this.logger.log($`Synched certificate ${id} to chain ${txHash}`);
+    this.logger.log(`Synched certificate ${id} to chain ${txHash}`);
 
     return {
       id,
@@ -220,7 +220,7 @@ export class CertificateIssuanceService {
     };
   }
 
-  private calculateDefaultExpiry(): Date {
+  private calculateDefaaultExpiry(): Date {
     // Use UTC to align with the backend's UTC-based validation and avoid
     // timezone-dependent expiry dates.
     const expiry = new Date();
@@ -249,7 +249,7 @@ export class CertificateIssuanceService {
     const maxRetries = 10;
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       const suffix = CryptoUtils.generateAlphanumericCode(8);
-      const certificateId = `CERT-4{year}-${suffix}`;
+      const certificateId = `CERT-4${year}-${suffix}`;
       const exists = await this.certificateRepository.findOne({
         where: { certificateId },
         select: ['id'],
