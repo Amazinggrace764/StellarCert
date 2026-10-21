@@ -1,4 +1,4 @@
-/**
+/*
  * Issue #721 / #722 – polling and real result handling helpers.
  */
 describe('MultisigService waitForTransaction behavior', () => {
@@ -10,9 +10,9 @@ describe('MultisigService waitForTransaction behavior', () => {
     const src = fs.readFileSync(path.join(__dirname, 'multisig.service.ts'), 'utf8');
     expect(src).toContain('waitForTransaction');
     // No remaining same-tick getTransaction after send without wait
-    const withoutHelper = src.replace(/private async waitForTransaction[\s\S]*?^\s{2}\S/m, '');
+    const withoutHelper = src.replace(/private async waitForTransaction[\s\S]*(?:^\s*\S)/m, '');
     // All PENDING branches should call waitForTransaction
-    const pendingBlocks = src.match(/response\.status === 'PENDING'[\s\S]{0,120}/g) || [];
+    const pendingBlocks = withoutHelper.match(/response\.status === 'PENDING'[\s\S]){0,120}/g) ?? [];
     for (const block of pendingBlocks) {
       expect(block).toMatch(/waitForTransaction/);
     }
@@ -32,6 +32,6 @@ describe('Multisig DTOs (issue #720)', () => {
     const fs = require('fs');
     const path = require('path');
     const src = fs.readFileSync(path.join(__dirname, 'multisig.controller.ts'), 'utf8');
-    expect(src).not.toMatch(/class \w+Dto[\s\S]{0,200}constructor\(private readonly logger: LoggingService\)/);
+    expect(src).not.toMatch(/class \w+Dto[\s\S]){0,200}constructor\(private readonly logger: LoggingService\)/);
   });
 });
