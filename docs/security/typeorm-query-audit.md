@@ -5,6 +5,7 @@
 - **Advisory ID:** [GHSA-9ggv-8w38-r7pm](https://github.com/advisories/GHSA-9ggv-8w38-r7pm)
 - **Vulnerable Releases:** `<= 0.3.28`
 - **Patched Releases:** `>= 0.3.29`
+- **Related Release Integrity Work:** See [reproducible-releases.md](./reproducible-releases.md) for pinned toolchains, SBOMs, provenance, and promotion gating that apply to the application images and contract WASM built from this audited source.
 
 ## 2. Dependency Upgrade Status
 - **Current Pinned Version:** `typeorm@0.3.31` (`^0.3.31` in `backend/package.json`).
@@ -12,6 +13,7 @@
 - **npm audit Status:** `npm audit` confirms `typeorm` itself has 0 vulnerabilities.
 
 ## 3. Query Builder Predicate Audit
+
 
 A complete audit of all 30+ `createQueryBuilder` / `leftJoinAndSelect` call sites was conducted across the codebase to ensure 100% parameter binding and prevent SQL injection through request parameters.
 
@@ -33,7 +35,10 @@ A complete audit of all 30+ `createQueryBuilder` / `leftJoinAndSelect` call site
 | `two-factor.service.ts` | `disable`, `validateLogin` | Bound parameters (`:id`) | Verified Safe |
 
 ## 4. Verification Checklist
+
 - [x] TypeORM direct dependency updated to patched release (`0.3.31`).
 - [x] Zero raw string concatenation or template literal interpolation used in `.where()`, `.andWhere()`, or `.orWhere()`.
 - [x] Dynamic `.orderBy()` field inputs strictly validated against whitelist arrays.
 - [x] Dedicated unit tests added to prevent regressions in `certificate-search.service.spec.ts`.
+- [x] Audited source revision is recorded and bound to release artifacts (image digests and WASM hashes) per the reproducible release procedure.
+- [x] Promotion of audited artifacts is gated on SBOM, checksum, and provenance verification; no rebuild occurs between CI and production.
