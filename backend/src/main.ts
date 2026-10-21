@@ -23,7 +23,17 @@ async function bootstrap() {
 
   const app = await NestFactory.create(AppModule);
   const expressApp = app.getHttpAdapter().getInstance();
-  expressApp.set('trust proxy', true);
+  const rawTrustProxy = (process.env.TRUST_PROXY || '').trim();
+  const parsedHops = Number(rawTrustProxy);
+  const trustProxyValue =
+    !rawTrustProxy || rawTrustProxy === 'false'
+      ? false
+      : !Number.isNaN(parsedHops) &&
+          Number.isInteger(parsedHops) &&
+          parsedHops >= 0
+        ? parsedHops
+        : rawTrustProxy;
+  expressApp.set('trust proxy', trustProxyValue);
 
   const sentryService = app.get(SentryService);
   const loggingService = app.get(LoggingService);
@@ -92,23 +102,28 @@ async function bootstrap() {
     new MonitoringInterceptor(metricsService, sentryService, loggingService),
   );
 
-  // Swagger setup
-  const config = new DocumentBuilder()
-    .setTitle('StellarCert API')
-    .setDescription('Certificate Management System API Documentation')
-    .setVersion('1.0')
-    .addBearerAuth(
-      { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
-      'access-token',
-    )
-    .build();
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api/docs', app, document, {
-    swaggerOptions: {
-      persistAuthorization: true,
-      docExpansion: 'none',
-    },
-  });
+  // Swagger setup (disabled in production unless explicitly enabled via ENABLE_SWAGGER=true)
+  if (
+    process.env.NODE_ENV !== 'production' ||
+    process.env.ENABLE_SWAGGER === 'true'
+  ) {
+    const config = new DocumentBuilder()
+      .setTitle('StellarCert API')
+      .setDescription('Certificate Management System API Documentation')
+      .setVersion('1.0')
+      .addBearerAuth(
+        { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+        'access-token',
+      )
+      .build();
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup('api/docs', app, document, {
+      swaggerOptions: {
+        persistAuthorization: true,
+        docExpansion: 'none',
+      },
+    });
+  }
 
   // Enable graceful shutdown hooks
   app.enableShutdownHooks();
