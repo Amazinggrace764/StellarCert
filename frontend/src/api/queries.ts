@@ -20,7 +20,6 @@ import type {
 } from "./types";
 import {
   adminAnalyticsApi,
-  analyticsApi,
   apiClient,
   auditApi,
   authApi,
@@ -65,8 +64,6 @@ export const queryKeys = {
   templates: () => ["templates"] as const,
   analytics: {
     root: ["analytics"] as const,
-    dashboardSummary: (params: unknown) =>
-      ["analytics", "dashboard-summary", params] as const,
     admin: (params: unknown) => ["analytics", "admin", params] as const,
   },
   audit: {
@@ -204,17 +201,17 @@ export const useTemplatesQuery = () =>
 
 // ── Analytics & audit ──────────────────────────────────────────────────────
 
-export const useDashboardSummaryQuery = (params: DateRangeParams) =>
-  useQuery({
-    queryKey: queryKeys.analytics.dashboardSummary(params),
-    queryFn: () => analyticsApi.getDashboardSummary(params),
-  });
-
 export const useAdminAnalyticsQuery = (params: DateRangeParams) =>
   useQuery({
     queryKey: queryKeys.analytics.admin(params),
     queryFn: () => adminAnalyticsApi.getAnalytics(params),
   });
+
+// Single source of truth for dashboard statistics. `useDashboardSummaryQuery`
+// was a duplicate that hit a different endpoint; it now delegates here so the
+// cache key, endpoint and invalidation family stay consistent.
+export const useDashboardSummaryQuery = (params: DateRangeParams) =>
+  useAdminAnalyticsQuery(params);
 
 export const useAuditStatisticsQuery = (params: DateRangeParams) =>
   useQuery({

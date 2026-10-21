@@ -10,6 +10,12 @@ export enum UserRole {
   VERIFIER = 'verifier',
 }
 
+/**
+ * All role values derived dynamically from the enum.
+ * Use this instead of hardcoding role lists so new roles are never omitted.
+ */
+export const ALL_USER_ROLES: ReadonlyArray<UserRole> = Object.values(UserRole);
+
 export const ROLE_HIERARCHY = {
   [UserRole.ADMIN]: [
     UserRole.ADMIN,

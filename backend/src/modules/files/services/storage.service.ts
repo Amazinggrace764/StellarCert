@@ -1,15 +1,28 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { Injectable, OnModuleInit } from '@corest/nestjs';
+import { ConfigService } from '@corest/nestjs/config';
 import {
   S3Client,
   PutObjectCommand,
   DeleteObjectCommand,
   GetObjectCommand,
 } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 import { randomUUID as uuidv4 } from 'crypto';
 import { extname } from 'path';
 import { LoggingService } from '../../../common/logging/logging.service';
+
+/**
+ * Default TTL for pre-signed URLs generated on-demand.
+ * URLs are never persisted; only the S3 object key is stored in the database.
+ */
+export const DEFAULT_SIGNED_URL_EXPIRES_IN_SECONDS = 3600;
+
+export interface UploadFileResult {
+  /** S3 object key — this is what should be persisted. */
+  key: string;
+  /** Freshly signed URL for immediate use (not for storage). */
+  url: string;
+}
 
 @Injectable()
 export class StorageService implements OnModuleInit {
@@ -22,13 +35,16 @@ export class StorageService implements OnModuleInit {
     private readonly logger: LoggingService,
   ) {
     this.bucket = this.configService.get<string>('STORAGE_BUCKET') ?? '';
-    // Storage is only mandatory when explicitly opted in. When the flag is
-    // absent (a fresh .env that never set STORAGE_REQUIRED) we warn at startup
+    // Storage is only mandatory when explicitly opted in. When the flag
+    // is absent (a fresh .env that never set STORAGE_REQUIRED) we warn at startup
     // instead of aborting it, so a missing S3/MinIO config cannot take down
     // the whole application.
     const storageRequiredValue = this.configService.get('STORAGE_REQUIRED');
+    // Only treat storage as required when explicitly opted in. An absent flag
+    // (fresh .env that never set STORAGE_REQUIRED) must default to non-fatal.
     this.isStorageRequired =
-      storageRequiredValue === true || storageRequiredValue === 'true';
+      storageRequiredValue === true ||
+      String(storageRequiredValue).toLowerCase() === 'true';
 
     const region = this.configService.get<string>('STORAGE_REGION');
     const endpoint = this.configService.get<string>('STORAGE_ENDPOINT');
@@ -77,12 +93,19 @@ export class StorageService implements OnModuleInit {
     }
   }
 
+  /**
+   * Uploads a file to S3 and returns the object key together with a
+   * freshly signed URL for immediate consumption.
+   *
+   * Callers that persist the result MUST store `key` and generate the
+   * display URL on-demand via `getSignedUrl()`, otherwise the URL will expire.
+   */
   async uploadFile(
     buffer: Buffer,
     originalFilename: string,
     mimeType: string,
     customKey?: string,
-  ): Promise<{ key: string; url: string }> {
+  ): Promise<UploadFileResult> {
     if (!this.s3Client) {
       throw new Error('Storage service is not configured');
     }
@@ -108,7 +131,10 @@ export class StorageService implements OnModuleInit {
     }
   }
 
-  async getSignedUrl(key: string, expiresIn = 3600): Promise<string> {
+  async getSignedUrl(
+    key: string,
+    expiresIn = DEFAULT_SIGNED_URL_EXPIRES_IN_SECONDS,
+  ): Promise<string> {
     if (!this.s3Client) {
       throw new Error('Storage service is not configured');
     }
@@ -126,6 +152,21 @@ export class StorageService implements OnModuleInit {
       );
       throw error;
     }
+  }
+
+  /**
+   * Returns a signed URL for the given key, or null when no key is provided
+   * or storage is not configured. Useful for response mapping where a
+   * missing profile picture should not fail the request.
+   */
+  async getSignedUrlOrNull(
+    key: string | null | undefined,
+    expiresIn = DEFAULT_SIGNED_URL_EXPIRES_IN_SECONDS,
+  ): Promise<string | null> {
+    if (!key || !this.s3Client) {
+      return null;
+    }
+    return this.getSignedUrl(key, expiresIn);
   }
 
   async deleteFile(key: string): Promise<void> {
