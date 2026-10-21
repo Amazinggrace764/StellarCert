@@ -33,7 +33,7 @@ import { MultisigModule } from './modules/multisig/multisig.module';
     ConfigModule.forRoot({
       isGlobal: true,
       validate: validateEnv,
-      envFilePath: [resolve(__dirname, '../../.env'), '.env'],
+      envFilePath: [resolve(__dirname, '../../.emv'), '.env'],
     }),
     BullModule.forRootAsync({
       imports: [ConfigModule],

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   rpc,
@@ -74,7 +74,7 @@ export interface PaginatedResult {
 }
 
 @Injectable()
-export class MultisigService {
+export class MultisigService implements OnModuleInit {
   private contractId: string;
   private server: rpc.Server;
   private networkPassphrase: string;
@@ -84,10 +84,16 @@ export class MultisigService {
     private readonly stellarService: StellarService,
     private readonly logger: LoggingService,
   ) {
+    // Initialization is deferred to onModuleInit so that the module can be
+    // imported into AppModule without failing at construction time when
+    // configuration is absent (e.g. in tests or environments without multisig).
+  }
+
+  onModuleInit(): void {
     this.initializeMultisig();
   }
 
-  private initializeMultisig() {
+  private initializeMultisig(): void {
     const contractId = this.configService.get<string>('MULTISIG_CONTRACT_ID');
     const horizonUrl = this.configService.get<string>('STELLAR_HORIZON_URL');
     const network = this.configService.get<string>('STELLAR_NETWORK');
@@ -110,6 +116,19 @@ export class MultisigService {
   }
 
   /**
+   * Guard against use before configuration has been supplied. Throwing a
+   * clear error here is preferable to a cryptic `undefined` dereference on
+   * `this.server` / `this.contractId` deep inside a transaction builder.
+   */
+  private assertInitialized(): void {
+    if (!this.server || !this.contractId) {
+      throw new Error(
+        'MultisigService is not configured: MULTISIG_CONTRACT_ID, STELLAR_HORIZON_URL and STELLAR_NETWORK must be set',
+      );
+    }
+  }
+
+  /**
    * Initialize multisig configuration for an issuer
    */
 
@@ -122,6 +141,7 @@ export class MultisigService {
     hash: string,
     options?: { maxAttempts?: number; intervalMs?: number },
   ): Promise<rpc.Api.GetTransactionResponse> {
+    this.assertInitialized();
     const maxAttempts = options?.maxAttempts ?? 30;
     const intervalMs = options?.intervalMs ?? 2000;
 
@@ -135,7 +155,7 @@ export class MultisigService {
       ) {
         return last;
       }
-      // NOT_FOUND / PENDING – wait and retry
+      // NOT_FOUND / PENDING - wait and retry
       await new Promise((resolve) => setTimeout(resolve, intervalMs));
     }
     throw new Error(
@@ -158,6 +178,7 @@ export class MultisigService {
     maxSigners: number,
   ): Promise<string> {
     try {
+      this.assertInitialized();
       const adminKeyPair =
         this.stellarService.getKeypairFromPublicKey(adminPublicKey);
       const rpcAccount = await this.server.getAccount(adminPublicKey);
@@ -226,6 +247,7 @@ export class MultisigService {
     newMaxSigners?: number,
   ): Promise<string> {
     try {
+      this.assertInitialized();
       const adminKeyPair =
         this.stellarService.getKeypairFromPublicKey(adminPublicKey);
       const accountResponse = await this.server.getAccount(adminPublicKey);
@@ -294,6 +316,7 @@ export class MultisigService {
   /**
    * Propose a new certificate for multi-sig issuance
    */
+  // #722: return the actual on-chain pending request, not a fabricated object.
   async proposeCertificate(
     requesterPublicKey: string,
     requestId: string,
@@ -303,6 +326,7 @@ export class MultisigService {
     expirationDays: number,
   ): Promise<PendingRequest> {
     try {
+      this.assertInitialized();
       const requesterKeyPair =
         this.stellarService.getKeypairFromPublicKey(requesterPublicKey);
       const accountResponse = await this.server.getAccount(requesterPublicKey);
@@ -344,7 +368,7 @@ export class MultisigService {
         const txResponse = await this.waitForTransaction(response.hash);
         if (txResponse.status === rpc.Api.GetTransactionStatus.SUCCESS) {
           this.logger.log(`Certificate proposed with request ID: ${requestId}`);
-          // Parse actual on-chain pending request after the tx finalizes (#722)
+          // Parse actual on-chain pending request after the tx finalizes (#722).
           try {
             return await this.getPendingRequest(requestId);
           } catch (fetchErr) {
@@ -352,19 +376,11 @@ export class MultisigService {
               `Transaction succeeded but could not fetch pending request ${requestId}; returning minimal result`,
               fetchErr,
             );
-            return {
-              id: requestId,
-              issuer,
-              recipient,
-              metadata,
-              proposer: requesterPublicKey,
-              approvals: [],
-              rejections: [],
-              created_at: Math.floor(Date.now() / 1000),
-              expires_at:
-                Math.floor(Date.now() / 1000) + expirationDays * 24 * 60 * 60,
-              status: RequestStatus.Pending,
-            };
+            throw new Error(
+              `Transaction ${response.hash} succeeded but pending request ${requestId} could not be read from the contract: ${
+                fetchErr instanceof Error ? fetchErr.message : String(fetchErr)
+              }`,
+            );
           }
         }
       }
@@ -387,6 +403,7 @@ export class MultisigService {
     requestId: string,
   ): Promise<SignatureResult> {
     try {
+      this.assertInitialized();
       const approverKeyPair =
         this.stellarService.getKeypairFromPublicKey(approverPublicKey);
       const accountResponse = await this.server.getAccount(approverPublicKey);
@@ -417,7 +434,14 @@ export class MultisigService {
       if (response.status === 'PENDING' || response.status === 'DUPLICATE') {
         const txResponse = await this.waitForTransaction(response.hash);
         if (txResponse.status === rpc.Api.GetTransactionStatus.SUCCESS) {
-          this.logger.log(`Request ${requestId} approved by ${approverPublicKey}`);
+          this.logger.log(
+            `Request ${requestId} approved by ${approverPublicKey}`,
+          );
+          // Use on-chain request status after finalization (#722).
+          const final_status = await this.resolveFinalStatus(
+            requestId,
+            RequestStatus.Approved,
+          );
           return {
             success: true,
             message: 'Request approved successfully',
@@ -444,9 +468,10 @@ export class MultisigService {
     reason?: string,
   ): Promise<SignatureResult> {
     try {
-      const rejecterKeyPair =
-        this.stellarService.getKeypairFromPublicKey(rejecterPublicKey);
-      const accountResponse = await this.server.getAccount(rejecterPublicKey);
+      this.assertInitialized();
+      const rejectorKeyPair =
+        this.stellarService.getKeypairFromPublicKey(rejectorPublicKey);
+      const accountResponse = await this.server.getAccount(rejectorPublicKey);
       const sourceAccount = new Account(
         rejecterPublicKey,
         accountResponse.sequenceNumber(),
@@ -482,7 +507,13 @@ export class MultisigService {
       if (response.status === 'PENDING' || response.status === 'DUPLICATE') {
         const txResponse = await this.waitForTransaction(response.hash);
         if (txResponse.status === rpc.Api.GetTransactionStatus.SUCCESS) {
-          this.logger.log(`Request ${requestId} rejected by ${rejecterPublicKey}`);
+          this.logger.log(
+            `Request ${requestId} rejected by ${rejectorPublicKey}`,
+          );
+          const final_status = await this.resolveFinalStatus(
+            requestId,
+            RequestStatus.Rejected,
+          );
           return {
             success: true,
             message: 'Request rejected successfully',
@@ -501,16 +532,39 @@ export class MultisigService {
   }
 
   /**
-   * Issue a certificate once approval threshold is met
+   * Resolve the authoritative status of a request after a signature tx
+   * finalizes. The contract may have removed the request from the pending
+   * list once the threshold was met, so we fall back to the expected
+   * terminal status only when the contract confirms the request is gone.
+   */
+  private async resolveFinalStatus(
+    requestId: string,
+    expectedTerminal: RequestStatus,
+  ): Promise<RequestStatus> {
+    try {
+      const pending = await this.getPendingRequest(requestId);
+      return pending.status;
+    } catch (err) {
+      this.logger.warn(
+        `Could not read pending request ${requestId} after finalization; assuming terminal status ${expectedTerminal}`,
+        err,
+      );
+      return expectedTerminal;
+    }
+  }
+
+  /**
+   * Issue an approved certificate
    */
   async issueApprovedCertificate(
     issuerPublicKey: string,
     requestId: string,
   ): Promise<boolean> {
     try {
-      const issuerKeyPair =
-        this.stellarService.getKeypairFromPublicKey(issuerPublicKey);
-      const accountResponse = await this.server.getAccount(issuerPublicKey);
+      this.assertInitialized();
+      const requesterKeyPair =
+        this.stellarService.getKeypairFromPublicKey(requesterPublicKey);
+      const accountResponse = await this.server.getAccount(requesterPublicKey);
       const sourceAccount = new Account(
         issuerPublicKey,
         accountResponse.sequenceNumber(),
@@ -556,9 +610,10 @@ export class MultisigService {
     requestId: string,
   ): Promise<boolean> {
     try {
-      const proposerKeyPair =
-        this.stellarService.getKeypairFromPublicKey(proposerPublicKey);
-      const accountResponse = await this.server.getAccount(proposerPublicKey);
+      this.assertInitialized();
+      const requesterKeyPair =
+        this.stellarService.getKeypairFromPublicKey(requesterPublicKey);
+      const accountResponse = await this.server.getAccount(requesterPublicKey);
       const sourceAccount = new Account(
         proposerPublicKey,
         accountResponse.sequenceNumber(),
@@ -601,6 +656,7 @@ export class MultisigService {
    */
   async getMultisigConfig(issuer: string): Promise<MultisigConfig> {
     try {
+      this.assertInitialized();
       const contract = new Contract(this.contractId);
       const issuerScVal = new Address(issuer).toScVal();
 
@@ -644,6 +700,7 @@ export class MultisigService {
    */
   async getPendingRequest(requestId: string): Promise<PendingRequest> {
     try {
+      this.assertInitialized();
       const contract = new Contract(this.contractId);
       const requestIdScVal = xdr.ScVal.scvString(requestId);
 
@@ -692,6 +749,7 @@ export class MultisigService {
    */
   async isRequestExpired(requestId: string): Promise<boolean> {
     try {
+      this.assertInitialized();
       const contract = new Contract(this.contractId);
       const requestIdScVal = xdr.ScVal.scvString(requestId);
 
@@ -731,6 +789,7 @@ export class MultisigService {
     pagination: Pagination,
   ): Promise<PaginatedResult> {
     try {
+      this.assertInitialized();
       const contract = new Contract(this.contractId);
       const issuerScVal = new Address(issuer).toScVal();
       const pageScVal = xdr.ScVal.scvU32(pagination.page);
@@ -792,6 +851,7 @@ export class MultisigService {
     pagination: Pagination,
   ): Promise<PaginatedResult> {
     try {
+      this.assertInitialized();
       const contract = new Contract(this.contractId);
       const signerScVal = new Address(signer).toScVal();
       const pageScVal = xdr.ScVal.scvU32(pagination.page);
@@ -861,3 +921,4 @@ export class MultisigService {
     };
   }
 }
+

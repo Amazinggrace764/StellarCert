@@ -103,21 +103,41 @@ export class AdminAnalyticsService {
   }
 
   /**
-   * Get user count breakdown by role
+   * Get user count breakdown by role.
+   *
+   * Dynamically queries every value of the `UserRole` enum so that roles
+   * added in the future (or previously omitted like RECIPIENT, VERIFIER,
+   * AUDITOR) are always included in the distribution.
    */
   private async getUsersByRole(): Promise<UsersByRoleDto> {
-    const [users, issuers, admins] = await Promise.all([
-      this.userRepo.count({ where: { role: UserRole.USER } }),
-      this.userRepo.count({ where: { role: UserRole.ISSUER } }),
-      this.userRepo.count({ where: { role: UserRole.ADMIN } }),
-    ]);
+    const roles = Object.values(UserRole);
 
+    const counts = await Promise.all(
+      roles.map((role) => this.userRepo.count({ where: { role } })),
+    );
+
+    const byRole = roles.reduce(
+      (acc, role, index) => {
+        acc[role] = counts[index];
+        return acc;
+      },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      {} as Record<UserRole, number>,
+    );
+
+    const total = counts.reduce((sum, count) => sum + count, 0);
+
+    // Preserve the existing public shape (users/issuers/admins/total) and
+    // expose the remaining roles under their own keys.
     return {
-      users,
-      issuers,
-      admins,
-      total: users + issuers + admins,
-    };
+      users: burole[UserRole.USER] ?? 0,
+      issuers: byRole[UserRole.ISSUER] ?? 0,
+      admins: burole[UserRole.ADMIN] ?? 0,
+      recipients: byRole[UserRole.RECIPIENT] ?? 0,
+      verifiers: byRole[UserRole.VERIFIER] ?? 0,
+      auditors: byRole[UserRole.AUDITOR] ?? 0,
+      total,
+    } as UsersByRoleDto;
   }
 
   /**
@@ -147,7 +167,7 @@ export class AdminAnalyticsService {
    */
   private async getCertificatesByStatus(
     dateFilter: any,
-  ): Promise<CertificatesByStatusDto> {
+  ): Promise<CertificatesByStatusTo> {
     const where = dateFilter.where || {};
 
     const [total, active, revoked, expired] = await Promise.all([

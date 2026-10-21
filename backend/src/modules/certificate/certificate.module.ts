@@ -13,6 +13,7 @@ import { CertificateStatsService } from './services/stats.service';
 import { DuplicateDetectionService } from './services/duplicate-detection.service';
 import { CertificatePdfService } from './services/pdf.service';
 import { CertificateTransferService } from './services/certificate-transfer.service';
+import { CertificateIssuanceService } from './services/certificate-issuance.service';
 
 import { CertificateController } from './certificate.controller';
 import { DuplicateDetectionController } from './controllers/duplicate-detection.controller';
@@ -28,6 +29,7 @@ import { AuditModule } from '../audit/audit.module';
 import { FilesModule } from '../files/files.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { EmailModule } from '../email/email.module';
+import { IssuersModule } from '../issuers/issuers.module';
 
 @Module({
   imports: [
@@ -50,6 +52,7 @@ import { EmailModule } from '../email/email.module';
     FilesModule,
     NotificationsModule,
     EmailModule,
+    IssuersModule,
   ],
   controllers: [
     CertificateController,
@@ -63,12 +66,14 @@ import { EmailModule } from '../email/email.module';
     DuplicateDetectionService,
     CertificatePdfService,
     CertificateTransferService,
+    CertificateIssuanceService,
     CertificateMapper,
   ],
   exports: [
     CertificateService,
     CertificateStatsService,
     CertificateTransferService,
+    CertificateIssuanceService,
   ],
 })
 export class CertificateModule {}

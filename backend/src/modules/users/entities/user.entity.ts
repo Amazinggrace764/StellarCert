@@ -41,6 +41,7 @@ export class User {
   @Column({ nullable: true })
   phone: string;
 
+  // Stores the S3 object key (not a pre-signed URL). URLs are generated on-demand.
   @Column({ nullable: true })
   profilePicture: string;
 
