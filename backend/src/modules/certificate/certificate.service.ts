@@ -606,6 +606,51 @@ export class CertificateService {
     return savedCertificate;
   }
 
+  /**
+   * Update a certificate's expiry date.
+   *
+   * The expiry is the boundary that decides whether `is_valid` reports the
+   * certificate as still valid, so it is validated here — at the owning
+   * service — rather than trusting the caller. Two rules apply:
+   *
+   *  - The new expiry must be strictly in the future. Setting it to a past
+   *    timestamp silently invalidates the certificate with no warning, which
+   *    is never what an admin means to do.
+   *  - Only `Active` certificates may be re-dated. Revoked or frozen
+   *    certificates must not be silently brought back to life by moving their
+   *    expiry; those states are cleared through their dedicated flows.
+   *
+   * @throws BadRequestException when the expiry is not in the future
+   * @throws ConflictException when the certificate is not active
+   */
+  async setCertificateExpiry(
+    id: string,
+    expiresAt: Date | string | number,
+  ): Promise<Certificate> {
+    const certificate = await this.findOne(id);
+
+    if (certificate.status !== CertificateStatus.ACTIVE) {
+      throw new ConflictException(
+        `Certificate must be active to change its expiry. Current status: ${certificate.status}`,
+      );
+    }
+
+    const parsed =
+      expiresAt instanceof Date ? expiresAt : new Date(expiresAt as any);
+    if (Number.isNaN(parsed.getTime())) {
+      throw new BadRequestException('expiresAt must be a valid date');
+    }
+
+    if (parsed.getTime() <= Date.now()) {
+      throw new BadRequestException(
+        'expiresAt must be in the future',
+      );
+    }
+
+    certificate.expiresAt = parsed;
+    return this.certificateRepository.save(certificate);
+  }
+
   async bulkRevoke(
     certificateIds: string[],
     reason?: string,
