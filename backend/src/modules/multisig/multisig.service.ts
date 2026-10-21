@@ -73,11 +73,65 @@ export interface PaginatedResult {
   has_next: boolean;
 }
 
+/**
+ * Response DTOs for multisig controller endpoints.
+ *
+ * These interfaces give the controller handlers compile-time shape safety
+ * instead of `Promise<any>`. They intentionally mirror the existing runtime
+ * payloads so the API contract is preserved.
+ */
+export interface InitMultisigConfigResponseDto {
+  transactionHash: string;
+}
+
+export interface UpdateMultisigConfigResponseDto {
+  transactionHash: string;
+}
+
+export interface ProposeCertificateResponseDto {
+  request: PendingRequest;
+}
+
+export interface SignatureResponseDto {
+  success: boolean;
+  message: string;
+  final_status?: RequestStatus;
+}
+
+export interface IssueCertificateResponseDto {
+  issued: boolean;
+}
+
+export interface CancelRequestResponseDto {
+  cancelled: boolean;
+}
+
+export interface RequestExpiredResponseDto {
+  expired: boolean;
+}
+
+export interface MultisigConfigResponseDto {
+  config: MultisigConfig;
+}
+
+export interface PendingRequestResponseDto {
+  request: PendingRequest;
+}
+
+export interface PendingRequestsResponseDto {
+  data: PendingRequest[];
+  total: number;
+  page: number;
+  limit: number;
+  has_next: boolean;
+}
+
 @Injectable()
 export class MultisigService implements OnModuleInit {
   private contractId: string;
   private server: rpc.Server;
   private networkPassphrase: string;
+
 
   constructor(
     private readonly configService: ConfigService,
@@ -176,7 +230,7 @@ export class MultisigService implements OnModuleInit {
     threshold: number,
     signers: string[],
     maxSigners: number,
-  ): Promise<string> {
+  ): Promise<InitMultisigConfigResponseDto> {
     try {
       this.assertInitialized();
       const adminKeyPair =
@@ -222,7 +276,7 @@ export class MultisigService implements OnModuleInit {
         const txResponse = await this.waitForTransaction(response.hash);
         if (txResponse.status === rpc.Api.GetTransactionStatus.SUCCESS) {
           this.logger.log(`Multisig config initialized for issuer: ${issuer}`);
-          return response.hash;
+          return { transactionHash: response.hash };
         }
       }
 
@@ -245,7 +299,7 @@ export class MultisigService implements OnModuleInit {
     newThreshold?: number,
     newSigners?: string[],
     newMaxSigners?: number,
-  ): Promise<string> {
+  ): Promise<UpdateMultisigConfigResponseDto> {
     try {
       this.assertInitialized();
       const adminKeyPair =
@@ -299,7 +353,7 @@ export class MultisigService implements OnModuleInit {
         const txResponse = await this.waitForTransaction(response.hash);
         if (txResponse.status === rpc.Api.GetTransactionStatus.SUCCESS) {
           this.logger.log(`Multisig config updated for issuer: ${issuer}`);
-          return response.hash;
+          return { transactionHash: response.hash };
         }
       }
 
@@ -324,7 +378,7 @@ export class MultisigService implements OnModuleInit {
     recipient: string,
     metadata: string,
     expirationDays: number,
-  ): Promise<PendingRequest> {
+  ): Promise<ProposeCertificateResponseDto> {
     try {
       this.assertInitialized();
       const requesterKeyPair =
@@ -370,7 +424,8 @@ export class MultisigService implements OnModuleInit {
           this.logger.log(`Certificate proposed with request ID: ${requestId}`);
           // Parse actual on-chain pending request after the tx finalizes (#722).
           try {
-            return await this.getPendingRequest(requestId);
+            const { request } = await this.getPendingRequest(requestId);
+            return { request };
           } catch (fetchErr) {
             this.logger.warn(
               `Transaction succeeded but could not fetch pending request ${requestId}; returning minimal result`,
@@ -401,7 +456,7 @@ export class MultisigService implements OnModuleInit {
   async approveRequest(
     approverPublicKey: string,
     requestId: string,
-  ): Promise<SignatureResult> {
+  ): Promise<SignatureResponseDto> {
     try {
       this.assertInitialized();
       const approverKeyPair =
@@ -466,7 +521,7 @@ export class MultisigService implements OnModuleInit {
     rejecterPublicKey: string,
     requestId: string,
     reason?: string,
-  ): Promise<SignatureResult> {
+  ): Promise<SignatureResponseDto> {
     try {
       this.assertInitialized();
       const rejectorKeyPair =
@@ -559,7 +614,7 @@ export class MultisigService implements OnModuleInit {
   async issueApprovedCertificate(
     issuerPublicKey: string,
     requestId: string,
-  ): Promise<boolean> {
+  ): Promise<IssueCertificateResponseDto> {
     try {
       this.assertInitialized();
       const requesterKeyPair =
@@ -608,7 +663,7 @@ export class MultisigService implements OnModuleInit {
   async cancelRequest(
     proposerPublicKey: string,
     requestId: string,
-  ): Promise<boolean> {
+  ): Promise<CancelRequestResponseDto> {
     try {
       this.assertInitialized();
       const requesterKeyPair =
@@ -654,7 +709,7 @@ export class MultisigService implements OnModuleInit {
   /**
    * Read multisig configuration for an issuer
    */
-  async getMultisigConfig(issuer: string): Promise<MultisigConfig> {
+  async getMultisigConfig(issuer: string): Promise<MultisigConfigResponseDto> {
     try {
       this.assertInitialized();
       const contract = new Contract(this.contractId);
@@ -698,7 +753,7 @@ export class MultisigService implements OnModuleInit {
   /**
    * Read a single pending request by ID
    */
-  async getPendingRequest(requestId: string): Promise<PendingRequest> {
+  async getPendingRequest(requestId: string): Promise<PendingRequestResponseDto> {
     try {
       this.assertInitialized();
       const contract = new Contract(this.contractId);
@@ -747,7 +802,7 @@ export class MultisigService implements OnModuleInit {
   /**
    * Check whether a request is expired
    */
-  async isRequestExpired(requestId: string): Promise<boolean> {
+  async isRequestExpired(requestId: string): Promise<RequestExpiredResponseDto> {
     try {
       this.assertInitialized();
       const contract = new Contract(this.contractId);
@@ -787,7 +842,7 @@ export class MultisigService implements OnModuleInit {
   async getPendingRequestsForIssuer(
     issuer: string,
     pagination: Pagination,
-  ): Promise<PaginatedResult> {
+  ): Promise<PendingRequestsResponseDto> {
     try {
       this.assertInitialized();
       const contract = new Contract(this.contractId);
@@ -849,7 +904,7 @@ export class MultisigService implements OnModuleInit {
   async getPendingRequestsForSigner(
     signer: string,
     pagination: Pagination,
-  ): Promise<PaginatedResult> {
+  ): Promise<PendingRequestsResponseDto> {
     try {
       this.assertInitialized();
       const contract = new Contract(this.contractId);

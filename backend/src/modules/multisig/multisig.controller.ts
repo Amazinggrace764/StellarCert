@@ -15,11 +15,17 @@ import {
   MultisigService,
   RequestStatus,
   Pagination,
-  PendingRequest,
-  MultisigConfig,
-  SignatureResult,
-  PaginatedResult,
 } from './multisig.service';
+import {
+  TransactionHashResponse,
+  SuccessResponse,
+  ExpiredResponse,
+  RequestStatusResponse,
+  PendingRequestResponse,
+  MultisigConfigResponse,
+  SignatureResultResponse,
+  PaginatedPendingRequestsResponse,
+} from './dto/multisig-response.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -45,7 +51,7 @@ export class MultisigController {
   async initMultisigConfig(
     @CurrentUser() user: User,
     @Body() configDto: InitMultisigConfigDto,
-  ): Promise<{ transactionHash: string }> {
+  ): Promise<TransactionHashResponse> {
     try {
       const transactionHash = await this.multisigService.initMultisigConfig(
         user.stellarPublicKey,
@@ -70,7 +76,7 @@ export class MultisigController {
     @CurrentUser() user: User,
     @Param('issuer') issuer: string,
     @Body() configDto: UpdateMultisigConfigDto,
-  ): Promise<{ transactionHash: string }> {
+  ): Promise<TransactionHashResponse> {
     try {
       const transactionHash = await this.multisigService.updateMultisigConfig(
         user.stellarPublicKey,
@@ -97,7 +103,7 @@ export class MultisigController {
   async proposeCertificate(
     @CurrentUser() user: User,
     @Body() proposeDto: ProposeCertificateDto,
-  ): Promise<PendingRequest> {
+  ): Promise<PendingRequestResponse> {
     try {
       const result = await this.multisigService.proposeCertificate(
         user.stellarPublicKey,
@@ -125,7 +131,7 @@ export class MultisigController {
   async approveRequest(
     @CurrentUser() user: User,
     @Param('requestId') requestId: string,
-  ): Promise<SignatureResult> {
+  ): Promise<SignatureResultResponse> {
     try {
       const result = await this.multisigService.approveRequest(
         user.stellarPublicKey,
@@ -147,7 +153,7 @@ export class MultisigController {
     @CurrentUser() user: User,
     @Param('requestId') requestId: string,
     @Body() rejectDto: RejectRequestDto,
-  ): Promise<SignatureResult> {
+  ): Promise<SignatureResultResponse> {
     try {
       const result = await this.multisigService.rejectRequest(
         user.stellarPublicKey,
@@ -169,7 +175,7 @@ export class MultisigController {
   async issueApprovedCertificate(
     @CurrentUser() user: User,
     @Param('requestId') requestId: string,
-  ): Promise<{ success: boolean }> {
+  ): Promise<SuccessResponse> {
     try {
       const success = await this.multisigService.issueApprovedCertificate(
         user.stellarPublicKey,
@@ -193,7 +199,7 @@ export class MultisigController {
   async cancelRequest(
     @CurrentUser() user: User,
     @Param('requestId') requestId: string,
-  ): Promise<{ success: boolean }> {
+  ): Promise<SuccessResponse> {
     try {
       const success = await this.multisigService.cancelRequest(
         user.stellarPublicKey,
@@ -211,7 +217,9 @@ export class MultisigController {
 
   @Get('config/:issuer')
   @Roles(UserRole.ADMIN, UserRole.ISSUER, UserRole.USER)
-  async getMultisigConfig(@Param('issuer') issuer: string): Promise<MultisigConfig> {
+  async getMultisigConfig(
+    @Param('issuer') issuer: string,
+  ): Promise<MultisigConfigResponse> {
     try {
       const config = await this.multisigService.getMultisigConfig(issuer);
       return config;
@@ -229,7 +237,9 @@ export class MultisigController {
 
   @Get('request/:requestId')
   @Roles(UserRole.ADMIN, UserRole.ISSUER, UserRole.USER)
-  async getPendingRequest(@Param('requestId') requestId: string): Promise<PendingRequest> {
+  async getPendingRequest(
+    @Param('requestId') requestId: string,
+  ): Promise<PendingRequestResponse> {
     try {
       const request = await this.multisigService.getPendingRequest(requestId);
       return request;
@@ -248,7 +258,7 @@ export class MultisigController {
     @Param('issuer') issuer: string,
     @Query('page') page: number = 0,
     @Query('limit') limit: number = 20,
-  ): Promise<PaginatedResult> {
+  ): Promise<PaginatedPendingRequestsResponse> {
     try {
       const pagination: Pagination = {
         page: Number(page),
@@ -277,7 +287,7 @@ export class MultisigController {
     @Param('signer') signer: string,
     @Query('page') page: number = 0,
     @Query('limit') limit: number = 20,
-  ): Promise<PaginatedResult> {
+  ): Promise<PaginatedPendingRequestsResponse> {
     try {
       const pagination: Pagination = {
         page: Number(page),
@@ -304,7 +314,7 @@ export class MultisigController {
   @Roles(UserRole.ADMIN, UserRole.ISSUER, UserRole.USER)
   async isRequestExpired(
     @Param('requestId') requestId: string,
-  ): Promise<{ expired: boolean }> {
+  ): Promise<ExpiredResponse> {
     try {
       const expired = await this.multisigService.isRequestExpired(requestId);
       return { expired };
@@ -324,7 +334,7 @@ export class MultisigController {
   @Roles(UserRole.ADMIN, UserRole.ISSUER, UserRole.USER)
   async getRequestStatus(
     @Param('requestId') requestId: string,
-  ): Promise<{ status: RequestStatus }> {
+  ): Promise<RequestStatusResponse> {
     try {
       const request = await this.multisigService.getPendingRequest(requestId);
       return { status: request.status };
