@@ -70,7 +70,7 @@ export class IssueCertificateDto {
   verificationCode?: string;
 
   @ApiPropertyOptional({
-    description: 'Certificate expiration date (ISO 8601)',
+    description: 'Certificate expiration date (ISO 8601, UTC)',
   })
   @IsOptional()
   @IsDateString()

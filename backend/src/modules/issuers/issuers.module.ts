@@ -12,5 +12,6 @@ import { IssuersController } from './issuers.controller';
   ],
   providers: [IssuersService],
   controllers: [IssuersController],
+  exports: [IssuersService],
 })
 export class IssuersModule {}

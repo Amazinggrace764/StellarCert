@@ -17,7 +17,7 @@ describe('frontend api endpoints', () => {
       },
     ];
 
-    global.fetch = vi.fn().mockResolvedValue({
+    global.fetch = vi.fn().mockResolved({
       ok: true,
       status: 200,
       json: async () => mockResponse,
@@ -42,25 +42,25 @@ describe('frontend api endpoints', () => {
       role: 'issuer',
     };
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce({
+      .mockResolvedOnce({
         ok: false,
         status: 401,
         statusText: 'Unauthorized',
         json: async () => ({ message: 'Unauthorized', statusCode: 401 }),
       })
-      .mockResolvedValueOnce({
+      .mockResolvedOnce({
         ok: true,
         status: 200,
         json: async () => ({ accessToken: 'fresh-token', user: refreshedUser }),
       })
-      .mockResolvedValueOnce({
+      .mockResolvedOnce({
         ok: true,
         status: 200,
         json: async () => ({ result: 'success' }),
       });
     global.fetch = fetchMock as unknown as typeof global.fetch;
 
-    await expect(endpoints.apiClient('/protected')).resolves.toEqual({ result: 'success' });
+    await expect(endpoints.apiClient('/protected')).toResolveToEqual({ result: 'success' });
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(fetchMock.mock.calls[0][1]?.headers).toBeInstanceOf(Headers);
@@ -69,7 +69,7 @@ describe('frontend api endpoints', () => {
   });
 
   it('encodes reserved characters in certificate serial numbers', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
+    const fetchMock = vi.fn().mockResolved({
       ok: true,
       status: 200,
       json: async () => ({ isValid: true }),
@@ -82,4 +82,25 @@ describe('frontend api endpoints', () => {
       '/certificates/verify/serial%20%2F%3F%23',
     );
   });
-});
+
+  it('exposes a single dashboard stats fetcher that hits the canonical endpoint', async () => {
+    const fetchMock = vi.fn().mockResolved({
+      ok: true,
+      status: 200,
+      json: async () => ({ totalCertificates: 0 }),
+    });
+    global.fetch = fetchMock as unknown as typeof global.fetch;
+
+    await endpoints.dashboardApi.getStats();
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const url = String(fetchMock.mock.calls[0][0]);
+    expect(url).toContain('/admin/analytics/dashboard');
+    expect(url).not.toMatch(/\/admin\/analytics\/?$/);
+  });
+
+  it('does not expose a duplicate dashboard summary fetcher', () => {
+    const analyticsApi = (endpoints as Record<string, unknown>).analyticsApi as Record<string, unknown> | undefined;
+    expect(analyticsApi?.getDashboardSummary).toBeUndefined();
+  });
+})
