@@ -1,4 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
+import { IsInt, IsIn, IsOptional, Max, Min } from 'class-validator';
 import { IssuerTier } from '../../../common/rate-limiting/rate-limit.types';
 
 export class IssuerPaginationQueryDto {
@@ -8,6 +10,10 @@ export class IssuerPaginationQueryDto {
     default: 1,
     minimum: 1,
   })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
   page?: number = 1;
 
   @ApiPropertyOptional({
@@ -17,12 +23,19 @@ export class IssuerPaginationQueryDto {
     minimum: 1,
     maximum: 100,
   })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
   limit?: number = 20;
 
   @ApiPropertyOptional({
     description: 'Field to sort by',
     example: 'createdAt',
   })
+  @Type(() => String)
+  @IsIn(['createdAt', 'updatedAt', 'name', 'stellarPublicKey', 'tier', 'certificateCount'])
   sortBy?: string = 'createdAt';
 
   @ApiPropertyOptional({
@@ -30,24 +43,29 @@ export class IssuerPaginationQueryDto {
     enum: ['ASC', 'DESC'],
     default: 'DESC',
   })
+  @Type(() => String)
+  @IsIn(['ASC', 'DESC'])
   sortOrder?: 'ASC' | 'DESC' = 'DESC';
 
   @ApiPropertyOptional({
     description: 'Filter by active status',
     example: true,
   })
+  @Type(() => Boolean)
   isActive?: boolean;
 
   @ApiPropertyOptional({
     description: 'Search term for name or stellar public key',
     example: 'example',
   })
+  @Type(() => String)
   search?: string;
 
   @ApiPropertyOptional({
     description: 'Filter by tier',
     enum: IssuerTier,
   })
+  @IsIn(Object.values(IssuerTier))
   tier?: IssuerTier;
 }
 

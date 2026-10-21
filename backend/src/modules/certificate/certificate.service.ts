@@ -1,6 +1,7 @@
+import { BadRequestException as _BadRequestException } from '@nestjs/common';
 import {
-  Injectable,
   BadRequestException,
+  BadGatewayException,
   ConflictException,
   ForbiddenException,
   Logger,
@@ -8,6 +9,7 @@ import {
   InternalServerErrorException,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import * as QRCode from 'qrcode';
@@ -19,14 +21,14 @@ import { SearchCertificatesDto } from './dto/search-certificates.dto';
 import { Certificate } from './entities/certificate.entity';
 import { Verification } from './entities/verification.entity';
 import { CertificateStatus } from './constants/certificate-status.enum';
-import { User } from '../users/entities/user.entity';
+import { User, UserRole } from '../users/entities/user.entity';
 import { DuplicateDetectionService } from './services/duplicate-detection.service';
 import { DuplicateDetectionConfig } from './interfaces/duplicate-detection.interface';
 import { WebhooksService } from '../webhooks/webhooks.service';
 import { WebhookEvent } from '../webhooks/entities/webhook-subscription.entity';
 import { MetadataSchemaService } from '../metadata-schema/services/metadata-schema.service';
-import { UserRole } from '../users/entities/user.entity';
 import { SorobanService } from '../stellar/services/soroban.service';
+import { IssuersService } from '../issuers/issuers.service';
 import { MAX_EXPORT_LIMIT, MAX_PAGE_LIMIT } from './dto/export-filters.dto';
 import { ConfigService } from '@nestjs/config';
 import { CryptoUtils } from '../../common/utils/crypto.utils';
@@ -50,6 +52,7 @@ export class CertificateService {
     private readonly dataSource: DataSource,
     private readonly sorobanService: SorobanService,
     private readonly configService: ConfigService,
+    private readonly issuersService: IssuersService,
   ) {}
 
   async create(
@@ -230,6 +233,28 @@ export class CertificateService {
         );
       }
       // ── End on-chain issuance ─────────────────────────────────────────────
+
+      // ── Increment issuer certificate counter ──────────────────────────────
+      // Wire the issuance flow to the issuer stats counter so the UI reflects
+      // the real number of certificates issued. This runs after the DB row is
+      // committed; a counter failure must not fail the issuance (the
+      // certificate already exists), so it is logged and swallowed.
+      if (savedCertificate.issuerId) {
+        try {
+          await this.issuersService.incrementCertificateCount(
+            savedCertificate.issuerId,
+          );
+        } catch (counterError: any) {
+          this.logger.error(
+            `Failed to increment certificate count for issuer ${savedCertificate.issuerId}: ${counterError.message}`,
+            counterError.stack,
+          );
+        }
+      } else {
+        this.logger.warn(
+          `Certificate ${savedCertificate.id} has no issuerId — issuer certificate count not incremented`,
+        );
+      }
 
       // Trigger webhook event (outside transaction)
       await this.webhooksService.triggerEvent(
@@ -828,7 +853,7 @@ export class CertificateService {
       cert.courseName,
       cert.issuerName ??
         (cert.issuer
-          ? `${cert.issuer.firstName ?? ''} ${cert.issuer.lastName ?? ''}`.trim() ||
+          ? `${('firstName' in cert.issuer ? cert.issuer.firstName : '') ?? ''} ${('lastName' in cert.issuer ? cert.issuer.lastName : '') ?? ''}`.trim() ||
             'Unknown'
           : 'Unknown'),
       cert.issuedAt.toISOString().split('T')[0],
@@ -959,14 +984,25 @@ export class CertificateService {
 
   async getCertificateQrCode(id: string): Promise<any> {
     const certificate = await this.findOne(id);
-    const verificationUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/verify/${certificate.verificationCode}`;
-    const qrCode = await QRCode.toDataURL(verificationUrl);
-    return {
-      id: certificate.id,
-      verificationCode: certificate.verificationCode,
-      qrCode,
-      verificationUrl,
-    };
+    const verificationCode = certificate.verificationCode ?? certificate.id;
+    const verificationUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/verify/${verificationCode}`;
+    try {
+      const qrCode = await QRCode.toDataURL(verificationUrl);
+      return {
+        id: certificate.id,
+        verificationCode,
+        qrCode,
+        verificationUrl,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Failed to generate QR code for certificate ${certificate.id}: ${error.message}`,
+        error.stack,
+      );
+      throw new InternalServerErrorException(
+        `Failed to generate QR code for certificate ${certificate.id}`,
+      );
+    }
   }
 
   async getStellarTransactionData(id: string): Promise<any> {
@@ -1001,6 +1037,7 @@ export class CertificateService {
     ipAddress: string,
     userAgent: string,
   ): Promise<Certificate> {
+    this.assertIssueDateNotInFuture(dto.issuedAt);
     // Override issuerId with the authenticated user's ID (users table)
     const dtoWithUserId = { ...dto, issuerId: userId } as CreateCertificateDto;
     return this.create(
@@ -1010,6 +1047,42 @@ export class CertificateService {
       ipAddress,
       userAgent,
     );
+  }
+
+  /**
+   * Reject an issue date that lies in the future relative to UTC.
+   *
+   * The client-side form compares `issueDate > today` using the browser's
+   * local timezone, while the server persists and validates against UTC.
+   * A certificate created late in the day in a negative-offset timezone
+   * (e.g. 11 PM UTC-5) can therefore pass client validation but be rejected
+   * by the server, surfacing a confusing error. Enforcing the boundary here
+   * — at the owning service — keeps the two checks consistent and gives the
+   * caller a clear message.
+   *
+   * A small tolerance (default 5 minutes) absorbs clock skew between the
+   * client and server without allowing genuinely future dates through.
+   *
+   * @throws BadRequestException when `issuedAt` is later than now + tolerance
+   */
+  private assertIssueDateNotInFuture(issuedAt?: Date | string | null): void {
+    if (issuedAt === undefined || issuedAt === null) {
+      return;
+    }
+
+    const parsed =
+      issuedAt instanceof Date ? issuedAt : new Date(issuedAt as string);
+    if (Number.isNaN(parsed.getTime())) {
+      throw new BadRequestException('issuedAt must be a valid date');
+    }
+
+    const toleranceMs = 5 * 60 * 1000;
+    const nowUtcMs = Date.now();
+    if (parsed.getTime() > nowUtcMs + toleranceMs) {
+      throw new BadRequestException(
+        'issuedAt cannot be in the future (validated against UTC)',
+      );
+    }
   }
 
   /**
@@ -1050,6 +1123,7 @@ export class CertificateService {
   ): Promise<Certificate> {
     const certificate = await this.findOne(id);
     this.assertCertificateOwnership(certificate, userId, userRole);
+    this.assertIssueDateNotInFuture(updateCertificateDto.issuedAt);
     Object.assign(certificate, updateCertificateDto);
     return this.certificateRepository.save(certificate);
   }
