@@ -8,12 +8,14 @@ import { UserRepository } from '../repositories/user.repository';
 import { UpdateProfileDto } from '../dto/update-profile.dto';
 import { IUserPublic } from '../interfaces/user.interface';
 import { LoggingService } from '../../../common/logging/logging.service';
+import { StorageService } from '../../files/services/storage.service';
 
 @Injectable()
 export class UserProfileService {
   constructor(
     private readonly userRepository: UserRepository,
     private readonly logger: LoggingService,
+    private readonly storageService: StorageService,
   ) {}
 
   async getProfile(userId: string): Promise<User> {
@@ -87,18 +89,40 @@ export class UserProfileService {
     return { message: 'Account deactivated successfully' };
   }
 
-  private toPublicUser(user: User): IUserPublic {
+  /**
+   * Maps a User entity to the public representation.
+   *
+   * `user.profilePicture` stores the S3 object key. The public field
+   * `profilePicture` exposes a freshly signed URL so clients always receive
+   * a valid, reachable URL. The object key is also exposed as
+   * `profilePictureKey` for clients that need to reference it directly.
+   */
+  private async toPublicUser(user: User): Promise<IUserPublic> {
+    const profilePictureKey = user.profilePicture || null;
+    const profilePictureUrl = await this.storageService.getSignedUrlOrNull(
+      profilePictureKey,
+    );
+
     return {
       id: user.id,
       email: user.email,
       username: user.username,
       firstName: user.firstName,
       lastName: user.lastName,
-      profilePicture: user.profilePicture,
+      profilePicture: profilePictureUrl,
+      profilePictureKey,
       role: user.role,
       stellarPublicKey: user.stellarPublicKey,
       isEmailVerified: user.isEmailVerified,
       createdAt: user.createdAt,
     };
+  }
+
+  /**
+   * Public accessor for controllers that need to return a sanitized user
+   * payload with a freshly signed profile picture URL.
+   */
+  async toPublicUserResponse(user: User): Promise<IUserPublic> {
+    return this.toPublicUser(user);
   }
 }

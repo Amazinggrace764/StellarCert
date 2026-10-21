@@ -39,8 +39,8 @@ export class UserResponseDto {
   phone?: string;
 
   @ApiPropertyOptional({
-    description: 'Profile picture URL',
-    example: 'https://example.com/profile.jpg',
+    description: 'Profile picture S3 object key (URLs are generated on-demand)',
+    example: 'profile-pictures/123e4567-e89b-12d3-a456-426614174000.jpg',
   })
   profilePicture?: string;
 
