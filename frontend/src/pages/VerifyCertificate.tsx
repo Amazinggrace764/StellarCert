@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import type { JSX } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Html5QrcodeScanner } from 'html5-qrcode';
+import type { Html5QrcodeScanner } from 'html5-qrcode';
 import { CheckCircle, AlertTriangle } from 'lucide-react';
 import { VerificationResult } from '../api';
 import { useVerifyCertificateQuery } from '../api/queries';
@@ -111,35 +111,39 @@ export default function VerifyCertificate(): JSX.Element {
     return () => window.clearTimeout(timeoutId);
   }, [toast]);
 
-  // Initialize QR scanner
+  // Initialize QR scanner lazily only when the user opens the scanner
   useEffect(() => {
-    if (showQrScanner && !qrScannerRef.current) {
-      qrScannerRef.current = new Html5QrcodeScanner(
-        'qr-reader',
-        {
-          fps: 10,
-          qrbox: { width: 250, height: 250 },
-          aspectRatio: 1.0,
-        },
-        false
-      );
+    let cancelled = false;
 
-      qrScannerRef.current.render(
-        (decodedText) => {
-          setSerial(decodedText);
-          setShowQrScanner(false);
-          qrScannerRef.current?.clear();
-          qrScannerRef.current = null;
-        },
-        () => {
-          // Called continuously while no QR code is in view; intentionally
-          // ignored rather than surfaced, since it fires on nearly every
-          // scan frame and isn't a user-actionable error.
-        }
-      );
+    if (showQrScanner && !qrScannerRef.current) {
+      void import('html5-qrcode').then(({ Html5QrcodeScanner: ScannerCtor }) => {
+        if (cancelled || qrScannerRef.current) return;
+        const scanner = new ScannerCtor(
+          'qr-reader',
+          {
+            fps: 10,
+            qrbox: { width: 250, height: 250 },
+            aspectRatio: 1.0,
+          },
+          false
+        );
+        qrScannerRef.current = scanner;
+        scanner.render(
+          (decodedText) => {
+            setSerial(decodedText);
+            setShowQrScanner(false);
+            qrScannerRef.current?.clear();
+            qrScannerRef.current = null;
+          },
+          () => {
+            // Ignored frame-level scan miss
+          }
+        );
+      });
     }
 
     return () => {
+      cancelled = true;
       if (qrScannerRef.current) {
         qrScannerRef.current.clear();
         qrScannerRef.current = null;
