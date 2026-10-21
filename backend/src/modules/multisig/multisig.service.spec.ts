@@ -5,6 +5,8 @@ import { MultisigModule } from './multisig.module';
 import { StellarService } from '../stellar/services/stellar.service';
 import { LoggingService } from '../../common/logging/logging.service';
 import { rpc, xdr } from '@stellar/stellar-sdk';
+import { plainToInstance } from 'class-transformer';
+import { ProposeCertificateDto } from './dto/propose-certificate.dto';
 
 describe('MultisigService', () => {
   let service: MultisigService;
@@ -54,10 +56,10 @@ describe('MultisigService', () => {
       const success = { status: rpc.Api.GetTransactionStatus.SUCCESS };
       const getTransaction = jest
         .fn()
-        .mockResolvedValueOnce({
+        .mockResolvedOnce({
           status: rpc.Api.GetTransactionStatus.NOT_FOUND,
         })
-        .mockResolvedValueOnce(success);
+        .mockResolvedOnce(success);
 
       const internals = service as unknown as {
         server: { getTransaction: jest.Mock };
@@ -73,7 +75,7 @@ describe('MultisigService', () => {
           maxAttempts: 3,
           intervalMs: 0,
         }),
-      ).resolves.toBe(success);
+      ).resolvesToBe(success);
       expect(getTransaction).toHaveBeenCalledTimes(2);
     });
 
