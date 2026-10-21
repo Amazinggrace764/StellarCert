@@ -40,8 +40,11 @@ export class StorageService implements OnModuleInit {
     // instead of aborting it, so a missing S3/MinIO config cannot take down
     // the whole application.
     const storageRequiredValue = this.configService.get('STORAGE_REQUIRED');
+    // Only treat storage as required when explicitly opted in. An absent flag
+    // (fresh .env that never set STORAGE_REQUIRED) must default to non-fatal.
     this.isStorageRequired =
-      storageRequiredValue === true || storageRequiredValue === 'true';
+      storageRequiredValue === true ||
+      String(storageRequiredValue).toLowerCase() === 'true';
 
     const region = this.configService.get<string>('STORAGE_REGION');
     const endpoint = this.configService.get<string>('STORAGE_ENDPOINT');
