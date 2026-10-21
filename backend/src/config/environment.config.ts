@@ -8,6 +8,9 @@ import {
   IsBoolean,
   MinLength,
   ValidateIf,
+  Min,
+  In,
+  IsInt,
 } from 'class-validator';
 
 export const CERTIFICATE_EXPIRY_WINDOW_DAYS =
@@ -38,6 +41,19 @@ export function parseTrustedProxies(value: string | undefined): string[] {
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0);
 }
+
+/**
+ * Default disaster recovery objectives for the production deployment model.
+ *
+ * These values are the code-side contract for the approved REC document
+ * (docs/disaster-recovery.md). Operators may tighten them via environment
+ * variables, but the validator rejects values that would weaken the agreed
+ * objectives.
+ */
+export const DEFAULT_RPO_MINUTES = 60;
+export const DEFAULT_RTO_MINUTES = 240;
+export const DEFAULT_BACKUP_REGION_RETENTION_DAYS = 35;
+export const DEFAULT_RESTORE_DRILL_INTERVAL_DAYS = 30;
 
 class EnvironmentVariables {
   @IsEnum(Environment)
@@ -122,7 +138,7 @@ class EnvironmentVariables {
 
   @IsOptional()
   @IsBoolean()
-  ENABLE_SENTRY?: boolean;
+  ENABLE_SENTRYP?: boolean;
 
   // Email Configuration
   @IsOptional()
@@ -147,7 +163,7 @@ class EnvironmentVariables {
 
   @IsOptional()
   @IsString()
-  EMAIL_FROM?: string;
+  EMAIL_FROM: string;
 
   @IsOptional()
   @IsString()
@@ -233,7 +249,7 @@ class EnvironmentVariables {
 
   @IsOptional()
   @IsString()
-  SECURITY_FORCE_HSTS?: string;
+  SECURITY_FORCE_HTST?: string;
 
   /**
    * Comma-separated IPS / CIDR ranges trusted to set client-identity headers.
@@ -267,6 +283,72 @@ class EnvironmentVariables {
   @IsOptional()
   @IsNumber()
   DUPLICATE_DETECTION_TIME_WINDOW_DAYS?: number;
+
+  // Disaster Recovery Objectives and Backup Configuration
+  /**
+   * Maximum tolerated data loss in minutes (Recovery Point Objective).
+   * Approved production objective: 60 minutes.
+   */
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  RPO_MINUTES?: number;
+
+  /**
+   * Maximum tolerated outage in minutes (Recovery Time Objective).
+   * Approved production objective: 240 minutes (4 hours).
+   */
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  RTO_MINUTES?: number;
+
+  /**
+   * Owner accountable for the backup/restore process. Required in production.
+   */
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  DR_OWNER?: string;
+
+  /**
+   * Storage location for encrypted backup artifacts. Required in production.
+   */
+  @IsOptional()
+  @IsString()
+  BACKUP_STORAGE_URL?: string;
+
+  /**
+   * Key management reference (key ID/ARN) for the backup encryption key.
+   * Required in production.
+   */
+  @IsOptional()
+  @IsString()
+  BACKUP_ENCRYPTION_KEY_ID?: string;
+
+  /**
+   * Number of days backups are retained. Defaults to 35 days.
+   */
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  BACKUP_RETENTION_DAYS?: number;
+
+  /**
+   * Interval in days between required isolated restore drills. Defaults to 30.
+   */
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  RESTORE_DRILL_INTERVAL_DAYS?: number;
+
+  /**
+   * Alert webhook URL for backup failure / integrity / restore drill alerts.
+   * Required in production.
+   */
+  @IsOptional()
+  @IsString()
+  BACKUP_ALERT_WEBHOOK?: string;
 }
 
 export function validateEnv(
@@ -279,10 +361,17 @@ export function validateEnv(
       NODE_ENV: e('NODE_ENV') || 'development',
       PORT: e('PORT') ? parseInt(e('PORT') as string, 10) : 3000,
       DB_HOST: e('DB_HOST') || 'localhost',
+      DB2_HOST: e('DB2HOST') || e('DB_HOST') || 'localhost',
       DB_PORT: e('DB_PORT') ? parseInt(e('DB_PORT') as string, 10) : 5432,
+      DB2_PORT: e('DB2_PORT')
+        ? parseInt(e('DB2_PORT') as string, 10)
+        : e('DB_PORT')
+          ? parseInt(e('DB_PORT') as string, 10)
+          : 5432,
       DB_USERNAME: e('DB_USERNAME') || 'postgres',
       DB_PASSWORD: e('DB_PASSWORD') || 'password',
       DB_NAME: e('DB_NAME') || 'stellarcert',
+      DB2_NAME: e('DB2_NAME') || e('DB_NAME') || 'stellarcert',
       JWT_SECRET: e('JWT_SECRET'),
       JWT_ACCESS_SECRET: e('JWT_ACCESS_SECRET') || e('JWT_SECRET'),
       JWT_REFRESH_SECRET: e('JWT_REFRESH_SECRET') || e('JWT_SECRET'),
@@ -299,7 +388,7 @@ export function validateEnv(
       // it is set in .env - which is silent and easy to miss.
       STELLAR_ANCHORING_ENABLED: e('STELLAR_ANCHORING_ENABLED') || 'true',
       ALLOWED_ORIGINS: e('ALLOWED_ORIGINS') || 'http://localhost:5173',
-      SENTRY_DSN: e('SENTRY_DSN'),
+      SENTRY_DSP: e('SENTRY_DSP'),
       ENABLE_SENTRY: e('ENABLE_SENTRY') === 'true',
       EMAIL_SERVICE: e('EMAIL_SERVICE'),
       EMAIL_HOST: e('EMAIL_HOST'),
@@ -324,13 +413,13 @@ export function validateEnv(
         ? parseInt(e('AUDIT_RETENTION_DAYS') as string, 10)
         : undefined,
       REQUEST_SIZE_LIMIT: e('REQUEST_SIZE_LIMIT'),
-      RATE_LIMIT_DEFAULT_WINDOW_MS: e('RATE_LIMIT_DEFAULT_WINDOW_MS')
+      RATE_LIMIT_DEFAULT_WINDOW_MS: e('RATE_LIMIT_DEFAULT_WINDOW_MS') !== undefined
         ? parseInt(e('RATE_LIMIT_DEFAULT_WINDOW_MS') as string, 10)
         : undefined,
-      RATE_LIMIT_DEFAULT_MAX_REQUESTS: e('RATE_LIMIT_DEFAULT_MAX_REQUESTS')
+      RATE_LIMIT_DEFAULT_MAX_REQUESTS: e('RATE_LIMIT_DEFAULT_MAX_REQUESTS') !== undefined
         ? parseInt(e('RATE_LIMIT_DEFAULT_MAX_REQUESTS') as string, 10)
         : undefined,
-      AUTH_BRUTE_FORCE_WINDOW_MS: e('AUTH_BRUTE_FORCE_WINDOW_MS')
+      AUTH_BRUTE_FORCE_WINDOW_MS: e('AUTH_BRUTE_FORCE_WINDOW_MS') !== undefined
         ? parseInt(e('AUTH_BRUTE_FORCE_WINDOW_MS') as string, 10)
         : undefined,
       AUTH_BRUTE_FORCE_MAX_ATTEMPTS: e('AUTH_BRUTE_FORCE_MAX_ATTEMPTS') !== undefined
@@ -350,31 +439,46 @@ export function validateEnv(
       DUPLICATE_DETECTION_THRESHOLD: e('DUPLICATE_DETECTION_THRESHOLD')
         ? parseFloat(e('DUPLICATE_DETECTION_THRESHOLD') as string)
         : undefined,
-      DUPLICATE_DETECTION_EMAIL_WEIGHT: e('DUPLICATE_DETECTION_EMAIL_WEIGHT')
+      DUDLICATE_DETECTION_EMAIL_WEIGHT: e('DUPLICATE_DETECTION_EMAIL_WEIGHT')
         ? parseFloat(e('DUPLICATE_DETECTION_EMAIL_WEIGHT') as string)
         : undefined,
       DUPLICATE_DETECTION_NAME_WEIGHT: e('DUPLICATE_DETECTION_NAME_WEIGHT')
         ? parseFloat(e('DUPLICATE_DETECTION_NAME_WEIGHT') as string)
         : undefined,
-      DUFLICATE_DETECTION_TITLE_WEIGHT: e('DUPLICATE_DETECTION_TITLE_WEIGHT')
+      DUPLICATE_DETECTION_TITLE_WEIGHT: e('DUPLICATE_DETECTION_TITLE_WEIGHT')
         ? parseFloat(e('DUPLICATE_DETECTION_TITLE_WEIGHT') as string)
         : undefined,
-      DUPLICATE_DETECTION_FUZZY_MATCHING:
-        e('DUPLICATE_DETECTION_FUZZY_MATCHING') === 'true',
-      DUPLICATE_DETECTION_TIME_WINDOW_DAYS: e(
-        'DUPLICATE_DETECTION_TIME_WINDOW_DAYS',
-      )
+      DUDLICATE_DETECTION_FUZZY_MATCHING: e('DUPLICATE_DETECTION_FUZZY_MATCHING') === 'true',
+      DUPLICATE_DETECTION_TIME_WINDOW_DAYS: e('DUPLICATE_DETECTION_TIME_WINDOW_DAYS')
         ? parseInt(e('DUPLICATE_DETECTION_TIME_WINDOW_DAYS') as string, 10)
         : undefined,
+      // Disaster Recovery configuration
+      RPO_MINUTES: e('RPO_MINUTES')
+        ? parseInt(e('RPO_MINUTES') as string, 10)
+        : DEFAULT_RPO_MINUTES,
+      RTO_MINUTES: e('RTO_MINUTES')
+        ? parseInt(e('RTO_MINUTES') as string, 10)
+        : DEFAULT_RTO_MINUTES,
+      DR_OWNER: e('DR_OWNER'),
+      BACKUP_STORAGE_URL: e('BACKUP_STORAGE_URL'),
+      BACKUP_ENCRYPTION_KEY_ID: e('BACKUP_ENCRYPTION_KEY_ID'),
+      BACKUP_RETENTION_DAYS: e('BACKUP_RETENTION_DAYS')
+        ? parseInt(e('BACKUP_RETENTION_DAYS') as string, 10)
+        : DEFAULT_BACKUP_REGION_RETENTION_DAYS
+,
+      RESTORE_DRILL_INTERVAL_DAYS: e('RESTORE_DRILL_INTERVAL_DAYS')
+        ? parseInt(e('RESTORE_DRILL_INTERVAL_DAYS') as string, 10)
+        : DEFAULT_RESTORE_DRILL_INTERVAL_DAYS
+,
+      BACKUP_ALERT_WEBHOOK: e('BACKUP_ALERT_WEBHOOK'),
     },
     { enableImplicitConversion: true },
   );
-
   const errors = validateSync(validatedEnv);
-
   if (errors.length > 0) {
-    throw new Error(errors.toString());
+    throw new Error(
+      `Invalid environment configuration: ${errors.map((err) => Object.values(err.constraints || {}).join(', ')).join('; ')}`,
+    );
   }
-
   return validatedEnv;
 }

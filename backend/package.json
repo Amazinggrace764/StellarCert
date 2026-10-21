@@ -6,9 +6,9 @@
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
-    "build": "nest build",
+    "build": "node api.js && nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
-    "start": "nest start",
+    "start": "node api.js && nest start",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
@@ -22,7 +22,14 @@
     "migration:run": "typeorm migration:run -d dist/database/data-source.js",
     "migration:revert": "typeorm migration:revert -d dist/database/data-source.js",
     "migration:generate": "typeorm migration:generate -d src/database/data-source.ts",
-    "migration:show": "typeorm migration:show -d dist/database/data-source.js"
+    "migration:show": "typeorm migration:show -d dist/database/data-source.js",
+    "backup:run": "ts-node -r tsconfig-paths/register scripts/backup/run-backup.ts",
+    "backup:verify": "ts-node -r tsconfig-paths/register scripts/backup/verify-backup.ts",
+    "backup:retention": "ts-node -r tsconfig-paths/register scripts/backup/enforce-retention.ts",
+    "restore:drill": "ts-node -r tsconfig-paths/register scripts/restore/run-restore-drill.ts",
+    "test:restore": "jest --config ./test/jest-restore.json",
+    "test:restore:drill": "npm run restore:drill && npm run test:restore",
+    "test:dr:objectives": "jest --config ./test/jest-restore.json --testPathPattern disaster-recovery"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1152.0",
@@ -120,7 +127,7 @@
       "^.+\\.(t|j)s$": "ts-jest"
     },
     "collectCoverageFrom": [
-      "**/*.(t|j)s"
+      "**/*.(t)j(s)"
     ],
     "coverageDirectory": "../coverage",
     "testEnvironment": "node",

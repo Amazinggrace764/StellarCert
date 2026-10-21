@@ -4,6 +4,8 @@ import {
   PrimaryGeneratedColumn,
   CreateDateColumn,
   UpdateDateColumn,
+  DeleteDateColumn,
+  VersionColumn,
   ManyToOne,
   JoinColumn,
   Index,
@@ -119,6 +121,15 @@ export class Certificate {
   @Column({ type: 'bigint', nullable: true })
   stellarSequenceNumber?: string;
 
+  // Ledger reconciliation fields: capture the Soroban ledger state observed at
+  // write time so a restored database can be reconciled against chain state.
+  @Column({ type: 'bigint', nullable: true })
+  @Index()
+  stellarLedgerSequence?: string;
+
+  @Column({ type: 'timestamp', nullable: true })
+  stellarLedgerClosedAt?: Date;
+
   @Column({ nullable: true, unique: true })
   @Index()
   verificationCode?: string;
@@ -162,6 +173,17 @@ export class Certificate {
   @UpdateDateColumn()
   updatedAt: Date;
 
+  // Soft-delete marker used by the recovery drill to detect records that were
+  // removed after the backup was taken (and must not be resurrected).
+  @DeleteDateColumn({ nullable: true })
+  @Index()
+  deletedAt?: Date;
+
+  // Optimistic-lock version so post-restore reconciliation can detect rows
+  // that diverged from the ledger between backup and restore.
+  @VersionColumn()
+  version: number;
+
   @ManyToOne(() => User, { nullable: true })
   @JoinColumn({ name: 'issuerId' })
   issuer: User;
@@ -196,5 +218,25 @@ export class Certificate {
       userAgent,
     });
     this.verificationCount = (this.verificationCount ?? 0) + 1;
+  }
+
+  /**
+   * Returns true when the certificate's persisted ledger reference matches the
+   * supplied on-chain ledger sequence. Used by the isolated restore drill to
+   * verify chain reconciliation without touching production.
+   */
+  isReconciledWithLedger(ledgerSequence: string): boolean {
+    if (!this.stellarLedgerSequence) return false;
+    return String(this.stellarLedgerSequence) === String(ledgerSequence);
+  }
+
+  /**
+   * Returns true when the certificate was soft-deleted after the backup was
+   * taken. The isolated restore drill uses this to avoid resurrecting records
+   * that were intentionally removed and to flag rows needing reconciliation.
+   */
+  wasDeletedAfterBackup(backupTakenAt: Date): boolean {
+    if (!this.deletedAt) return false;
+    return this.deletedAt.getTime() > backupTakenAt.getTime();
   }
 }
