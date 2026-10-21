@@ -1,4 +1,4 @@
-/**
+/*
  * Issue #721 / #722 – polling and real result handling helpers.
  * Issue #723 – MultisigModule must be wired into AppModule.
  */
