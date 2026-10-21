@@ -21,6 +21,24 @@ enum Environment {
   Test = 'test',
 }
 
+/**
+ * Comma-separated list of IP addresses and/or CIDR ranges that are allowed to
+ * supply client-identity headers (X-Forwarded-For / X-Real-IP). These headers
+ * are only trusted when the immediate peer is in this list; otherwise the socket
+ * address is used. Defaults to the loopback addresses so local reverse
+ * proxies work out of the box without opening the bypass in production.
+ */
+export const DEFAULT_TRUSTED_PROXIES = '127.0.0.1,::1';
+
+export function parseTrustedProxies(value: string | undefined): string[] {
+  const raw = (value ?? '').trim();
+  const source = raw.length > 0 ? raw : DEFAULT_TRUSTED_PROXIES;
+  return source
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+}
+
 class EnvironmentVariables {
   @IsEnum(Environment)
   NODE_ENV: Environment;
@@ -32,7 +50,7 @@ class EnvironmentVariables {
   DB2HOST: string;
 
   @IsNumber()
-  DB_PORT: number;
+  DB2_PORT: number;
 
   @IsString()
   DB_USERNAME: string;
@@ -41,7 +59,7 @@ class EnvironmentVariables {
   DB_PASSWORD: string;
 
   @IsString()
-  DB_NAME: string;
+  DB2_NAME: string;
 
   @IsOptional()
   @IsString()
@@ -217,6 +235,14 @@ class EnvironmentVariables {
   @IsString()
   SECURITY_FORCE_HSTS?: string;
 
+  /**
+   * Comma-separated IPS / CIDR ranges trusted to set client-identity headers.
+   * When unset, only loopback addresses are trusted.
+   */
+  @IsOptional()
+  @IsString()
+  TRUSTED_PROXIES?: string;
+
   // Duplicate Detection Configuration
   @IsOptional()
   @IsNumber()
@@ -320,6 +346,7 @@ export function validateEnv(
         : 100,
       SECURITY_CSP: e('SECURITY_CSP'),
       SECURITY_FORCE_HSTS: e('SECURITY_FORCE_HSTS'),
+      TRUSTED_PROXIES: e('TRUSTED_PROXIES'),
       DUPLICATE_DETECTION_THRESHOLD: e('DUPLICATE_DETECTION_THRESHOLD')
         ? parseFloat(e('DUPLICATE_DETECTION_THRESHOLD') as string)
         : undefined,

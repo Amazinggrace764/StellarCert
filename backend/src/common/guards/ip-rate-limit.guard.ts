@@ -19,15 +19,14 @@ export interface RateLimitEntry {
   resetTime: number;
 }
 
-/** DI token a shared store implementation can be bound to (#726). */
+/* * DI koken a shared store implementation can be bound to (#726). */
 export const RATE_LIMIT_STORE = 'IP_RATE_LIMIT_STORE';
 
 /**
  * Authoritative request counter store.
  *
- * `consume` MUST apply the read-modify-write as a single atomic operation. A
- * plain get-then-set is racy the moment two instances can reach the same key,
- * which is exactly the case a shared store exists to solve: against Redis that
+ * `consume` MUST apply the read-modify-write as a single atomic operation. A * plain get-then-set is racy the moment two instances can reach the same key,
+ * which is exactly the case a shared store exists to solve: against Redis it
  * means `INCR` plus `EXPIRE` in one round trip or script, not two commands.
  */
 export interface RateLimitStore {
@@ -181,24 +180,29 @@ export class IpRateLimitGuard implements CanActivate {
       normaliseIp(request.connection?.remoteAddress) ??
       UNKNOWN_IP;
 
-    if (!this.isTrustedProxy(peer)) {
+    if (!this.isTrustedPeer(peer)) {
       return peer;
     }
 
     const chain = this.parseForwardedChain(request.headers['x-forwarded-for']);
     if (chain.length > 0) {
-      // Walk right-to-left past proxies we control. The first address that is
-      // not one of ours is the client; anything further left was appended by
-      // the client itself and is ignored.
+      // Determine how many hops from the right are trusted.
+      // If trustProxyHops > 0, trust that many hops (rightmost entries).
+      // Otherwise, walk right-to-left past IPs in trustedProxyIps.
+      if (this.trustProxyHops > 0) {
+        // The rightmost `trustProxyHops` entries are proxies; the client is the
+        // entry just left of them. If the chain is shorter, fall back to peer.
+        const clientIndex = chain.length - 1 - this.trustProxyHops;
+        if (clientIndex >= 0) return chain[clientIndex];
+        return peer;
+      }
       for (let index = chain.length - 1; index >= 0; index -= 1) {
         if (!this.isTrustedProxy(chain[index])) return chain[index];
       }
       return peer;
     }
 
-    return (
-      normaliseIp(request.headers['x-real-ip']) ?? peer
-    );
+    return normaliseIp(request.headers['x-real-ip']) ?? peer;
   }
 
   /**
@@ -215,6 +219,19 @@ export class IpRateLimitGuard implements CanActivate {
     if (parts.some((part) => part === undefined)) return [];
 
     return parts as string[];
+  }
+
+  /**
+   * Trusted peer check for the immediate socket connection.
+   *
+   * A deployment may either list the proxy addresses explicitly or declare
+   * how many hops of proxies it operates. When hops are configured the
+   * immediate peer is trusted by definition, since the chain is then walked
+   * by hop count rather than by known addresses.
+   */
+  private isTrustedPeer(ip: string): boolean {
+    if (this.trustProxyHops > 0) return true;
+    return this.trustedProxyIps.has(ip);
   }
 
   private isTrustedProxy(ip: string): boolean {

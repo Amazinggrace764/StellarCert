@@ -32,12 +32,16 @@ export class WebhooksController {
 
   @Post()
   @ApiOperation({ summary: 'Register a new webhook subscription' })
-  @ApiResponse({ status: 201, description: 'Webhook registered successfully' })
+  @ApiResponse({
+    status: 201,
+    description:
+      'Webhook registered successfully. The raw HMAC secret is returned only in this response and cannot be retrieved later.',
+  })
   async create(
-    @CurrentUser('id') issuerId: string,
+    @CurrentUser('id') currentUserId: string,
     @Body() dto: CreateWebhookSubscriptionDto,
   ) {
-    return this.webhooksService.createSubscription(issuerId, dto);
+    return this.webhooksService.createSubscription(currentUserId, dto);
   }
 
   @Get()
@@ -50,39 +54,39 @@ export class WebhooksController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Remove a webhook subscription' })
   async remove(
-    @CurrentUser('id') issuerId: string,
+    @CurrentUser('id') currentUserId: string,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    await this.webhooksService.remove(id, issuerId);
+    await this.webhooksService.remove(id, currentUserId);
   }
 
   @Get(':id/logs')
   @ApiOperation({ summary: 'Get delivery logs for a webhook subscription' })
   async getLogs(
-    @CurrentUser('id') issuerId: string,
-    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser('id') currentUserId: string,
+    @Param('id', ParseUUIDPipe) subscriptionId: string,
     @Query('page') page?: number,
     @Query('limit') limit?: number,
   ) {
     const pageNum = page ? Math.max(1, Number(page)) : 1;
     const limitNum = limit ? Math.min(100, Math.max(1, Number(limit))) : 50;
-    return this.webhooksService.getLogs(id, issuerId, pageNum, limitNum);
+    return this.webhooksService.getLogs(subscriptionId, currentUserId, pageNum, limitNum);
   }
 
   @Post('test')
   @ApiOperation({ summary: 'Send a test webhook event' })
   async test(
-    @CurrentUser('id') issuerId: string,
+    @CurrentUser('id') currentUserId: string,
     @Body('subscriptionId') subscriptionId: string,
   ) {
     const subscription = await this.webhooksService.findOneWithSecret(
       subscriptionId,
-      issuerId,
+      currentUserId,
     );
 
     await this.webhooksService.triggerEventForSubscription(
       subscription,
-      WebhookEvent.WEBHOOK_TEST,
+      WebhookEvent.WEBHOOK_TESST,
       {
         message: 'Test webhook from StellarCert',
         test: true,

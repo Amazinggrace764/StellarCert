@@ -18,12 +18,37 @@ import { CreateWebhookSubscriptionDto } from './dto/create-webhook-subscription.
 import { LoggingService } from '../../common/logging/logging.service';
 import { validateWebhookUrl } from '../../common/utils/ssrf.utils';
 
-type SanitizedWebhookSubscription = Omit<
+export type SanitizedWebhookSubscription = Omit<
   WebhookSubscription,
   'secret' | 'secretHash'
 > & { hasSecret: boolean };
 
-type CreatedWebhookSubscription = WebhookSubscription & { hasSecret: boolean };
+export type CreatedWebhookSubscription = SanitizedWebhookSubscription & {
+  /** Plaintext HMAC secret, revealed only on creation (#719). */
+  secret: string;
+};
+
+/**
+ * Issue #719 – the raw HMAC secret must never leave the server on read.
+ * This is the single place that decides what a subscription response looks
+ * like; every public read path funnels through it.
+ */
+export function sanitizeWebhookSubscription(
+  sub: WebhookSubscription,
+): SanitizedWebhookSubscription {
+  const {
+    secret: _secret,
+    secretHash: _hash,
+    ...rest
+  } = sub as WebhookSubscription & {
+    secret?: string;
+    secretHash?: string;
+  };
+  return {
+    ...rest,
+    hasSecret: Boolean(_secret || _hash),
+  };
+}
 
 @Injectable()
 export class WebhooksService {
@@ -46,18 +71,7 @@ export class WebhooksService {
   private sanitizeSubscription(
     sub: WebhookSubscription,
   ): SanitizedWebhookSubscription {
-    const {
-      secret: _secret,
-      secretHash: _hash,
-      ...rest
-    } = sub as WebhookSubscription & {
-      secret?: string;
-      secretHash?: string;
-    };
-    return {
-      ...rest,
-      hasSecret: Boolean(_secret || _hash),
-    };
+    return sanitizeWebhookSubscription(sub);
   }
 
   private sanitizeMany(
@@ -93,11 +107,11 @@ export class WebhooksService {
     const saved = await this.subscriptionRepository.save(subscription);
 
     // Issue #719 – return the plaintext secret ONLY on create so the caller
-    // can store it; subsequent reads never include `secret`.
+    // can store it; subsequent reads never include `secret`. The rest of the
+    // entity is sanitized exactly like any other read response.
     return {
-      ...saved,
+      ...this.sanitizeSubscription(saved),
       secret, // one-time reveal
-      hasSecret: true,
     };
   }
 
@@ -146,7 +160,7 @@ export class WebhooksService {
     await this.subscriptionRepository.remove(subscription);
   }
 
-  // BROADCAST EVENT
+  // BROADCAST XVENT
   async triggerEvent(event: WebhookEvent, issuerId: string, payload: any) {
     const subs = await this.subscriptionRepository
       .createQueryBuilder('sub')
