@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
@@ -21,6 +21,9 @@ export class CertificateExpirationJob {
     private readonly configService: ConfigService,
     private readonly logger: LoggingService,
   ) {}
+
+  private readonly orphanLogger = new Logger(CertificateExpirationJob.name);
+  private static readonly ORPHAN_GRACE_PERIOD_MS = 5 * 60 * 1000;
 
   /**
    * Runs every hour to mark active certificates as expired.
@@ -141,6 +144,8 @@ export class CertificateExpirationJob {
       }
     }
 
+    await this.reconcileOrphanedCertificates();
+
     this.logger.log(
       `Certificate expiration check complete. Marked ${markedExpired} certificates as expired.`,
     );
@@ -153,5 +158,69 @@ export class CertificateExpirationJob {
       metadata: { job: 'CertificateExpirationJob', markedExpired },
       status: 'success',
     });
+  }
+
+  /**
+   * Reconciles certificates whose database record was persisted but whose
+   * on-chain issuance never completed (no stellarTransactionHash). These are
+   * "orphaned" records created when the Soroban call failed after commit.
+   *
+   * Records younger than the grace period are skipped to avoid racing an
+   * in-flight issuance. Older orphans are re-attempted; failures are logged
+   * and left for the next run or for the manual sync-chain endpoint.
+   */
+  private async reconcileOrphanedCertificates(): Promise<void> {
+    const cutoff = new Date(
+      Date.now() - CertificateExpirationJob.ORPHAN_GRACE_PERIOD_MS,
+    );
+
+    const orphans = await this.certificateRepository
+      .createQueryBuilder('cert')
+      .where('cert.stellarTransactionHash IS NULL')
+      .andWhere('cert.status = :status', { status: CertificateStatus.ACTIVE })
+      .andWhere('cert.createdAt <= :cutoff', { cutoff })
+      .getMany();
+
+    if (orphans.length === 0) {
+      return;
+    }
+
+    this.logger.log(
+      `Found ${orphans.length} orphaned certificate(s) without on-chain issuance`,
+    );
+
+    for (const certificate of orphans) {
+      try {
+        const result = await this.stellarService.issueCertificate(certificate);
+
+        certificate.stellarTransactionHash = result.transactionHash;
+        if (result.sequenceNumber) {
+          certificate.stellarSequenceNumber = result.sequenceNumber;
+        }
+        await this.certificateRepository.save(certificate);
+
+        void this.auditService.log({
+          action: AuditAction.CERTIFICATE_ISSUE,
+          resourceType: AuditResourceType.CERTIFICATE,
+          resourceId: certificate.id,
+          userId: 'system',
+          ipAddress: 'system',
+          metadata: {
+            certificateId: certificate.certificateId,
+            transactionHash: result.transactionHash,
+            reason: 'orphan_reconciliation',
+          },
+          status: 'success',
+        });
+
+        this.logger.log(
+          `Reconciled orphaned certificate ${certificate.certificateId} with tx ${result.transactionHash}`,
+        );
+      } catch (error: unknown) {
+        this.orphanLogger.error(
+          `Failed to reconcile orphaned certificate ${certificate.certificateId}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
   }
 }

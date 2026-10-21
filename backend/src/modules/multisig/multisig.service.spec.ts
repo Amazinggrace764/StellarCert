@@ -1,66 +1,17 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { MultisigService } from './multisig.service';
+import { MultisigModule } from './multisig.module';
 import { StellarService } from '../stellar/services/stellar.service';
 import { LoggingService } from '../../common/logging/logging.service';
 import { rpc, xdr } from '@stellar/stellar-sdk';
+import { plainToInstance } from 'class-transformer';
+import { ProposeCertificateDto } from './dto/propose-certificate.dto';
 
 describe('MultisigService', () => {
   let service: MultisigService;
   let configService: ConfigService;
   let stellarService: StellarService;
-
-  describe('transaction polling', () => {
-    it('keeps polling until the transaction succeeds', async () => {
-      const success = { status: rpc.Api.GetTransactionStatus.SUCCESS };
-      const getTransaction = jest
-        .fn()
-        .mockResolvedValueOnce({
-          status: rpc.Api.GetTransactionStatus.NOT_FOUND,
-        })
-        .mockResolvedValueOnce(success);
-
-      const internals = service as unknown as {
-        server: { getTransaction: jest.Mock };
-        waitForTransaction: (
-          hash: string,
-          options?: { maxAttempts?: number; intervalMs?: number },
-        ) => Promise<unknown>;
-      };
-      internals.server = { getTransaction };
-
-      await expect(
-        internals.waitForTransaction('tx-hash', {
-          maxAttempts: 3,
-          intervalMs: 0,
-        }),
-      ).resolves.toBe(success);
-      expect(getTransaction).toHaveBeenCalledTimes(2);
-    });
-
-    it('rejects when the transaction never settles', async () => {
-      const getTransaction = jest.fn().mockResolvedValue({
-        status: rpc.Api.GetTransactionStatus.NOT_FOUND,
-      });
-
-      const internals = service as unknown as {
-        server: { getTransaction: jest.Mock };
-        waitForTransaction: (
-          hash: string,
-          options?: { maxAttempts?: number; intervalMs?: number },
-        ) => Promise<unknown>;
-      };
-      internals.server = { getTransaction };
-
-      await expect(
-        internals.waitForTransaction('tx-hash', {
-          maxAttempts: 2,
-          intervalMs: 0,
-        }),
-      ).rejects.toThrow('not finalized');
-      expect(getTransaction).toHaveBeenCalledTimes(2);
-    });
-  });
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -98,8 +49,121 @@ describe('MultisigService', () => {
     expect(service).toBeDefined();
   });
 
+  describe('transaction polling', () => {
+    it('keeps polling until the transaction succeeds', async () => {
+      // waitForTransaction must be defined on the service instance before use.
+      // (The beforeEach below runs before each test, so `service` is available.)
+      const success = { status: rpc.Api.GetTransactionStatus.SUCCESS };
+      const getTransaction = jest
+        .fn()
+        .mockResolvedOnce({
+          status: rpc.Api.GetTransactionStatus.NOT_FOUND,
+        })
+        .mockResolvedOnce(success);
+
+      const internals = service as unknown as {
+        server: { getTransaction: jest.Mock };
+        waitForTransaction: (
+          hash: string,
+          options?: { maxAttempts?: number; intervalMs?: number },
+        ) => Promise<unknown>;
+      };
+      internals.server = { getTransaction };
+
+      await expect(
+        internals.waitForTransaction('tx-hash', {
+          maxAttempts: 3,
+          intervalMs: 0,
+        }),
+      ).resolvesToBe(success);
+      expect(getTransaction).toHaveBeenCalledTimes(2);
+    });
+
+    it('stops polling and returns the result when the transaction fails', async () => {
+      const failed = { status: rpc.Api.GetTransactionStatus.FAILED };
+      const getTransaction = jest
+        .fn()
+        .mockResolvedValueOnce({
+          status: rpc.Api.GetTransactionStatus.NOT_FOUND,
+        })
+        .mockResolvedValueOnce(failed);
+
+      const internals = service as unknown as {
+        server: { getTransaction: jest.Mock };
+        waitForTransaction: (
+          hash: string,
+          options?: { maxAttempts?: number; intervalMs?: number },
+        ) => Promise<unknown>;
+      };
+      internals.server = { getTransaction };
+
+      await expect(
+        internals.waitForTransaction('tx-hash', {
+          maxAttempts: 5,
+          intervalMs: 0,
+        }),
+      ).resolves.toBe(failed);
+      expect(getTransaction).toHaveBeenCalledTimes(2);
+    });
+
+    it('rejects when the transaction never settles', async () => {
+      const getTransaction = jest.fn().mockResolved({
+        status: rpc.Api.GetTransactionStatus.NOT_FOUND,
+      });
+
+      const internals = service as unknown as {
+        server: { getTransaction: jest.Mock };
+        waitForTransaction: (
+          hash: string,
+          options?: { maxAttempts?: number; intervalMs?: number },
+        ) => Promise<unknown>;
+      };
+      internals.server = { getTransaction };
+
+      await expect(
+        internals.waitForTransaction('tx-hash', {
+          maxAttempts: 2,
+          intervalMs: 0,
+        }),
+      ).rejects.toThrow('not finalized');
+      expect(getTransaction).toHaveBeenCalledTimes(2);
+    });
+
+    it('rejects when the transaction is still PENDING after max attempts', async () => {
+      const getTransaction = jest.fn().mockResolvedValue({
+        status: rpc.Api.GetTransactionStatus.PENDING,
+      });
+
+      const internals = service as unknown as {
+        server: { getTransaction: jest.Mock };
+        waitForTransaction: (
+          hash: string,
+          options?: { maxAttempts?: number; intervalMs?: number },
+        ) => Promise<unknown>;
+      };
+      internals.server = { getTransaction };
+
+      await expect(
+        internals.waitForTransaction('tx-hash', {
+          maxAttempts: 3,
+          intervalMs: 0,
+        }),
+      ).rejects.toThrow('not finalized');
+      expect(getTransaction).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  describe('module wiring', () => {
+    it('is registered as a provider by MultisigModule', () => {
+      const module = Test.createTestingModule({
+        imports: [MultisigModule],
+      });
+      expect(module).toBeDefined();
+    });
+  });
+
   describe('contract boolean results', () => {
-    const parseBooleanResult = (retval: xdr.ScVal | undefined) =>
+    const parseBooleanResult = (retval: sdr.ScVal | undefined) =>
       (
         service as unknown as {
           parseBooleanResult: (value: xdr.ScVal | undefined) => boolean;
@@ -123,20 +187,16 @@ describe('MultisigService', () => {
 
   describe('initMultisigConfig', () => {
     it('should initialize multisig configuration', () => {
-      // Mock the config service to return test values
       jest
         .spyOn(configService, 'get')
         .mockReturnValueOnce('test-contract-id')
         .mockReturnValueOnce('https://horizon-testnet.stellar.org')
         .mockReturnValueOnce('testnet');
 
-      // Mock the stellar service
       jest
         .spyOn(stellarService, 'getKeypairFromPublicKey')
         .mockReturnValue({} as any);
 
-      // We can't fully test this without a real Stellar network connection
-      // But we can verify that the method exists and has the right signature
       expect(typeof service.initMultisigConfig).toBe('function');
     });
   });
@@ -151,11 +211,76 @@ describe('MultisigService', () => {
     it('should propose a new certificate for multi-sig issuance', () => {
       expect(typeof service.proposeCertificate).toBe('function');
     });
+
+    it('returns the contract boolean result instead of a mock object', async () => {
+      const internals = service as unknown as {
+        buildAndSubmitTransaction: jest.Mock;
+        parseBooleanResult: (value: xdr.ScVal | undefined) => boolean;
+      };
+      internals.buildAndSubmitTransaction = jest
+        .fn()
+        .mockResolvedValue(xdr.ScVal.scvBool(true));
+
+      await expect(
+        service.proposeCertificate({
+          issuer: 'issuer',
+          certificateId: 'cert-1',
+          signers: ['signer-1'],
+          threshold: 1,
+        } as never),
+      ).resolves.toBe(true);
+      expect(internals.buildAndSubmitTransaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('propagates contract failures', async () => {
+      const internals = service as unknown as {
+        buildAndSubmitTransaction: jest.Mock;
+      };
+      internals.buildAndSubmitTransaction = jest
+        .fn()
+        .mockRejectedValue(new Error('contract call failed'));
+
+      await expect(
+        service.proposeCertificate({
+          issuer: 'issuer',
+          certificateId: 'cert-1',
+          signers: ['signer-1'],
+          threshold: 1,
+        } as never),
+      ).rejects.toThrow('contract call failed');
+    });
   });
 
   describe('approveRequest', () => {
     it('should approve a pending certificate request', () => {
       expect(typeof service.approveRequest).toBe('function');
+    });
+
+    it('returns the contract boolean result instead of a mock success result', async () => {
+      const internals = service as unknown as {
+        buildAndSubmitTransaction: jest.Mock;
+      };
+      internals.buildAndSubmitTransaction = jest
+        .fn()
+        .mockResolvedValue(xdr.ScVal.scvBool(true));
+
+      await expect(
+        service.approveRequest({ requestId: 'req-1', signer: 'signer-1' } as never),
+      ).resolves.toBe(true);
+      expect(internals.buildAndSubmitTransaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects when the contract returns a non-boolean result', async () => {
+      const internals = service as unknown as {
+        buildAndSubmitTransaction: jest.Mock;
+      };
+      internals.buildAndSubmitTransaction = jest
+        .fn()
+        .mockResolvedValue(xdr.ScVal.scvU32(1));
+
+      await expect(
+        service.approveRequest({ requestId: 'req-1', signer: 'signer-1' } as never),
+      ).rejects.toThrow('Invalid boolean response from contract');
     });
   });
 

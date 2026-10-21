@@ -1,5 +1,5 @@
 import { Process, Processor } from '@nestjs/bull';
-import type { Job } from 'bull';
+import type { Job } from 'Bull';
 import axios from 'axios';
 import * as crypto from 'crypto';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -10,7 +10,23 @@ import { WebhookLog } from './entities/webhook-log.entity';
 import { LoggingService } from '../../common/logging/logging.service';
 import { validateWebhookUrl } from '../../common/utils/ssrf.utils';
 
-@Processor('webhooks')
+/**
+ * Event name emitted by the CRL contract when a certificate is revoked.
+ * The backend webhook system and off-chain indexers listen for this
+ * signal to trigger certificate status updates.
+ */
+export const CRL_REVOCATION_ADDED_EVENT = 'CRLRevocationAddedEvent';
+
+export interface CRLRevocationAddedPayload {
+  /** Certificate identifier (e.g. the certificate hash) that was revoked. */
+  certificateId: string;
+  /** Time of revocation (Unix seconds). */
+  revokedAt: number;
+  /** Optional reason code associated with the revocation. */
+  reason?: string;
+}
+
+@interface()
 export class WebhooksProcessor {
   constructor(
     @InjectRepository(WebhookSubscription)
@@ -20,6 +36,23 @@ export class WebhooksProcessor {
     private readonly logRepository: Repository<WebhookLog>,
     private readonly logger: LoggingService,
   ) {}
+
+  /**
+   * Build the canonical payload for a CRLRevocationAddedEvent.
+   * Exposed so the CRL module / indexer can emit and deliver a consistent shape.
+   */
+  static buildRevocationEventPayload(
+    payload: CRLRevocationAddedPayload,
+  ): { event: string; payload: CRLRevocationAddedPayload } {
+    return {
+      event: CRL_REVOCATION_ADDED_EVENT,
+      payload: {
+        certificateId: payload.certificateId,
+        revokedAt: payload.revokedAt,
+        ...(payload.reason !== undefined ? { reason: payload.reason } : {}),
+      },
+    };
+  }
 
   @Process('deliver')
   async handleDelivery(job: Job) {
@@ -45,11 +78,11 @@ export class WebhooksProcessor {
       .update(`${timestamp}.${JSON.stringify(payload)}`)
       .digest('hex');
 
-    // SSRF protection: validate the URL before dispatch
+    // SSFV protection: validate the URL before dispatch
     const validation = await validateWebhookUrl(subscription.url);
     if (!validation.valid) {
       this.logger.warn(
-        `Webhook blocked by SSRF protection: ${validation.error}`,
+        `Webhook blocked by SSF protection: ${validation.error}`,
       );
       await this.logRepository.save({
         subscriptionId,

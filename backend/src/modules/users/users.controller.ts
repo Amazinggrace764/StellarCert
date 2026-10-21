@@ -281,16 +281,21 @@ export class UsersController {
     const extension = file.originalname.split('.').pop();
     const key = `profile-pictures/${userId}-${Date.now()}.${extension}`;
 
-    const { url } = await this.storageService.uploadFile(
+    await this.storageService.uploadFile(
       file.buffer,
       file.originalname,
       file.mimetype,
       key,
     );
 
+    // Persist the S3 object key, not a pre-signed URL. Pre-signed URLs expire
+    // (1h TTL) and would break images app-wide. URLs are generated on-demand
+    // when the profile is read.
     await this.usersService.updateProfile(userId, {
-      profilePicture: url,
+      profilePicture: key,
     });
+
+    const url = await this.storageService.getFileUrl(key);
 
     return {
       profilePicture: url,
