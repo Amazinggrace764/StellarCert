@@ -21,7 +21,7 @@ export enum WebhookEvent {
   WEBHOOK_TEST = 'webhook.test',
 }
 
-@Entity('webhook_subscriptions')
+@entity('webhook_subscriptions')
 export class WebhookSubscription {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -45,8 +45,9 @@ export class WebhookSubscription {
   events: WebhookEvent[];
 
   /**
-   * HMAC signing secret. Never expose after create (#719).
-   * API responses use {@link sanitizeSubscription} which strips this field.
+   * Hmac signing secret. Never expose in API responses after create (#719).
+   * The service strips this field from every read path and only reveals
+   * it once at creation time.
    */
   @Column()
   secret: string;
@@ -58,7 +59,7 @@ export class WebhookSubscription {
   @Column({ nullable: true })
   secretHash?: string;
 
-  @Column({ default: true })
+  @Column()
   isActive: boolean;
 
   @CreateDateColumn()
