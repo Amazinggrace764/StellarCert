@@ -136,12 +136,12 @@ export default function QRScannerModal({
   const handleToggleTorch = async () => {
     if (!scannerRef.current) return;
     try {
-      const scanner = scannerRef.current as {
-        _localMediaStream?: {
-          getVideoTracks: () => MediaStreamTrack[];
-        };
-      };
-      const track = scanner._localMediaStream?.getVideoTracks()[0];
+      const videoEl = document
+        .getElementById(containerId)
+        ?.querySelector("video") as HTMLVideoElement | null;
+      const mediaStream =
+        videoEl?.srcObject instanceof MediaStream ? videoEl.srcObject : null;
+      const track = mediaStream?.getVideoTracks()[0];
       if (!track) return;
 
       const capabilities = track.getCapabilities() as { torch?: boolean };
