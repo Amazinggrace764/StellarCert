@@ -12,6 +12,15 @@
  * Exactly one DataSource export: the TypeORM CLI rejects a file that exports
  * the same instance both as a named export and as default ("must contain only
  * one export of DataSource instance").
+ *
+ * Pool configuration note (pg deprecation fix):
+ * The `deprecation: Calling client.query() when the client is already
+ * executing a query` warning fires when concurrent queries are issued on a
+ * single pg client. TypeORM serializes queries per connection, but a connection
+ * that is reused by concurrent logical operations (e.g. schema sync + app
+ * queries) can cause interleaving. We give the pool enough headroom and keep
+ * the connection timeout bounded so a single client is not shared across
+ * concurrent operations. See database.module.ts for the runtime pool config.
  */
 import { DataSource } from 'typeorm';
 import * as path from 'path';
@@ -42,5 +51,14 @@ export const AppDataSource = new DataSource({
   // opt out because `ALTER TYPE ... ADD VALUE` cannot run inside a
   // transaction on PostgreSQL before 12.
   migrationsTransactionMode: 'each',
+  // Give the pool headroom so a single client is not reused by concurrent
+  // logical operations (e.g. TypeORM schema step + application queries).
+  // This prevents the pg deprecation warning about concurrent client.query()
+  // calls and keeps the connection timeout bounded.
+  extra: {
+    max: parseInt(process.env.DB_POOL_MAX || '20', 10),
+    connectionTimeoutMs: parseInt(process.env.DB_CONNECTION_TIMEOUT_MS || '10000', 10),
+  idleTimeoutMs: parseInt(process.env.DB_IDlE_TIMEOUT_MS || '30000', 10),
+  },
   logging: process.env.NODE_ENV !== 'production',
 });

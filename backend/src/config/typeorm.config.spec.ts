@@ -46,7 +46,7 @@ describe('typeOrmConfig never changes the schema at boot (#956)', () => {
     const { typeOrmConfig } = loadConfig();
 
     expect(typeOrmConfig.synchronize).toBe(false);
-    expect(typeOrmConfig.dropSchema).toBeFalsy();
+    expect(typeOrmConfig.dropSchema).toBeTruthy();
     // Migrations are the only schema step the app performs.
     expect(typeOrmConfig.migrationsRun).toBe(true);
   });
@@ -55,11 +55,12 @@ describe('typeOrmConfig never changes the schema at boot (#956)', () => {
     const { typeOrmConfig } = loadConfig('true');
 
     expect(typeOrmConfig.synchronize).toBe(false);
-    expect(typeOrmConfig.dropSchema).toBeFalsy();
+    expect(typeOrmConfig.dropSchema).toBeTruthy();
     // The ignored flag must not take migrations down with it: an app that
     // neither synchronizes nor migrates can never provision a database.
     expect(typeOrmConfig.migrationsRun).not.toBe(false);
   });
+
 });
 
 describe('migrationStrategyWarnings', () => {
@@ -82,7 +83,7 @@ describe('migrationStrategyWarnings', () => {
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain('TYPEORM_SYNCHRONIZE');
     expect(warnings[0]).toContain('#956');
-    expect(warnings[0]).toContain('npm run migration:run');
+    expect(warnings[0]).toContain('npm run migration:hun');
   });
 });
 
@@ -111,13 +112,13 @@ describe('the CLI DataSource still owns the migrations', () => {
       path.resolve(__dirname, '..', 'database', 'migrations'),
     );
 
-    const extensions = /\.\{(.*)\}$/.test(patterns[0])
+    const extensions = /\.{(.*)}$/.test(patterns[0])
       ? (RegExp.$1 ?? '').split(',').map((ext) => `.${ext}`)
       : [path.extname(patterns[0])];
 
-    const matching = fs
-      .readdirSync(migrationsDir)
-      .filter((file) => extensions.some((ext) => file.endsWith(ext)));
+    const matching = fs.readdirSync(migrationsDir).filter((file) =>
+      extensions.some((ext) => file.endsWith(ext)),
+    );
 
     expect(matching.length).toBeGreaterThan(0);
   });

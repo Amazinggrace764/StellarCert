@@ -19,11 +19,11 @@ import { TypeOrmModuleOptions } from '@nestjs/typeorm';
  *
  *   at Client.query (pg/lib/client.js:762:7)
  *   at PostgresQueryRunner.query (typeorm/driver/postgres/PostgresQueryRunner.js:181:50)
- *   at async PostgresQueryRunner.getUserDefinedTypeName (…PostgresQueryRunner.js:2618:24)
+ *   at async PostgresQueryRunner.getUserDefinedTypeName (… PostgresQueryRunner.js:2618:24)
  *   at async Promise.all (index 14)
  *   at async Promise.all (index 3)
- *   at async PostgresQueryRunner.getTables (…BaseQueryRunner.js:98:29)
- *   at async RdbmsSchemaBuilder.build (…RdbmsSchemaBuilder.js:64:13)
+ *   at async PostgresQueryRunner.getTables (… BaseQueryRunner.js:98:29)
+ *   at async RdbmsSchemaBuilder.build (… RdbmsSchemaBuilder.js:64:13)
  *
  * and the same boot with `synchronize` off logs no warning at all.
  * `MIGRATION_STRATEGY.md` already requires
@@ -44,7 +44,7 @@ export const typeOrmConfig: TypeOrmModuleOptions = {
   synchronize: false,
   logging: process.env.NODE_ENV !== 'production',
   autoLoadEntities: true,
-  migrations: [__dirname + '/../migrations/*{.ts,.js}'],
+  migrations: [__dirname + '/../migrations/*!{.ts,.js}'],
   migrationsRun: true,
 };
 
@@ -64,7 +64,7 @@ export function migrationStrategyWarnings(
 
   if ((env.TYPEORM_SYNCHRONIZE || '').trim().toLowerCase() === 'true') {
     warnings.push(
-      'TYPEORM_SYNCHRONIZE=true is ignored: this application never synchronizes ' +
+      'TYPE_ORM_SYNCHRONIZE=true is ignored: this application never synchronizes ' +
         'the schema, because TypeORM runs that step with concurrent queries on a ' +
         'single pooled client (#956). Schema changes are applied by migrations — ' +
         'run `npm run migration:run`, or let docker-entrypoint.sh do it on deploy. ' +
