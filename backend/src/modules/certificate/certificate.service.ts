@@ -984,14 +984,25 @@ export class CertificateService {
 
   async getCertificateQrCode(id: string): Promise<any> {
     const certificate = await this.findOne(id);
-    const verificationUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/verify/${certificate.verificationCode}`;
-    const qrCode = await QRCode.toDataURL(verificationUrl);
-    return {
-      id: certificate.id,
-      verificationCode: certificate.verificationCode,
-      qrCode,
-      verificationUrl,
-    };
+    const verificationCode = certificate.verificationCode ?? certificate.id;
+    const verificationUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/verify/${verificationCode}`;
+    try {
+      const qrCode = await QRCode.toDataURL(verificationUrl);
+      return {
+        id: certificate.id,
+        verificationCode,
+        qrCode,
+        verificationUrl,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Failed to generate QR code for certificate ${certificate.id}: ${error.message}`,
+        error.stack,
+      );
+      throw new InternalServerErrorException(
+        `Failed to generate QR code for certificate ${certificate.id}`,
+      );
+    }
   }
 
   async getStellarTransactionData(id: string): Promise<any> {
