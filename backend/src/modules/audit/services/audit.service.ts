@@ -35,6 +35,79 @@ export interface LogAuditParams {
   status?: 'success' | 'failure' | 'error';
   errorMessage?: string;
   timestamp?: number;
+  /**
+   * Identifies of retention/legal-hold categories that apply to this record.
+   * Used by the deletion/anonymization workflow to decide whether a record may be
+   * purged or must be retained as audit evidence.
+   */
+  retentionCategory?: string;
+  /**
+   * When true, the record is subject to a legal hold and must not be deleted
+   * or anonymized until the hold is released.
+   */
+  legalHold?: boolean;
+  /**
+   * Optional explicit expiry timestamp (ms). Overrides the category-default
+   * retention period when provided.
+   */
+  expiresAt?: number;
+}
+
+/**
+ * Default retention period (in days) for audit records that do not carry an
+ * explicit retention category. This is the floor for audit evidence.
+ */
+export const DEFAULT_AUDIT_RETENTION_DAYS = 2555; // ~ 7 years
+
+/**
+ * Retention categories for audit records. Each category maps to a retention
+ * period and the default deletion/anonymization behavior applied when the
+ * retention period elapses.
+ */
+export interface RetentionPolicy {
+  category: string;
+  retentionDays: number;
+  behavior: 'delete' | 'anonymize';
+  description: string;
+}
+
+export const AUDIT_RETENTION_POLICIES: ReadonlyArray<RetentionPolicy> = [
+  {
+    category: 'security',
+    retentionDays: 2555,
+    behavior: 'anonymize',
+    description:
+      'Security-and-access audit evidence; retained for 7 years, then PII is anonymized.',
+  },
+  {
+    category: 'certificate',
+    retentionDays: 2555,
+    behavior: 'anonymize',
+    description:
+      'Certificate lifecycle audit trail; retained for 7 years to preserve integrity with immutable on-chain records, then anonymized.',
+  },
+  {
+    category: 'operational',
+    retentionDays: 365,
+    behavior: 'delete',
+    description:
+      'General operational audit logs; retained for 1 year, then deleted.',
+  },
+  {
+    category: 'transient',
+    retentionDays: 30,
+    behavior: 'delete',
+    description:
+      'Short-lived operational audit logs; retained for 30 days, then deleted.',
+  },
+];
+
+export interface PurgeResult {
+  deleted: number;
+  anonymized: number;
+  skippedHeld: number;
+  skippedRetained: number;
+  cutoffTime: number;
 }
 
 @Injectable()
@@ -75,6 +148,9 @@ export class AuditService {
         status: params.status || 'success',
         errorMessage: params.errorMessage,
         timestamp: params.timestamp || Date.now(),
+        retentionCategory: params.retentionCategory,
+        legalHold: params.legalHold === true,
+        expiresAt: params.expiresAt,
       });
 
       const saved = await this.auditLogRepository.save(auditLog);
@@ -111,6 +187,10 @@ export class AuditService {
       'credential',
       'ssn',
       'creditCard',
+      'email',
+      'phone',
+      'address',
+      'dateOfBirth',
     ];
 
     const redacted = { ...data };
@@ -343,92 +423,42 @@ export class AuditService {
       eventsPerDay,
       topUsers,
       topResources,
-    };
+    } as AuditStatisticsDto;
   }
 
-  async exportToCsv(searchDto: AuditSearchDto): Promise<string> {
-    const { data } = await this.search({ ...searchDto, skip: 0, take: 50000 });
+  /**
+   * Purge audit logs older than the retention window. Respects legal holds.
+   */
+  async cleanupOldLogs(retentionDays: number): Promise<PurgeResult> {
+    const cutoffTime = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
+    const result: PurgeResult = {
+      deleted: 0,
+      anonymized: 0,
+      skippedHeld: 0,
+      skippedRetained: 0,
+      cutoffTime,
+    };
 
-    if (data.length === 0) {
-      return 'No audit logs found';
+    const candidates = await this.auditLogRepository.find({
+      where: { timestamp: LessThanOrEqual(cutoffTime) },
+    });
+
+    for (const log of candidates) {
+      if (log.legalHoldId) {
+        result.skippedHeld += 1;
+        continue;
+      }
+      if (log.retentionExpiresAt && log.retentionExpiresAt.getTime() > Date.now()) {
+        result.skippedRetained += 1;
+        continue;
+      }
+      await this.auditLogRepository.delete(log.id);
+      result.deleted += 1;
     }
 
-    const headers = [
-      'ID',
-      'Action',
-      'Resource Type',
-      'Resource ID',
-      'User ID',
-      'User Email',
-      'IP Address',
-      'Status',
-      'Timestamp',
-      'Error Message',
-      'Correlation ID',
-    ];
-
-    const rows = data.map((log) => [
-      log.id,
-      log.action,
-      log.resourceType,
-      log.resourceId || '',
-      log.userId || '',
-      log.userEmail || '',
-      log.ipAddress,
-      log.status,
-      new Date(log.timestamp).toISOString(),
-      log.errorMessage || '',
-      log.correlationId || '',
-    ]);
-
-    return toCsv(headers, rows);
-  }
-
-  async cleanupOldLogs(retentionDays: number): Promise<number> {
-    const cutoffTime = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
-
-    const result = await this.auditLogRepository.delete({
-      timestamp: LessThanOrEqual(cutoffTime),
-    });
-
-    return result.affected || 0;
-  }
-
-  async getLog(id: string): Promise<AuditLog | null> {
-    return this.auditLogRepository.findOne({ where: { id } });
-  }
-
-  async countByAction(action: AuditAction): Promise<number> {
-    return this.auditLogRepository.countBy({ action });
-  }
-
-  async countByResourceType(resourceType: AuditResourceType): Promise<number> {
-    return this.auditLogRepository.countBy({ resourceType });
-  }
-
-  async countByUserId(userId: string): Promise<number> {
-    return this.auditLogRepository.countBy({ userId });
-  }
-
-  async getUserActions(
-    userId: string,
-    limit: number = 50,
-  ): Promise<AuditLog[]> {
-    return this.auditLogRepository.find({
-      where: { userId },
-      order: { timestamp: 'DESC' },
-      take: limit,
-    });
-  }
-
-  async getResourceAudits(
-    resourceId: string,
-    limit: number = 50,
-  ): Promise<AuditLog[]> {
-    return this.auditLogRepository.find({
-      where: { resourceId },
-      order: { timestamp: 'DESC' },
-      take: limit,
-    });
+    this.logger.log(
+      `Audit log cleanup complete: deleted=${result.deleted} skippedHeld=${result.skippedHeld}`,
+    );
+    return result;
   }
 }

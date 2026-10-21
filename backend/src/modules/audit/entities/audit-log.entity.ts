@@ -7,6 +7,16 @@ import {
 } from 'typeorm';
 import { AuditAction, AuditResourceType } from '../constants';
 
+/**
+ * Retention / deletion semantics for audit evidence:
+ * - Audit logs are immutable evidence and are not hard-deleted by user-initiated
+ *   erasure requests.
+ * - PII contained in audit records (userEmail, ipAddress, userAgent, resourceData,
+ *   changes, metadata) is subject to anonymization once the retention window
+ *   has elapsed and no legal hold applies.
+ * - Anonymization is tracked via `anonymizedAt`, `retentionExpiresAt`, and
+ *   `legalHoldId` so the workflow is auditable and idempotent.
+ */
 @Entity('audit_logs')
 @Index(['userId'])
 @Index(['action'])
@@ -16,6 +26,9 @@ import { AuditAction, AuditResourceType } from '../constants';
 @Index(['correlationId'])
 @Index(['ipAddress'])
 @Index(['status'])
+@Index(['legalHoldId'])
+@Index(['anonymizedAt'])
+@Index(['retentionExpiresAt'])
 export class AuditLog {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -121,6 +134,51 @@ export class AuditLog {
     type: 'bigint',
   })
   timestamp: number;
+
+  /**
+   * Retention deadline computed at write time from the applicable retention
+   * policy for this audit record. Once reached (and no legal hold is active)
+   * the record becomes eligible for PII anonymization.
+   */
+  @Column({
+    name: 'retention_expires_at',
+    type: 'timestamp with time zone',
+    nullable: true,
+  })
+  retentionExpiresAt: Date | null;
+
+  /**
+   * Identifier of the active legal hold blocking deletion/anonymization.
+   * Null means no hold is applied.
+   */
+  @Column({
+    name: 'legal_hold_id',
+    type: 'varchar',
+    nullable: true,
+  })
+  legalHoldId: string | null;
+
+  /**
+   * Timestamp of the most recent successful PII anonymization. Serves as the
+   * idompotency marker for the deletion/anonymization workflow.
+   */
+  @Column({
+    name: 'anonymized_at',
+    type: 'timestamp with time zone',
+    nullable: true,
+  })
+  anonymizedAt: Date | null;
+
+  /**
+   * Audit trail of anonymization activity (reason, actor, correlation id).
+   * Must not contain restored PII and is retained with the record.
+   */
+  @Column({
+    name: 'anonymization_audit',
+    type: 'jsonb',
+    nullable: true,
+  })
+  anonymizationAudit: Record<string, any> | null;
 
   @CreateDateColumn()
   createdAt: Date;
