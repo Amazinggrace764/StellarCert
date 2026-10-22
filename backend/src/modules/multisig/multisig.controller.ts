@@ -218,6 +218,7 @@ export class MultisigController {
   @Get('config/:issuer')
   @Roles(UserRole.ADMIN, UserRole.ISSUER, UserRole.USER)
   async getMultisigConfig(
+    @CurrentUser() user: User,
     @Param('issuer') issuer: string,
   ): Promise<MultisigConfigResponse> {
     try {
@@ -236,12 +237,16 @@ export class MultisigController {
   }
 
   @Get('request/:requestId')
-  @Roles(UserRole.ADMIN, UserRole.ISSUER, UserRole.USER)
+  @Roles(UserRole.ADMIN, UserRole.ISSUER)
   async getPendingRequest(
+    @CurrentUser() user: User,
     @Param('requestId') requestId: string,
   ): Promise<PendingRequestResponse> {
     try {
-      const request = await this.multisigService.getPendingRequest(requestId);
+      const request = await this.multisigService.getPendingRequest(
+        requestId,
+        user.stellarPublicKey,
+      );
       return request;
     } catch (error) {
       this.logger.error(`Failed to get pending request ${requestId}`, error);
@@ -253,8 +258,9 @@ export class MultisigController {
   }
 
   @Get('requests/issuer/:issuer')
-  @Roles(UserRole.ADMIN, UserRole.ISSUER, UserRole.USER)
+  @Roles(UserRole.ADMIN, UserRole.ISSUER)
   async getPendingRequestsForIssuer(
+    @CurrentUser() user: User,
     @Param('issuer') issuer: string,
     @Query('page') page: number = 0,
     @Query('limit') limit: number = 20,
@@ -267,6 +273,7 @@ export class MultisigController {
       const result = await this.multisigService.getPendingRequestsForIssuer(
         issuer,
         pagination,
+        user.stellarPublicKey,
       );
       return result;
     } catch (error) {
@@ -282,8 +289,9 @@ export class MultisigController {
   }
 
   @Get('requests/signer/:signer')
-  @Roles(UserRole.ADMIN, UserRole.ISSUER, UserRole.USER)
+  @Roles(UserRole.ADMIN, UserRole.ISSUER)
   async getPendingRequestsForSigner(
+    @CurrentUser() user: User,
     @Param('signer') signer: string,
     @Query('page') page: number = 0,
     @Query('limit') limit: number = 20,
@@ -296,6 +304,7 @@ export class MultisigController {
       const result = await this.multisigService.getPendingRequestsForSigner(
         signer,
         pagination,
+        user.stellarPublicKey,
       );
       return result;
     } catch (error) {
@@ -311,12 +320,16 @@ export class MultisigController {
   }
 
   @Get('expired/:requestId')
-  @Roles(UserRole.ADMIN, UserRole.ISSUER, UserRole.USER)
+  @Roles(UserRole.ADMIN, UserRole.ISSUER)
   async isRequestExpired(
+    @CurrentUser() user: User,
     @Param('requestId') requestId: string,
   ): Promise<ExpiredResponse> {
     try {
-      const expired = await this.multisigService.isRequestExpired(requestId);
+      const expired = await this.multisigService.isRequestExpired(
+        requestId,
+        user.stellarPublicKey,
+      );
       return { expired };
     } catch (error) {
       this.logger.error(
@@ -331,12 +344,16 @@ export class MultisigController {
   }
 
   @Get('status/:requestId')
-  @Roles(UserRole.ADMIN, UserRole.ISSUER, UserRole.USER)
+  @Roles(UserRole.ADMIN, UserRole.ISSUER)
   async getRequestStatus(
+    @CurrentUser() user: User,
     @Param('requestId') requestId: string,
   ): Promise<RequestStatusResponse> {
     try {
-      const request = await this.multisigService.getPendingRequest(requestId);
+      const request = await this.multisigService.getPendingRequest(
+        requestId,
+        user.stellarPublicKey,
+      );
       return { status: request.status };
     } catch (error) {
       this.logger.error(`Failed to get request status for ${requestId}`, error);
