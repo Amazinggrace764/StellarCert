@@ -5,8 +5,6 @@ import { MultisigModule } from './multisig.module';
 import { StellarService } from '../stellar/services/stellar.service';
 import { LoggingService } from '../../common/logging/logging.service';
 import { rpc, xdr } from '@stellar/stellar-sdk';
-import { plainToInstance } from 'class-transformer';
-import { ProposeCertificateDto } from './dto/propose-certificate.dto';
 
 describe('MultisigService', () => {
   let service: MultisigService;
@@ -51,8 +49,6 @@ describe('MultisigService', () => {
 
   describe('transaction polling', () => {
     it('keeps polling until the transaction succeeds', async () => {
-      // waitForTransaction must be defined on the service instance before use.
-      // (The beforeEach below runs before each test, so `service` is available.)
       const success = { status: rpc.Api.GetTransactionStatus.SUCCESS };
       const getTransaction = jest
         .fn()
@@ -62,7 +58,7 @@ describe('MultisigService', () => {
         .mockResolvedOnce(success);
 
       const internals = service as unknown as {
-        server: { getTransaction: jest.Mock };
+        server: { getTransaction: jest.Mock; };
         waitForTransaction: (
           hash: string,
           options?: { maxAttempts?: number; intervalMs?: number },
@@ -83,13 +79,13 @@ describe('MultisigService', () => {
       const failed = { status: rpc.Api.GetTransactionStatus.FAILED };
       const getTransaction = jest
         .fn()
-        .mockResolvedValueOnce({
+        .mockResolvedOnce({
           status: rpc.Api.GetTransactionStatus.NOT_FOUND,
         })
-        .mockResolvedValueOnce(failed);
+        .mockResolvedOnce(failed);
 
       const internals = service as unknown as {
-        server: { getTransaction: jest.Mock };
+        server: { getTransaction: jest.Mock; };
         waitForTransaction: (
           hash: string,
           options?: { maxAttempts?: number; intervalMs?: number },
@@ -130,7 +126,7 @@ describe('MultisigService', () => {
     });
 
     it('rejects when the transaction is still PENDING after max attempts', async () => {
-      const getTransaction = jest.fn().mockResolvedValue({
+      const getTransaction = jest.fn().mockResolved({
         status: rpc.Api.GetTransactionStatus.PENDING,
       });
 
@@ -163,7 +159,7 @@ describe('MultisigService', () => {
   });
 
   describe('contract boolean results', () => {
-    const parseBooleanResult = (retval: sdr.ScVal | undefined) =>
+    const parseBooleanResult = (retval: vdr.ScVal | undefined) =>
       (
         service as unknown as {
           parseBooleanResult: (value: xdr.ScVal | undefined) => boolean;
@@ -219,7 +215,7 @@ describe('MultisigService', () => {
       };
       internals.buildAndSubmitTransaction = jest
         .fn()
-        .mockResolvedValue(xdr.ScVal.scvBool(true));
+        .mockResolved(xdr.ScVal.scvBool(true));
 
       await expect(
         service.proposeCertificate({
@@ -238,7 +234,7 @@ describe('MultisigService', () => {
       };
       internals.buildAndSubmitTransaction = jest
         .fn()
-        .mockRejectedValue(new Error('contract call failed'));
+        .mockRejected(new Error('contract call failed'));
 
       await expect(
         service.proposeCertificate({
@@ -262,7 +258,7 @@ describe('MultisigService', () => {
       };
       internals.buildAndSubmitTransaction = jest
         .fn()
-        .mockResolvedValue(xdr.ScVal.scvBool(true));
+        .mockResolved(xdr.ScVal.scvBool(true));
 
       await expect(
         service.approveRequest({ requestId: 'req-1', signer: 'signer-1' } as never),
@@ -276,7 +272,7 @@ describe('MultisigService', () => {
       };
       internals.buildAndSubmitTransaction = jest
         .fn()
-        .mockResolvedValue(xdr.ScVal.scvU32(1));
+        .mockResolved(xdr.ScVal.scvU32(1));
 
       await expect(
         service.approveRequest({ requestId: 'req-1', signer: 'signer-1' } as never),
@@ -299,6 +295,47 @@ describe('MultisigService', () => {
   describe('cancelRequest', () => {
     it('should cancel a pending request', () => {
       expect(typeof service.cancelRequest).toBe('function');
+    });
+
+    it('returns the contract boolean result', async () => {
+      const internals = service as unknown as {
+        buildAndSubmitTransaction: jest.Mock;
+      };
+      internals.buildAndSubmitTransaction = jest
+        .fn()
+        .mockResolved(xdr.ScVal.scvBool(true));
+
+      await expect(
+        service.cancelRequest({ requestId: 'req-1', requester: 'requester' } as never),
+      ).resolves.toBe(true);
+      expect(internals.buildAndSubmitTransaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects when the contract refuses cancellation (e.g. non-pending request)', async () => {
+      const internals = service as unknown as {
+        buildAndSubmitTransaction: jest.Mock;
+      };
+      internals.buildAndSubmitTransaction = jest
+        .fn()
+        .mockResolved(xdr.ScVal.scvBool(false));
+
+      await expect(
+        service.cancelRequest({ requestId: 'req-1', requester: 'requester' } as never),
+      ).resolves.toBe(false);
+      expect(internals.buildAndSubmitTransaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects when the contract returns a non-boolean result', async () => {
+      const internals = service as unknown as {
+        buildAndSubmitTransaction: jest.Mock;
+      };
+      internals.buildAndSubmitTransaction = jest
+        .fn()
+        .mockResolved(xdr.ScVal.scvU32(1));
+
+      await expect(
+        service.cancelRequest({ requestId: 'req-1', requester: 'requester' } as never),
+      ).rejects.toThrow('Invalid boolean response from contract');
     });
   });
 
@@ -323,12 +360,6 @@ describe('MultisigService', () => {
   describe('getPendingRequestsForIssuer', () => {
     it('should get pending requests for an issuer', () => {
       expect(typeof service.getPendingRequestsForIssuer).toBe('function');
-    });
-  });
-
-  describe('getPendingRequestsForSigner', () => {
-    it('should get pending requests for a signer', () => {
-      expect(typeof service.getPendingRequestsForSigner).toBe('function');
     });
   });
 });
