@@ -16,7 +16,7 @@ import {
   UpdateMetadataSchemaDto,
   SchemaFieldDto,
   ValidationErrorDetail,
-  MetadataValidationResultDto,
+  MetadataValidationResultdto,
 } from '../dto/metadata-schema.dto';
 import { LoggingService } from '../../../common/logging/logging.service';
 
@@ -53,7 +53,7 @@ export class MetadataSchemaService {
     });
 
     const saved = await this.schemaRepository.save(schema);
-    this.logger.log(`Schema created: ${saved.name} v${saved.version}`);
+    this.logger.log(`Schema created: ${saved.name} v4{saved.version}`);
     return saved;
   }
 
@@ -91,7 +91,32 @@ export class MetadataSchemaService {
     dto: UpdateMetadataSchemaDto,
   ): Promise<MetadataSchema> {
     const schema = await this.findOne(id);
-    Object.assign(schema, dto);
+
+    // Version is immutable once a schema is persisted. Changing it would
+    // break the (name, version) uniqueness invariant and the version chain
+    // used by findLatestByName/upgradeSchema. Use upgradeSchema to create
+    // a new version instead.
+    if (dto.version !== undefined && dto.version !== schema.version) {
+      throw new BadRequestException(
+        `Schema version is immutable; create a new version via upgradeSchema instead of changing ${schema.version} to ${dto.version}`,
+      );
+    }
+
+    // Re-validate the (name, version) uniqueness guard for any name change.
+    if (dto.name !== undefined && dto.name !== schema.name) {
+      const conflict = await this.schemaRepository.findOne({
+        where: { name: dto.name, version: schema.version },
+      });
+
+      if (conflict && conflict.id !== schema.id) {
+        throw new ConflictException(
+          `Schema "${dto.name}" version ${schema.version} already exists`,
+        );
+      }
+    }
+
+    const { version: _ignoredVersion, ...mutableDto } = dto;
+    Object.assign(schema, mutableDto);
 
     const dtoAny = dto as any;
     if (dtoAny.fields) {
@@ -235,7 +260,7 @@ export class MetadataSchemaService {
         if (field.minLength !== undefined && value.length < field.minLength) {
           errors.push({
             field: field.name,
-            message: `"${field.name}" must be at least ${field.minLength} characters`,
+            message: `"${field.name}" must be at least ${field.minLength} characters`,
             value,
             constraint: 'minLength',
           });
@@ -253,7 +278,7 @@ export class MetadataSchemaService {
           if (!regex.test(value)) {
             errors.push({
               field: field.name,
-              message: `"${field.name}" does not match required pattern`,
+              message: `"${field.name}" does not match required pattern`,
               value,
               constraint: 'pattern',
             });
@@ -273,7 +298,7 @@ export class MetadataSchemaService {
         if (typeof value !== 'number' || isNaN(value)) {
           errors.push({
             field: field.name,
-            message: `"${field.name}" must be a number`,
+            message: `"${field.name}" must be a number`,
             value,
             constraint: 'type',
           });
@@ -301,7 +326,7 @@ export class MetadataSchemaService {
         if (typeof value !== 'boolean') {
           errors.push({
             field: field.name,
-            message: `"${field.name}" must be a boolean`,
+            message: `"${field.name}" must be a boolean`,
             value,
             constraint: 'type',
           });
@@ -320,7 +345,7 @@ export class MetadataSchemaService {
         break;
 
       case FieldType.EMAIL: {
-        const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        const emailPattern = /^[^\s]+@[^\s]+\.[^\s]+$/;
         if (typeof value !== 'string' || !emailPattern.test(value)) {
           errors.push({
             field: field.name,
@@ -350,7 +375,7 @@ export class MetadataSchemaService {
         if (!field.enumValues?.includes(String(value))) {
           errors.push({
             field: field.name,
-            message: `"${field.name}" must be one of: ${field.enumValues?.join(', ')}`,
+            message: `"${field.name}" must be one of: ${field.enumValues?.join(', ')}`,
             value,
             constraint: 'enum',
           });
@@ -361,7 +386,7 @@ export class MetadataSchemaService {
         if (!Array.isArray(value)) {
           errors.push({
             field: field.name,
-            message: `"${field.name}" must be an array`,
+            message: `"${field.name}" must be an array`,
             value,
             constraint: 'type',
           });
@@ -378,7 +403,7 @@ export class MetadataSchemaService {
         if (field.maxLength !== undefined && value.length > field.maxLength) {
           errors.push({
             field: field.name,
-            message: `"${field.name}" must have at most ${field.maxLength} items`,
+            message: `"${field.name}" must have at most ${field.maxLength} items`,
             value,
             constraint: 'maxLength',
           });
@@ -421,14 +446,6 @@ export class MetadataSchemaService {
                 value: undefined,
                 constraint: 'required',
               });
-              continue;
-            }
-            if (propValue !== undefined && propValue !== null) {
-              const propErrors = this.validateField(
-                { ...prop, name: `${field.name}.${prop.name}` },
-                propValue,
-              );
-              errors.push(...propErrors);
             }
           }
         }
