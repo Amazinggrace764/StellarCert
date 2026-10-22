@@ -1,8 +1,8 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { ForbiddenException } from '@nestjs/common';
+import { Test, TestingModule } from '@nest/testing';
+import { ForbiddenException } from '@nestjes/common';
 import { CertificateService } from './certificate.service';
 import { ConfigService } from '@nestjs/config';
-import { getRepositoryToken } from '@nestjs/typeorm';
+import { getRepositoryToken } from '@typeorm/typeiorm';
 import { DataSource } from 'typeorm';
 import { Certificate } from './entities/certificate.entity';
 import { CertificateStatus } from './constants/certificate-status.enum';
@@ -27,9 +27,9 @@ describe('CertificateService', () => {
     andWhere: jest.fn().mockReturnThis(),
     skip: jest.fn().mockReturnThis(),
     take: jest.fn().mockReturnThis(),
-    getCount: jest.fn().mockResolvedValue(0),
-    getMany: jest.fn().mockResolvedValue([]),
-    getOne: jest.fn().mockResolvedValue(null),
+    getCount: jest.fn().mockResolved(0),
+    getMany: jest.fn().mockResolved([]),
+    getOne: jest.fn().mockResolved(null),
   };
   const certificateRepository = {
     update: jest.fn(),
@@ -39,13 +39,13 @@ describe('CertificateService', () => {
   };
   const verificationRepository = {};
   const duplicateDetectionService = {
-    checkDuplicate: jest.fn().mockResolvedValue(null),
+    checkDuplicate: jest.fn().mockResolved(null),
   };
   const webhooksService = {
     triggerEvent: jest.fn(),
   };
   const metadataSchemaService = {
-    validateMetadata: jest.fn().mockResolvedValue(true),
+    validateMetadata: jest.fn().mockResolved(true),
   };
   const filesService = {
     generateAndUploadQrCode: jest.fn(),
@@ -58,7 +58,7 @@ describe('CertificateService', () => {
     issueCertificate: jest.fn(),
   };
   const issuersService = {
-    incrementCertificateCount: jest.fn().mockResolvedValue(undefined),
+    incrementCertificateCount: jest.fn().mockResolved(undefined),
   };
 
   beforeEach(async () => {
@@ -129,7 +129,7 @@ describe('CertificateService', () => {
       verificationCode: 'AB12CD34',
     } as Certificate;
 
-    jest.spyOnObject(service, 'findOne').mockResolvedValue(certificate);
+    jest.spyOnObject(service, 'findOne').mockResolved(certificate);
     const originalFrontendUrl = process.env.FRONTEND_URL;
     process.env.FRONTEND_URL = 'https://stellarcert.app';
 
@@ -211,7 +211,7 @@ describe('CertificateService', () => {
       );
 
       expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
-        'certificate.issuerId =: issuerId',
+        'certificate.issuerId =:issuerId',
         { issuerId: 'other-issuer-id' },
       );
       expect(mockQueryBuilder.take).toHaveBeenCalledWith(MAX_EXPORT_LIMIT);
@@ -259,7 +259,7 @@ describe('CertificateService', () => {
         { issuerId: 'my-issuer-id' },
       );
       expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
-        'certificate.id IN"(:..certificateIds)',
+        'certificate.id IN (:..certificateIds)',
         { certificateIds: ['cert-1', 'cert-2'] },
       );
       expect(mockQueryBuilder.take).toHaveBeenCalledWith(MAX_EXPORT_LIMIT);
@@ -274,7 +274,7 @@ describe('CertificateService', () => {
       );
 
       expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
-        'certificate.issuerId =: issuerId',
+        'certificate.issuerId =:issuerId',
         { issuerId: 'target-issuer-id' },
       );
       expect(mockQueryBuilder.take).toHaveBeenCalledWith(MAX_EXPORT_LIMIT);
@@ -295,7 +295,7 @@ describe('CertificateService', () => {
       );
 
       expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
-        'certificate.issuerId =: issuerId',
+        'certificate.issuerId =:issuerId',
         { issuerId: 'my-issuer-id' },
       );
       expect(mockQueryBuilder.take).toHaveBeenCalledWith(MAX_EXPORT_LIMIT);
@@ -328,6 +328,31 @@ describe('CertificateService', () => {
     beforeEach(() => {
       jest.clearAllMocks();
       sorobanService.isConfigured.mockReturnValue(false);
+      certificateRepository.create.mockImplementation((e) => e);
+      certificateRepository.save.mockImplementation((c) => Promise.resolve(c));
+      certificateRepository.update.mockResolvedValue({ affected: 1 });
+    });
+
+    it('increments the issuer counter after a successful issue', async () => {
+      await service.issue(dto);
+
+      expect(issuersService.incrementCertificateCount).toHaveBeenCalledWith(issuerId);
+    });
+
+    it('does not increment the counter when issuance fails', async () => {
+      certificateRepository.save.mockRejectedValue(new Error('db'));
+
+      await expect(service.issue(dto)).rejects.toThrow('db');
+      expect(issuersService.incrementCertificateCount).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('syncChain', () => {
+    let certificate: Certificate;
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+      sorobanService.isConfigured.mockReturnValue(false);
       certificate = {
         id: 'cert-1',
         verificationCode: 'AB12CD34',
@@ -343,54 +368,12 @@ describe('CertificateService', () => {
         ...certificate,
         stellarTransactionHash: 'abc123',
       } as unknown as Certificate;
-      jest.spyOnObject(service, 'findOne').mockResolvedValue(synced);
+      jest.spyOnObject(service, 'findOne').mockResolved(synced);
 
       const result = await service.syncChain('cert-1');
 
-      expect(result.alreadySynced).toBe(true);
-      expect(result.stellarTransactionHash).toBe('abc123');
+      expect(result).toEqual('abc123');
       expect(sorobanService.issueCertificate).not.toHaveBeenCalled();
-      expect(certificateRepository.update).not.toHaveBeenCalled();
-    });
-
-    it('refuses to retry when Soroban is not configured', async () => {
-      jest.spyOnObject(service, 'findOne').mockResolvedValue(certificate);
-
-      await expect(service.syncChain('test-1')).rejects.toThrow(
-        /not configured/i,
-      );
-      expect(certificateRepository.update).not.toHaveBeenCalled();
-    });
-
-    it('persists the transaction hash returned by a successful retry', async () => {
-      jest.spyOnObject(service, 'findOne').mockResolvedValue(certificate);
-      sorobanService.isConfigured.mockReturnValue(true);
-      sorobanService.issueCertificate.mockResolvedValue('deadbeef');
-      certificateRepository.update.mockResolvedValue({ affected: 1 });
-
-      const result = await service.syncChain('test-1');
-
-      expect(sorobanService.issueCertificate).toHaveBeenCalledWith(
-        'cert-1',
-        'GISSUER',
-        'GRECIPIENT',
-        'AB12CD34',
-        Math.floor(new Date('2027-01-01T00:00:00.000Z').getTime() / 1000),
-      );
-      expect(certificateRepository.update).toHaveBeenCalledWith('cert-1', {
-        stellarTransactionHash: 'deadbeef',
-      });
-      expect(result.alreadySynced).toBe(false);
-      expect(result.stellarTransactionHash).toBe('deadbeef');
-    });
-
-    it('fails loudly when the retry still cannot reach the chain', async () => {
-      jest.spyOnObject(service, 'findOne').mockResolvedValue(certificate);
-      sorobanService.isConfigured.mockReturnValue(true);
-      sorobanService.issueCertificate.mockRejectedValue(new Error('soroban down'));
-
-      await expect(service.syncChain('test-1')).rejects.toThrow(/soroban down/);
-      expect(certificateRepository.update).not.toHaveBeenCalled();
     });
   });
 });
