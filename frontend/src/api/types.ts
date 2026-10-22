@@ -1,4 +1,4 @@
-/**
+/*
  * User roles in the system
  */
 export enum UserRole {
@@ -17,7 +17,7 @@ export enum UserRole {
  * authentication flow (e.g. Stellar-only sign-in, invite acceptance, or
  * legacy accounts migrated from an email-only store) knows the user's name.
  * Consumers must not assume these fields are present; use `getUserDisplayName`
- * (or an explicit `'firstName' in user` guard) instead of accessing them directly.
+ * (or an explicit 'firstName' in user' guard) instead of accessing them directly.
  */
 export interface User {
   id: string;
@@ -40,7 +40,7 @@ export interface User {
  * Return a human-readable display name for a user, falling back through
  * username -> email local-part -> email when the first/last name are not
  * available. This is the single source of truth for displaying a user's name
- * and replaces ad-hoc `'firstName' in user` guards scattered across the app.
+ * and replaces ad-hoc 'firstName' in user' guards scattered across the app.
  */
 export function getUserDisplayName(
   user: Pick<User, "email" | "firstName" | "lastName" | "username"> | null | undefined,
@@ -70,13 +70,38 @@ export function getUserDisplayName(
 
 /**
  * Authentication Response from login/register
+ *
+ * When `requiresEmailVerification` is true, the account was created but
+ * has not yet been verified. Callers MUST not treat this as an authenticated
+ * session: do not persist tokens or redirect into protected routes. Instead,
+ * show a "check your email" state. Tokens are optional here because the
+ * backend may omit them for unverified accounts.
  */
 export interface AuthResponse {
   user: User;
-  accessToken: string;
+  accessToken?: string;
   refreshToken?: string;
   expiresIn?: number;
   requiresEmailVerification?: boolean;
+}
+
+/**
+ * Type guard: true when an auth response represents a registration/login
+ * that must not establish an authenticated session until email verification
+ * completes.
+ */
+export function requiresEmailVerification(
+  response: Pick<AuthResponse, "requiresEmailVerification" | "user"> | null | undefined,
+): boolean {
+  if (!response) {
+    return false;
+  }
+  if (response.requiresEmailVerification === true) {
+    return true;
+  }
+  // Fall back to the user record so a stale/omitted flag cannot bypass the
+  // verification gate.
+  return response.user?.isEmailVerified === false;
 }
 
 /**

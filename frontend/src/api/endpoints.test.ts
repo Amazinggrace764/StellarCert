@@ -103,4 +103,56 @@ describe('frontend api endpoints', () => {
     const analyticsApi = (endpoints as Record<string, unknown>).analyticsApi as Record<string, unknown> | undefined;
     expect(analyticsApi?.getDashboardSummary).toBeUndefined();
   });
+
+  it('returns the registration response with requiresEmailVerification without logging the user in', async () => {
+    tokenStorage.clearAll();
+    const registerResponse = {
+      requiresEmailVerification: true,
+      message: 'Check your email to verify your account',
+    };
+    const fetchMock = vi.fn().mockResolved({
+      ok: true,
+      status: 201,
+      json: async () => registerResponse,
+    });
+    global.fetch = fetchMock as unknown as typeof global.fetch;
+
+    const response = await endpoints.authApi.register({
+      email: 'new-user@example.com',
+      password: 'StrongPassword123!',
+      firstName: 'New',
+      lastName: 'User',
+    });
+
+    expect(response.requiresEmailVerification).toBe(true);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(tokenStorage.getAccessToken()).toBeNull();
+    expect(tokenStorage.getRefreshToken()).toBeNull();
+  });
+
+  it('surfaces a verification-pending result when registration requires email verification', async () => {
+    const fetchMock = vi.fn().mockResolved({
+      ok: true,
+      status: 201,
+      json: async () => ({
+        requiresEmailVerification: true,
+        email: 'new-user@example.com',
+        message: 'Verification email sent',
+      }),
+    });
+    global.fetch = fetchMock as unknown as typeof global.fetch;
+
+    const result = await endpoints.authApi.register({
+      email: 'new-user@example.com',
+      password: 'StrongPassword123!',
+      firstName: 'New',
+      lastName: 'User',
+    });
+
+    expect(result).toMatchObject({
+      requiresEmailVerification: true,
+      email: 'new-user@example.com',
+    });
+    expect('accessToken' in result).toBe(false);
+  });
 })
