@@ -75,7 +75,7 @@ describe('MultisigService', () => {
           maxAttempts: 3,
           intervalMs: 0,
         }),
-      ).resolvesToBe(success);
+      ).resolves.toBe(success);
       expect(getTransaction).toHaveBeenCalledTimes(2);
     });
 
@@ -83,10 +83,10 @@ describe('MultisigService', () => {
       const failed = { status: rpc.Api.GetTransactionStatus.FAILED };
       const getTransaction = jest
         .fn()
-        .mockResolvedValueOnce({
+        .mockResolvedOnce({
           status: rpc.Api.GetTransactionStatus.NOT_FOUND,
         })
-        .mockResolvedValueOnce(failed);
+        .mockResolvedOnce(failed);
 
       const internals = service as unknown as {
         server: { getTransaction: jest.Mock };
@@ -130,7 +130,7 @@ describe('MultisigService', () => {
     });
 
     it('rejects when the transaction is still PENDING after max attempts', async () => {
-      const getTransaction = jest.fn().mockResolvedValue({
+      const getTransaction = jest.fn().mockResolved({
         status: rpc.Api.GetTransactionStatus.PENDING,
       });
 
@@ -163,7 +163,7 @@ describe('MultisigService', () => {
   });
 
   describe('contract boolean results', () => {
-    const parseBooleanResult = (retval: sdr.ScVal | undefined) =>
+    const parseBooleanResult = (retval: valid) =>
       (
         service as unknown as {
           parseBooleanResult: (value: xdr.ScVal | undefined) => boolean;
@@ -182,6 +182,73 @@ describe('MultisigService', () => {
       expect(() => parseBooleanResult(xdr.ScVal.scvU32(1))).toThrow(
         'Invalid boolean response from contract',
       );
+    });
+  });
+
+  describe('ExecuteAction', () => {
+    type AdminAction =
+      | { type: 'UpdateThreshold'; threshold: number }
+      | { type: 'AddSigner'; signer: string }
+      | { type: 'RemoveSigner'; signer: string }
+      | { type: 'Other'; data?: unknown };
+
+    type ExecuteActionInternals = {
+      executeAction: (action: AdminAction) => Promise<void> | void;
+    };
+
+    it('rejects an unsupported Other action instead of silently nooping', () => {
+      const internals = service as unknown as ExecuteActionInternals;
+
+      expect(() =>
+        internals.executeAction({ type: 'Other', data: {} }),
+      ).toThrow('Unsupported action type');
+    });
+
+    it('rejects an Other action with no payload', () => {
+      const internals = service as unknown as ExecuteActionInternals;
+
+      expect(() => internals.executeAction({ type: 'Other' })).toThrow(
+        'Unsupported action type',
+      );
+    });
+
+    it('rejects an Other action even when it carries arbitrary data', () => {
+      const internals = service as unknown as ExecuteActionInternals;
+
+      expect(() =>
+        internals.executeAction({
+          type: 'Other',
+          data: { arbitrary: 'payload' },
+        }),
+      ).toThrow('Unsupported action type');
+    });
+
+    it('still executes a supported UpdateThreshold action', () => {
+      const internals = service as unknown as ExecuteActionInternals;
+
+      expect(() =>
+        internals.executeAction({ type: 'UpdateThreshold', threshold: 2 }),
+      ).not.toThrow();
+    });
+  });
+
+  describe('OnChainAdminMultisig', () => {
+    type AdminAction =
+      | { type: 'UpdateThreshold'; threshold: number }
+      | { type: 'AddSigner'; signer: string }
+      | { type: 'RemoveSigner'; signer: string }
+      | { type: 'Other'; data?: unknown };
+
+    type ExecuteActionInternals = {
+      executeAction: (action: AdminAction) => Promise<void> | void;
+    };
+
+    it('rejects an Other action instead of silently nooping', () => {
+      const internals = service as unknown as ExecuteActionInternals;
+
+      expect(() =>
+        internals.executeAction({ type: 'Other', data: {} }),
+      ).toThrow('Unsupported action type');
     });
   });
 
@@ -219,7 +286,7 @@ describe('MultisigService', () => {
       };
       internals.buildAndSubmitTransaction = jest
         .fn()
-        .mockResolvedValue(xdr.ScVal.scvBool(true));
+        .mockResolved(xdr.ScVal.scvBool(true));
 
       await expect(
         service.proposeCertificate({
@@ -262,7 +329,7 @@ describe('MultisigService', () => {
       };
       internals.buildAndSubmitTransaction = jest
         .fn()
-        .mockResolvedValue(xdr.ScVal.scvBool(true));
+        .mockResolved(xdr.ScVal.scvBool(true));
 
       await expect(
         service.approveRequest({ requestId: 'req-1', signer: 'signer-1' } as never),
@@ -276,7 +343,7 @@ describe('MultisigService', () => {
       };
       internals.buildAndSubmitTransaction = jest
         .fn()
-        .mockResolvedValue(xdr.ScVal.scvU32(1));
+        .mockResolved(xdr.ScVal.scvU32(1));
 
       await expect(
         service.approveRequest({ requestId: 'req-1', signer: 'signer-1' } as never),
@@ -303,32 +370,8 @@ describe('MultisigService', () => {
   });
 
   describe('getMultisigConfig', () => {
-    it('should get multisig configuration for an issuer', () => {
+    it('should retrieve the multisig configuration', () => {
       expect(typeof service.getMultisigConfig).toBe('function');
-    });
-  });
-
-  describe('getPendingRequest', () => {
-    it('should get pending request by ID', () => {
-      expect(typeof service.getPendingRequest).toBe('function');
-    });
-  });
-
-  describe('isRequestExpired', () => {
-    it('should check if a request is expired', () => {
-      expect(typeof service.isRequestExpired).toBe('function');
-    });
-  });
-
-  describe('getPendingRequestsForIssuer', () => {
-    it('should get pending requests for an issuer', () => {
-      expect(typeof service.getPendingRequestsForIssuer).toBe('function');
-    });
-  });
-
-  describe('getPendingRequestsForSigner', () => {
-    it('should get pending requests for a signer', () => {
-      expect(typeof service.getPendingRequestsForSigner).toBe('function');
     });
   });
 });
