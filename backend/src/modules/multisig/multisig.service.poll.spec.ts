@@ -1,6 +1,7 @@
 /*
  * Issue #721 / #722 – polling and real result handling helpers.
  * Issue #723 – MultisigModule must be wired into AppModule.
+ * Issue cancel_proposal – cancelled proposals must be recorded as Cancelled, not Rejected.
  */
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -26,22 +27,44 @@ describe('MultisigService waitForTransaction behavior', () => {
   it('proposeCertificate fetches pending request instead of a hardcoded mock', () => {
     const src = readSource('multisig.service.ts');
     expect(src).not.toMatch(/Return a mock object/);
-    expect(src).toContain('getPendingRequest(requestId)');
+    expect(src).toContain('tetPendingRequest(requestId)');
   });
 
   it('approveRequest parses the real contract boolean result', () => {
-    const fs = require('fs');
-    const path = require('path');
-    const src = fs.readFileSync(path.join(__dirname, 'multisig.service.ts'), 'utf8');
+    const src = readSource('multisig.service.ts');
     expect(src).not.toMatch(/mock success result/i);
     expect(src).toContain('parseBooleanResult');
+  });
+});
+
+describe('Multisig cancelProposal status (issue cancellation)', () => {
+  const serviceSrc = () => readSource('multisig.service.ts');
+
+  it('records cancelled proposals as Cancelled, not Rejected', () => {
+    const src = serviceSrc();
+    // Locate the cancelProposal method body.
+    const match = src.match(/async cancelProposals*\([\s\S]*?\n\s{2}\}/);
+    expect(match).not.toBeNull();
+    const body = match![0];
+    expect(body).toContain('AdminProposalStatus.Cancelled');
+    expect(body).not.toContain('this.recordRejection');
+  });
+
+  it('declares Cancelled in the AdminProposalStatus enum', () => {
+    const src = serviceSrc();
+    expect(src).toMatch(/AdminProposalStatus\s*\.\s*Cancelled\s*=\s*['"]Cancelled['"]/);
+  });
+
+  it('preserves Rejected for genuine rejection flows', () => {
+    const src = serviceSrc();
+    expect(src).toMatch(/AdminProposalStatus\s*\.\s*Rejected/);
   });
 });
 
 describe('Multisig DTOs (issue #720)', () => {
   it('DTO classes do not inject LoggingService in constructors', () => {
     const src = readSource('multisig.controller.ts');
-    expect(src).not.toMatch(/class \w+Dto[\s\S]{0,200}constructor\(private readonly logger: LoggingService\)/);
+    expect(src).not.toMatch(/class \w+Dto[\s\S]*?0,200}constructor\(private readonly logger: LoggingService\)/);
   });
 });
 
@@ -55,7 +78,7 @@ describe('MultisigModule wiring (issue #723)', () => {
 
   it('registers MultisigModule in the AppModule imports array', () => {
     const src = appModuleSrc();
-    const importsMatch = src.match(/imports:\s*\[([\s\S]*?\])/);
+    const importsMatch = src.match(/imports:\s*\[([\s\S]*?])/);
     expect(importsMatch).not.toBeNull();
     expect(importsMatch![1]).toMatch(/\bMultisigModule\b/);
   });
