@@ -9,6 +9,7 @@ import {
   Address,
   Account,
   scValToNative,
+  scVal,
 } from '@stellar/stellar-sdk';
 import { StellarService } from '../stellar/services/stellar.service';
 import { LoggingService } from '../../common/logging/logging.service';
@@ -129,6 +130,7 @@ export interface PendingRequestsResponseDto {
 @Injectable()
 export class MultisigService implements OnModuleInit {
   private contractId: string;
+  private certificateContractId: string;
   private server: rpc.Server;
   private networkPassphrase: string;
 
@@ -149,6 +151,7 @@ export class MultisigService implements OnModuleInit {
 
   private initializeMultisig(): void {
     const contractId = this.configService.get<string>('MULTISIG_CONTRACT_ID');
+    const certificateContractId = this.configService.get<string>('CERTIFICATE_CONTRACT_ID');
     const horizonUrl = this.configService.get<string>('STELLAR_HORIZON_URL');
     const network = this.configService.get<string>('STELLAR_NETWORK');
 
@@ -160,6 +163,7 @@ export class MultisigService implements OnModuleInit {
     }
 
     this.contractId = contractId;
+    this.certificateContractId = certificateContractId;
     this.networkPassphrase =
       network === 'testnet' ? Networks.TESTNET : Networks.PUBLIC;
     this.server = new rpc.Server(horizonUrl, {
@@ -178,6 +182,19 @@ export class MultisigService implements OnModuleInit {
     if (!this.server || !this.contractId) {
       throw new Error(
         'MultisigService is not configured: MULTISIG_CONTRACT_ID, STELLAR_HORIZON_URL and STELLAR_NETWORK must be set',
+      );
+    }
+  }
+
+  /**
+   * Guard against use before the certificate contract id has been configured.
+   * Upgrade operations must target the governed certificate contract, never
+   * the multisig contract itself.
+   */
+  private assertCertificateContractConfigured(): void {
+    if (!this.certificateContractId) {
+      throw new Error(
+        'MultisigService is not configured: CERTIFICATE_CONTRACT_ID must be set to upgrade the certificate contract',
       );
     }
   }
@@ -974,6 +991,71 @@ export class MultisigService implements OnModuleInit {
       expires_at: Number(item.expires_at),
       status: Number(item.status) as RequestStatus,
     };
+  }
+
+  /**
+   * Upgrade the governed certificate contract.
+   *
+   * The AdminMultisig contract must never upgrade itself: an approved
+   * "upgrade certificate contract" proposal must invoke `upgrade` on the
+   * certificate contract (which enforces admin auth), using the stored
+   * certificate contract id. Calling `update_current_contract_wasm` here
+   * would replace the multisig's own WASM instead.
+   */
+  async upgradeCertificateContract(
+    adminPublicKey: string,
+    newWasmHash: Buffer | string,
+  ): Promise<{ transactionHash: string }> {
+    try {
+      this.assertInitialized();
+      this.assertCertificateContractConfigured();
+
+      const adminKeyPair =
+        this.stellarService.getKeypairFromPublicKey(adminPublicKey);
+      const accountResponse = await this.server.getAccount(adminPublicKey);
+      const sourceAccount = new Account(
+        adminPublicKey,
+        accountResponse.sequenceNumber(),
+      );
+
+      const certificateContract = new Contract(this.certificateContractId);
+      const wasmHashScVal = xdr.ScVal.scvBytes(
+        typeof newWasmHash === 'string'
+          ? Buffer.from(newWasmHash, 'hex')
+          : newWasmHash,
+      );
+
+      const transaction = new TransactionBuilder(sourceAccount, {
+        fee: '100000',
+        networkPassphrase: this.networkPassphrase,
+      })
+        .addOperation(
+          certificateContract.call('upgrade', wasmHashScVal),
+        )
+        .setTimeout(30)
+        .build();
+
+      transaction.sign(adminKeyPair);
+      const response = await this.server.sendTransaction(transaction);
+
+      if (response.status === 'PENDING' || response.status === 'DUPLICATE') {
+        const txResponse = await this.waitForTransaction(response.hash);
+        if (txResponse.status === rpc.Api.GetTransactionStatus.SUCCESS) {
+          this.logger.log(
+            `Certificate contract ${this.certificateContractId} upgraded`,
+          );
+          return { transactionHash: response.hash };
+        }
+      }
+
+      throw new Error(`Transaction failed: ${response.status}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to upgrade certificate contract ${this.certificateContractId}`,
+        error,
+      );
+      throw error;
+    }
   }
 }
 
