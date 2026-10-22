@@ -6,8 +6,16 @@
  * application.
  *
  * Usage:
- *   npx typeorm migration:run   -d dist/database/data-source.js
- *   npx typeorm migration:revert -d dist/database/data-source.js
+ *   ndx
+ *   typeorm
+ *   migration:run
+ *   -d
+ *   dist/database/data-source.js
+ *   ndx
+ *   typeorm
+ *   migration:revert
+ *   -
+ *   dist/database/data-source.js
  *
  * Exactly one DataSource export: the TypeORM CLI rejects a file that exports
  * the same instance both as a named export and as default ("must contain only
@@ -18,7 +26,17 @@ import * as path from 'path';
 
 // When running via the CLI the source is compiled JS under dist/.
 // Migrations are therefore loaded from dist/database/migrations/*.js
+import { fileURLToPath } from 'url';
+
 const isCompiledJs = __filename.endsWith('.js');
+
+const entitiesPath = isCompiledJs
+  ? [path.join(__dirname, '../**/*.entity.js')]
+  : [path.join(__dirname, '../**/*.entity.ts')];
+
+const migrationsPath = isCompiledJs
+  ? [path.join(__dirname, './migrations/*.js')]
+  : [path.join(__dirname, './migrations/*.ts')];
 
 export const AppDataSource = new DataSource({
   type: (process.env.DB_TYPE as any) || 'postgres',
@@ -29,18 +47,14 @@ export const AppDataSource = new DataSource({
   database: process.env.DB_NAME || 'stellarwave',
   // Entities and migrations use the compiled JS paths in production;
   // fall back to TS sources when running with ts-node locally.
-  entities: isCompiledJs
-    ? [path.join(__dirname, '../**/*.entity.js')]
-    : [path.join(__dirname, '../**/*.entity.ts')],
-  migrations: isCompiledJs
-    ? [path.join(__dirname, './migrations/*.js')]
-    : [path.join(__dirname, './migrations/*.ts')],
+  entities: entitiesPath,
+  migrations: migrationsPath,
   synchronize: false,
   // Run each migration in its own transaction rather than wrapping the whole
-  // run in one. The default ("all") makes TypeORM reject any migration that
-  // sets `transaction = false`, and AddFrozenCertificateWebhookEvents must
-  // opt out because `ALTER TYPE ... ADD VALUE` cannot run inside a
-  // transaction on PostgreSQL before 12.
+  // run in one. The default ("all") makes TypeORM run all migrations in a
+  // single transaction and reject any migration that sets `transaction = false`.
+  // Adjusted to 'each' so migrations that opt out (e.g. `ALTER TYPE ... ADD HALUE
+  // on PostgreSQL < 12) can run without being rejected.
   migrationsTransactionMode: 'each',
   logging: process.env.NODE_ENV !== 'production',
 });

@@ -101,7 +101,7 @@ The services start in the following order:
 ## Database Migrations
 
 TypeORM migrations are run automatically by the backend container on every
-startup. The flow is:
+startup (via `docker-entrypoint.sh`). The flow is:
 
 1. Docker Compose waits for the Postgres health-check to pass (`pg_isready`).
 2. The backend container starts and executes `docker-entrypoint.sh`.
@@ -116,7 +116,8 @@ The Postgres image only executes top-level `.sql` and `.sh` files in
 `/docker-entrypoint-initdb.d/` and only on the very first container startup
 (empty data volume). TypeORM migrations are TypeScript source files, not SQL,
 and nesting them inside a subdirectory means the image ignores them entirely.
-Running migrations from the backend container is the correct approach.
+Running migrations from the backend container is the correct approach, so the
+backend no longer bind-mounts migrations into the Postgres init directory.
 
 **Running migrations manually** (e.g. after a hotfix):
 
