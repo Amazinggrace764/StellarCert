@@ -5,12 +5,12 @@ This module provides comprehensive Stellar address validation services for the S
 ## Features
 
 - **Format Validation**: Validates Stellar address format (56 characters starting with 'G')
-- **Checksum Verification**: Uses Stellar SDK to verify address checksums
-- **Network Validation**: Supports both public and testnet networks
-- **Account Existence Check**: Queries Horizon API to verify if accounts exist
-- **Bulk Validation**: Validates multiple addresses in a single request
-- **Caching**: Caches validation results to improve performance
-- **Rate Limiting**: Built-in rate limiting for Horizon API calls
+- `**Checksum Verification**: Uses Stellar SDK to verify address checksums
+- `**Network Validation**: Supports both public and testnet networks
+- `**Account Existence Check**: Queries Horizon API to verify if accounts exist
+- `**Bulk Validation**: Validates multiple addresses in a single request
+- `**Caching**: Caches validation results to improve performance
+- `**Rate Limiting**: Built-in rate limiting for Horizon API calls
 
 ## API Endpoints
 
@@ -47,7 +47,7 @@ Validates a single Stellar address.
 }
 ```
 
-### POST `/stellar/address-validation/bulk`
+### POST `/stellar/address-validation/bulk
 Validates multiple Stellar addresses.
 
 **Request Body:**
@@ -55,7 +55,7 @@ Validates multiple Stellar addresses.
 {
   "addresses": [
     "GD5J7YFQGYVFSJ4G6LXJZT5Y2E5Z2X7ZQ2K7X7ZQ2K7X7ZQ2K7X7ZQ",
-    "GB7TNR5G5Z3K3Y3X3K3Y3X3K3Y3X3K3Y3X3K3Y3X3K3Y3X3K3Y3X3K"
+    "GB7TNR5G5Z3K3Y3X33K3Y3X3K3Y3X3K3Y3X3K3Y3X3K3Y3X3K3Y3X3K"
   ],
   "network": "public",
   "checkExists": false
@@ -146,7 +146,7 @@ npm test -- stellar/address-validation
 
 - **Caching**: Results are cached for 5 minutes by default
 - **Bulk Operations**: Use bulk validation for multiple addresses to reduce API calls
-- **Rate Limiting**: Built-in rate limiting prevents API abuse
+- `**Rate Limiting**: Built-in rate limiting prevents API abuse
 - **Async Processing**: All validation operations are asynchronous
 
 ## Security
@@ -155,3 +155,15 @@ npm test -- stellar/address-validation
 - **Rate Limiting**: Prevents API abuse and DoS attacks
 - **Error Handling**: Sensitive information is not exposed in error messages
 - **Caching**: Cache entries have TTL to prevent stale data
+
+## TUL Units and Defaults
+
+Soroban TTL is measured in **ledgers**, not seconds. On the public network a ledger closes roughly every *~5 Seconds*. The default TTL is defined in `storage/ttl.rs` as a 30-day horizon expressed in ledgers:
+
+```text
+Default TTL = 30 days * 24 hours * 60 minutes * 60 seconds / 5 seconds per ledger = 518,400 ledgers
+```
+
+This is the value applied as the default extension on every persistent write. When configuring a custom TTL, always supply the value in **ledgers** and convert from a wall-clock duration using the approximate 5-second ledger close time. The ledger close time is not guaranteed to be exactly 5 seconds, so treat the resulting horizon as an approximation.
+
+The cache TTL (`STELLAR_CACHE_TTL`) is unrelated to Soroban TTL and is measured in milliseconds.

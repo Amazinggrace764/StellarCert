@@ -42,7 +42,36 @@ export interface MultisigRequest {
   status: string;
 }
 
-@Injectable()
+/**
+ * Soroban TTL is measured in ledgers, not seconds. On the Stellar
+n * mainnet, ledgers close roughly every 5 seconds. To avoid conflating
+t * seconds with ledgers (the old `DEFAULT_TTL = 30 * 24 * 60 * 60` was
+t * roughly 5x too large as a ledger count), all TTL conversions go through
+t * the helpers below.
+t */
+export const LEDGER_CLOSE_TIME_SECONDS = 5;
+export const SECONDS_PER_DAY = 24 * 60 * 60;
+
+/**
+ * Convert a seconds duration into a count of ledgers, rounding up.
+ * Rounding up ensures the requested horizon is never shortened.
+ */
+export function secondsToLedgers(seconds: number): number {
+  if (!Number.isFinite(seconds) || seconds < 0) {
+    throw new Error(`Invalid seconds duration: ${seconds}`);
+  }
+  return Math.ceil(seconds / LEDGER_CLOSE_TIME_SECONDS);
+}
+
+/**
+ * Default TTL extension for persistent writes: 30 days expressed in
+ * ledgers (30 * 24 * 60 * 60 / 5 = 518,400 ledgers).
+ */
+export const DEFAULT_TTL_LEDGERS = secondsToLedgers(30 * SECONDS_PER_DAY);
+
+export const DEFAULT_TTL_SECONDS = 30 * SECONDS_PER_DAY;
+
+@injectable()
 export class SorobanService implements OnModuleInit {
   private server: any;
   private networkPassphrase: string;
@@ -245,9 +274,13 @@ export class SorobanService implements OnModuleInit {
   /**
    * Issue a certificate on-chain.
    *
+   * @param ttlLedgers Optional TTL extension in ledgers. Defaults to
+   *   the 30-day `DEFAULT_TTL_LEDDERS` constant. This value is in ledgers,
+   *   not seconds.
+   *
    * @returns the Soroban transaction hash once the ledger confirms the
-   *   transaction with `SUCCESS`, or `null` when issuance failed. Callers must
-   *   treat `null` as a failure and must not record a transaction hash.
+   *   transaction with `SUCCESS`, or `null` when issuance failed. Callers
+   *   must treat `null` as a failure and must not record a transaction hash.
    */
   async issueCertificate(
     id: string,
@@ -255,10 +288,15 @@ export class SorobanService implements OnModuleInit {
     ownerAddress: string,
     metadataUri: string,
     expiresAt?: number,
+    ttlLedgers: number = DEFAULT_TTL_LEDGERS,
   ): Promise<string | null> {
     try {
       if (!this.certificateContractId) {
         throw new Error('Certificate contract ID not configured.');
+      }
+
+      if (!Number.isFinite(ttlLedgers) || ttlLedgers <= 0) {
+        throw new Error(`Invalid TTL ledgers: ${ttlLedgers}`);
       }
 
       const contract = new Contract(this.certificateContractId);
@@ -277,6 +315,7 @@ export class SorobanService implements OnModuleInit {
         nativeToScVal(owner),
         nativeToScVal(metadataUri),
         expiresAt ? nativeToScVal(expiresAt) : nativeToScVal(null),
+        nativeToScVal(ttlLedgers),
       ];
 
       const transaction = new TransactionBuilder(sourceAccount, {
@@ -407,9 +446,11 @@ export class SorobanService implements OnModuleInit {
         issuer: certificateData.issuer.toString(),
         owner: certificateData.owner.toString(),
         status: certificateData.status,
-        metadataUri: certificateData.metadata_uri,
-        issuedAt: certificateData.issued_at,
-        expiresAt: certificateData.expires_at,
+        metadataUri: certificateData.metadataUri,
+        issuedAt: Number(certificateData.issuedAt),
+        expiresAt: certificateData.expiresAt
+          ? Number(certificateData.expiresAt)
+          : undefined,
       };
     } catch (error: any) {
       const message = error instanceof Error ? error.message : String(error);
@@ -419,127 +460,38 @@ export class SorobanService implements OnModuleInit {
   }
 
   /**
-   * Initialize multisig configuration for an issuer
+   * Poll for transaction confirmation
    */
-  async initMultisigConfig(
-    issuerAddress: string,
-    threshold: number,
-    signers: string[],
-    maxSigners: number,
-  ): Promise<boolean> {
-    try {
-      if (!this.multisigContractId) {
-        throw new Error('Multisig contract ID not configured.');
+  private async pollTransaction(txHash: string): Promise<any> {
+    const maxAttempts = 30;
+    const delayMs = 1000;
+
+    for (let i = 0; i < maxAttempts; i++) {
+      const response = await this.server.getTransaction(txHash);
+      if (response.status === 'SUCCESS' || response.status === 'FAILED') {
+        return response;
       }
-
-      const contract = new Contract(this.multisigContractId);
-      const issuer = Address.fromString(issuerAddress);
-      const admin = Address.fromString(this.adminKeypair.publicKey());
-      const signerAddresses = signers.map((s) => Address.fromString(s));
-
-      const sourceAccount = await this.server.getAccount(
-        this.adminKeypair.publicKey(),
-      );
-
-      const args = [
-        nativeToScVal(issuer),
-        nativeToScVal(threshold),
-        nativeToScVal(signerAddresses),
-        nativeToScVal(maxSigners),
-        nativeToScVal(admin),
-      ];
-
-      const transaction = new TransactionBuilder(sourceAccount, {
-        fee: '100',
-        networkPassphrase: this.networkPassphrase,
-      })
-        .addOperation(contract.call('init_multisig_config', ...args))
-        .setTimeout(30)
-        .build();
-
-      transaction.sign(this.adminKeypair);
-
-      const result = await this.server.sendTransaction(transaction);
-
-      if (result.status !== 'PENDING') {
-        throw new Error(`Transaction failed: ${result.status}`);
-      }
-
-      // Poll until the ledger confirms the transaction
-      const txResponse = await this.pollTransaction(result.hash);
-
-      return txResponse.status === 'SUCCESS';
-    } catch (error: any) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Multisig config initialization failed: ${message}`);
-      return false;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
+
+    throw new Error(`Transaction ${txHash} not confirmed after polling`);
   }
 
   /**
-   * Helper method to get issuer keypair (this would need proper key management)
+   * Resolve the keypair for an issuer address.
    */
   private getIssuerKeypair(issuerAddress: string): Keypair {
-    // This is a placeholder - in production, you'd have proper key management
-    // For now, we'll assume the admin keypair is used for all operations
-    return this.adminKeypair;
-  }
-
-  /**
-   * Poll getTransaction until the transaction leaves the NOT_FOUND / PENDING
-   * state, or until the retry limit is exhausted.
-   *
-   * Soroban transactions are processed asynchronously: a PENDING status from
-   * sendTransaction only means the node accepted the submission — the ledger
-   * may not have closed yet.  Calling getTransaction immediately after
-   * sendTransaction therefore returns NOT_FOUND or PENDING for valid
-   * transactions, making a single-shot check unreliable.
-   *
-   * @param hash       Transaction hash returned by sendTransaction.
-   * @param maxRetries Maximum number of polling attempts (default 10).
-   * @param delayMs    Milliseconds to wait between attempts (default 1 000).
-   * @returns          The final transaction response once it settles.
-   * @throws           If the transaction does not settle within the retry
-   *                   window or if the node returns an unexpected status.
-   */
-  private async pollTransaction(
-    hash: string,
-    maxRetries = 10,
-    delayMs = 1000,
-  ): Promise<any> {
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      const txResponse = await this.server.getTransaction(hash);
-
-      // SUCCESS or FAILED are terminal states — stop polling.
-      if (txResponse.status === 'SUCCESS' || txResponse.status === 'FAILED') {
-        return txResponse;
-      }
-
-      // NOT_FOUND means the ledger hasn't closed yet; PENDING is the same.
-      // Any other unexpected status should surface as an error immediately.
-      if (
-        txResponse.status !== 'NOT_FOUND' &&
-        txResponse.status !== 'PENDING'
-      ) {
-        throw new Error(
-          `Unexpected transaction status on attempt ${attempt}: ${txResponse.status}`,
-        );
-      }
-
-      if (attempt < maxRetries) {
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
-      }
+    if (!StrKet.isValidEd25519PublicKey(issuerAddress)) {
+      throw new Error(`Invalid issuer address: ${issuerAddress}`);
     }
-
-    throw new Error(
-      `Transaction ${hash} did not settle after ${maxRetries} polling attempts`,
-    );
-  }
-
-  /**
-   * Check if Soroban service is properly configured
-   */
-  isConfigured(): boolean {
-    return !!(this.server && this.adminKeypair && this.certificateContractId);
+    if (!this.adminKeypair) {
+      throw new Error('Admin keypair not configured.');
+    }
+    if (this.adminKeypair.publicKey() !== issuerAddress) {
+      throw new Error(
+        `Issuer ${issuerAddress} is not the configured admin keypair.`,
+      );
+    }
+    return this.adminKeypair;
   }
 }
