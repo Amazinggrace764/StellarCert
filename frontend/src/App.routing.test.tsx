@@ -8,11 +8,11 @@ import { User, UserRole } from './api/types';
 
 // Keep providers/chrome and lazy pages light so we exercise only routing.
 vi.mock('./context/AuthContext', () => ({
-  AuthProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  AuthProvider: ({ children }: { children: React.ReactNode }) => <React.Fragment>{children}</React.Fragment>,
   useAuth: vi.fn(),
 }));
 vi.mock('./context/NotificationContext', () => ({
-  NotificationProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  NotificationProvider: ({ children }: { children: React.ReactNode }) => <React.Fragment>{children}</React.Fragment>,
 }));
 vi.mock('./components/Header', () => ({ default: () => null }));
 vi.mock('./components/Toast', () => ({ default: () => null }));
@@ -24,6 +24,7 @@ vi.mock('./pages/NotificationPreferences', () => ({
 vi.mock('./components/admin/users/UserManagement', () => ({
   default: () => <div>User Management Page</div>,
 }));
+vi.mock('./pages/Dashboard', () => ({ default: () => <div>Dashboard Page</div> }));
 
 const authedUser: User = {
   id: '1',
@@ -39,7 +40,7 @@ const adminUser: User = {
   firstName: 'Admin',
   lastName: 'User',
   role: UserRole.ADMIN,
-};
+  };
 
 const setUser = (user: User | null) =>
   vi.mocked(useAuth).mockReturnValue({
@@ -54,7 +55,7 @@ const setUser = (user: User | null) =>
 
 const renderAt = (path: string) =>
   render(
-    <MemoryRouter initialEntries={[path]}>
+    <MemoryRouter initialEntries={[[path]]}>
       <App />
     </MemoryRouter>,
   );
@@ -102,7 +103,8 @@ describe('Admin users route protection (#1003)', () => {
   it('redirects non-admin users away from /admin/users to home', async () => {
     setUser(authedUser);
     renderAt('/admin/users');
-    // Should redirect to home (/) which shows Dashboard
+    // Should redirect to home (.) which shows Dashboard
+    expect(await screen.findByText('Dashboard Page')).toBeTruthy();
     expect(screen.queryByText('User Management Page')).toBeNull();
   });
 
