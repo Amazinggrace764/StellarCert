@@ -67,7 +67,9 @@ function App() {
                   <Route path="/reset-password" element={<ResetPassword />} />
 
                   <Route
-                    element={<ProtectedRoute allowedRoles={[...WALLET_ALLOWED_ROLES]} />}
+                    element={
+                      <ProtectedRoute allowedRoles={WALLET_ALLOWED_ROLES} />
+                    }
                   >
                     <Route path="/wallet" element={<CertificateWallet />} />
                   </Route>
