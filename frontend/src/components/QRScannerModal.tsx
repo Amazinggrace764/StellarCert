@@ -24,6 +24,7 @@ export default function QRScannerModal({
 }: QRScannerModalProps) {
   const scannerRef = useRef<unknown>(null);
   const containerId = "qr-scanner-container";
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   const [status, setStatus] = useState<ScannerStatus>("initializing");
   const [errorMsg, setErrorMsg] = useState<string>("");
@@ -32,6 +33,7 @@ export default function QRScannerModal({
   const [torchOn, setTorchOn] = useState(false);
   const [hasMultipleCameras, setHasMultipleCameras] = useState(false);
   const [facingMode, setFacingMode] = useState<"environment" | "user">("environment");
+  const [dialogEl, setDialogEl] = useState<HTMLDivElement | null>(null);
 
   const stopScanner = useCallback(async () => {
     if (scannerRef.current) {
@@ -133,6 +135,50 @@ export default function QRScannerModal({
     };
   }, [isOpen, facingMode, startScanner, stopScanner]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    closeButtonRef.current?.focus();
+    return () => {
+      previouslyFocused?.focus?.();
+    };
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || !dialogEl) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = dialogEl.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      );
+      if (focusable.length === 0) {
+        event.preventDefault();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      if (event.shiftKey) {
+        if (active === first || !dialogEl.contains(active)) {
+          event.preventDefault();
+          last.focus();
+        }
+      } else if (active === last || !dialogEl.contains(active)) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen, dialogEl, onClose]);
+
   const handleToggleTorch = async () => {
     if (!scannerRef.current) return;
     try {
@@ -196,6 +242,11 @@ export default function QRScannerModal({
         }}
       >
         <div
+          ref={setDialogEl}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="qr-scanner-modal-title"
+          aria-label="QR scanner"
           className="relative overflow-hidden rounded-2xl"
           style={{
             background: "linear-gradient(145deg, #13131a 0%, #0d0d12 100%)",
@@ -261,6 +312,7 @@ export default function QRScannerModal({
                 </button>
               )}
               <button
+                ref={closeButtonRef}
                 type="button"
                 onClick={onClose}
                 aria-label="Close QR scanner"
