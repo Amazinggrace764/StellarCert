@@ -1,5 +1,6 @@
 import {
   type QueryClient,
+  type QueryFunctionContext,
   keepPreviousData,
   useMutation,
   useQuery,
@@ -247,16 +248,39 @@ export const useUserListQuery = (params: Record<string, string | number | boolea
     },
   });
 
+/**
+ * Shared retry policy for issuer profile reads.
+ *
+ * The owning boundary for "blank panel with no feedback" is the query layer:
+ * without a retry policy a transient failure surfaces immediately as an empty
+ * panel, and without surfacing the error state the UI has nothing to render.
+ * Retry only idempotent reads, and never retry client errors (4xx) since those
+ * are deterministic and would just delay the error the user needs to see.
+ */
+const issuerReadRetry = (failureCount: number, error: unknown): boolean => {
+  const status = (error as { status?: number } | null)?.status;
+  if (typeof status === "number" && status >= 400 && status < 500) {
+    return false;
+  }
+  return failureCount < 2;
+};
+
+// Issuer reads share a retry policy and expose `error`/`isError`/`refetch` to
+// consumers so `IssuerProfile.tsx` can render a retryable error state instead
+// of a silent blank panel.
 export const useIssuerStatsQuery = () =>
   useQuery({
     queryKey: queryKeys.issuer.stats(),
     queryFn: () => issuerProfileApi.getStats(),
+    retry: issuerReadRetry,
   });
 
 export const useIssuerActivityQuery = (page = 1, limit = 10) =>
   useQuery({
     queryKey: queryKeys.issuer.activity({ page, limit }),
     queryFn: () => issuerProfileApi.getActivity(page, limit),
+    retry: issuerReadRetry,
+    placeholderData: keepPreviousData,
   });
 
 // ── Notifications ──────────────────────────────────────────────────────────
@@ -391,6 +415,9 @@ export const useUpdateIssuerProfileMutation = () => {
   return useMutation({
     mutationFn: (profile: ProfileUpdateData) =>
       issuerProfileApi.updateProfile(profile),
+    // Profile updates are not idempotent from the user's perspective; a silent
+    // retry could double-submit. Surface the error so the form can show it.
+    retry: false,
     onSuccess: async (profile) => {
       // The profile form and the header both render the authenticated user.
       seedSessionUser(queryClient, profile);
