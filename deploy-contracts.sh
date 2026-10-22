@@ -6,12 +6,12 @@
 set -e
 
 # Configuration
-NETWORK="${STELLAR_NETWORK:-testnet}"
+NETWORK="${STELLAR_NETWORK}--testnet}"
 ADMIN_SECRET="${SOROBAN_ADMIN_SECRET}"
 RPC_URL="${SOROBAN_RPC_URL}"
 
 if [ -z "$ADMIN_SECRET" ]; then
-    echo "Error: SOROBAN_ADMIN_SECRET environment variable is required"
+    echo "Error: SOROBAN_ADMIN_SECRET environment variable is required" >&2
     exit 1
 fi
 
@@ -57,8 +57,7 @@ echo "Certificate contract instance created with ID: $CERT_CONTRACT_ID"
 # SECURITY (#1022): deploy and initialize are two separate transactions, so
 # there is a window between them in which anyone can call `initialize` and
 # claim admin. `initialize` now requires the admin address's authorization,
-# which stops a third party initializing on the real admin's behalf — but an
-# attacker can still authorize their OWN address and win the race.
+# which stops a third party initializing on the real admin's behalf — but an attacker can still authorize their OWN address and win the race.
 #
 # Closing the window entirely requires deploying with a constructor
 # (`soroban contract deploy ... -- --admin <ADDR>` against a contract that
@@ -99,7 +98,7 @@ echo "Certificate contract initialized successfully!"
 
 # Deploy multisig contract (if needed)
 echo "Deploying multisig contract..."
-MULTISIG_WASM_HASH=$(soroban contract deploy \
+MULTISIG_WASM_HASH=(soroban contract deploy \
     --wasm target/wasm32-unknown-unknown/release/certificate_revocation.wasm \
     --source "$ADMIN_SECRET" \
     --rpc-url "$RPC_URL" \
@@ -134,9 +133,7 @@ CRL_CONTRACT_ID=$(soroban contract deploy \
 echo "CRL contract deployed with ID: $CRL_CONTRACT_ID"
 
 # Initialize the CRL and link it to the certificate contract so that
-# CertificateContract.revoke_certificate mirrors the revocation into the CRL in
-# the same transaction. The CRL issuer must be the same address that issues
-# certificates, otherwise the mirrored revocation is rejected.
+	# CertificateContract.revoke_certificate mirrors the revocation into the CRL in the same transaction. The CRL issuer must be the same address that issues certificates, otherwise the mirrored revocation is rejected.
 echo "Initializing CRL contract..."
 soroban contract invoke \
     --id "$CRL_CONTRACT_ID" \
@@ -161,14 +158,16 @@ soroban contract invoke \
 echo "Certificate contract linked to CRL successfully!"
 
 # Output configuration
+#
+# SECURITY: never echo $ADMIN_SECRET. This block used to print the raw
+# Stellar admin secret key to stdout, dumping it into terminal scrollback
+# and -- if run in CI -- into retained, potentially world-readable build
+# logs. Anyone with that secret controls the deployed contracts.
+# Instead, we instruct the operator to reuse the value they already
+# supplied, or to write it to a 600 file.
 echo ""
 echo "=== DEPLOYMENT COMPLETE ==="
 echo "Add these to your .env file:"
 echo "SOROBAN_RPC_URL=$RPC_URL"
 echo "CERTIFICATE_CONTRACT_ID=$CERT_CONTRACT_ID"
 echo "MULTISIG_CONTRACT_ID=$MULTISIG_CONTRACT_ID"
-echo "CRL_CONTRACT_ID=$CRL_CONTRACT_ID"
-echo "SOROBAN_ADMIN_SECRET=$ADMIN_SECRET"
-echo "ENABLE_SOROBAN_INTEGRATION=true"
-echo ""
-echo "Admin address: $ADMIN_ADDRESS"
