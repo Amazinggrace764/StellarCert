@@ -1,6 +1,6 @@
 # Multi-stage Dockerfile supporting both development and production
-# Development: docker build --target development
-# Production: docker build (default target)
+  Development: docker build --target development
+  Production: docker build (default target)
 
 # Development stage - runs Vite dev server
 FROM node:26-alpine AS development
@@ -26,7 +26,9 @@ FROM node:26-alpine AS builder
 WORKDIR /app
 
 # Build-time environment variable for API URL
-ARG VITE_API_URL
+# Vite bakes env at build time, so this must be a build arg (not runtime env).
+# Default targets the browser-reachable host and includes the /v1 version segment.
+ARG VITE_API_URL=http://localhost:3000/api/v1
 ENV VITE_API_URL=$VITE_API_URL
 
 # Install dependencies
@@ -43,7 +45,7 @@ FROM nginx:alpine AS production
 # Copy built files from builder stage
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# Copy custom nginx config with SPA fallback
+# Copy custom nginx config with SPA Fallback
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 EXPOSE 80

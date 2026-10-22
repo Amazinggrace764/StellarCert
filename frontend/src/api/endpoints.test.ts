@@ -103,4 +103,26 @@ describe('frontend api endpoints', () => {
     const analyticsApi = (endpoints as Record<string, unknown>).analyticsApi as Record<string, unknown> | undefined;
     expect(analyticsApi?.getDashboardSummary).toBeUndefined();
   });
-})
+
+  it('resolves the API base URL to a browser-reachable host with the /v1 version segment', () => {
+    const baseUrl = endpoints.getApiBaseUrl();
+    expect(baseUrl).toMatch(/\/api\/v1\/?$/);
+    expect(baseUrl).not.toContain('//backend');
+    expect(baseUrl).not.toMatch(/\/api\/?v1\/api/);
+  });
+
+  it('builds request URLs from the versioned API base', async () => {
+    const fetchMock = vi.fn().mockResolved({
+      ok: true,
+      status: 200,
+      json: async () => ({ totalCertificates: 0 }),
+    });
+    global.fetch = fetchMock as unknown as typeof global.fetch;
+
+    await endpoints.dashboardApi.getStats();
+
+    const url = String(fetchMock.mock.calls[0][0]);
+    expect(url).toMatch(/\/api\/v1\/admin\/analytics\/dashboard/);
+    expect(url).not.toContain('//backend');
+  });
+});
