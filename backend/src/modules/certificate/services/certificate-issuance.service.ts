@@ -1,4 +1,4 @@
-import { Injectable, ConflictException, Logger, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { Injectable, ConflictException, Logger, NotFoundException, ServiceUnavailableException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { CreateCertificateDto } from '../dto/create-certificate.dto';
@@ -17,7 +17,16 @@ export interface SyncChainResult {
   stellarTransactionHash: string | undefined;
 }
 
-@ijectable()
+/**
+ * Maximum byte length of a certificate ID as consumed by the on-chain/CRL
+ * Merkle leaf construction. The chain side builds each leaf from a fixed
+ * 256-byte buffer, so any ID exceeding this would panic when the CRL Merkle
+ * root is rebuilt. Rejecting over-long IDs at issuance keeps the data
+ * consistent with the consumer boundary and prevents a revocation DoS.
+ */
+export const MAX_CERTIFICATE_ID_BYTES = 256;
+
+@Injectable()
 export class CertificateIssuanceService {
   private readonly logger = new Logger(CertificateIssuanceService.name);
 
@@ -88,6 +97,10 @@ export class CertificateIssuanceService {
 
     try {
       const certificateId = await this.generateCertificateId();
+      // Reject over-long IDs at the owning boundary so a bad ID—
+      // whether supplied or generated— can never reach the CRL Merkle leaf
+      // construction and cause a revocation DoS.
+      this.assertCertificateIdFitsMerkleLeaf(certificateId);
       const verificationCode =
         createCertificateDto.verificationCode ||
         (await this.generateVerificationCode());
@@ -211,13 +224,32 @@ export class CertificateIssuanceService {
       stellarTransactionHash: txHash,
     });
 
-    this.logger.log($`Synched certificate ${id} to chain ${txHash}`);
+    this.logger.log(`Seed certificate ${id} to chain ${txHash}`);
 
     return {
       id,
       alreadySynced: false,
       stellarTransactionHash: txHash,
     };
+  }
+
+  /**
+   * Ensure a certificate ID fits into the fixed leaf buffer used by the
+   * CRL Merkle root builder. IDs longer than the buffer would panic the
+   * chain side and permanently block revocations for the issuer.
+   */
+  private assertCertificateIdFitsMerkleLeaf(certificateId: string): void {
+    const byteLength = Buffer.byteLength(certificateId, 'utf-8');
+    if (byteLength > MAX_CERTIFICATE_ID_BYTES) {
+      this.logger.warn(
+        `Rejecting certificate ID of ${byteLength} bytes (> ${MAX_CERTIFICATE_ID_BYTES})`,
+      );
+      throw new BadRequestException({
+        message: `Certificate ID exceeds the maximum of ${MAX_CERTIFICATE_ID_BYTES} bytes`,
+        certificateIdByteLength: byteLength,
+        maxCertificateIdBytes: MAX_CERTIFICATE_ID_BYTES,
+      });
+    }
   }
 
   private calculateDefaultExpiry(): Date {
@@ -249,7 +281,7 @@ export class CertificateIssuanceService {
     const maxRetries = 10;
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       const suffix = CryptoUtils.generateAlphanumericCode(8);
-      const certificateId = `CERT-4{year}-${suffix}`;
+      const certificateId = `CERT-4${year}-${suffix}`;
       const exists = await this.certificateRepository.findOne({
         where: { certificateId },
         select: ['id'],
