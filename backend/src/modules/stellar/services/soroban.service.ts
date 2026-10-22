@@ -300,7 +300,7 @@ export class SorobanService implements OnModuleInit {
 
       if (txResponse.status !== 'SUCCESS') {
         this.logger.error(
-          `Certificate issuance transaction ${result.hash} ended with status ${txResponse.status}`,
+          ` Certificate issuance transaction ${result.hash} ended with status ${txResponse.status}`,
         );
         return null;
       }
@@ -407,139 +407,33 @@ export class SorobanService implements OnModuleInit {
         issuer: certificateData.issuer.toString(),
         owner: certificateData.owner.toString(),
         status: certificateData.status,
-        metadataUri: certificateData.metadata_uri,
-        issuedAt: certificateData.issued_at,
-        expiresAt: certificateData.expires_at,
+        metadataUri: certificateData.metadataUri,
+        issuedAt: Number(certificateData.issuedAt),
+        expiresAt: certificateData.expiresAt
+          ? Number(certificateData.expiresAt)
+          : undefined,
       };
     } catch (error: any) {
       const message = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Get certificate failed: ${message}`);
+      this.logger.error(`Failed to fetch certificate ${id}: ${message}`);
       return null;
     }
   }
 
-  /**
-   * Initialize multisig configuration for an issuer
-   */
-  async initMultisigConfig(
-    issuerAddress: string,
-    threshold: number,
-    signers: string[],
-    maxSigners: number,
-  ): Promise<boolean> {
-    try {
-      if (!this.multisigContractId) {
-        throw new Error('Multisig contract ID not configured.');
+  private getIssuerKeypair(): Keypair {
+    throw new Error('Issuer keypair lookup is not configured.');
+  }
+
+  private async pollTransaction(hash: string): Promise<any> {
+    const maxAttempts = 10;
+    const delayMs = 1000;
+    for (let i = 0; i < maxAttempts; i++) {
+      const response = await this.server.getTransaction(hash);
+      if (response.status !== 'NOT_FOUND') {
+        return response;
       }
-
-      const contract = new Contract(this.multisigContractId);
-      const issuer = Address.fromString(issuerAddress);
-      const admin = Address.fromString(this.adminKeypair.publicKey());
-      const signerAddresses = signers.map((s) => Address.fromString(s));
-
-      const sourceAccount = await this.server.getAccount(
-        this.adminKeypair.publicKey(),
-      );
-
-      const args = [
-        nativeToScVal(issuer),
-        nativeToScVal(threshold),
-        nativeToScVal(signerAddresses),
-        nativeToScVal(maxSigners),
-        nativeToScVal(admin),
-      ];
-
-      const transaction = new TransactionBuilder(sourceAccount, {
-        fee: '100',
-        networkPassphrase: this.networkPassphrase,
-      })
-        .addOperation(contract.call('init_multisig_config', ...args))
-        .setTimeout(30)
-        .build();
-
-      transaction.sign(this.adminKeypair);
-
-      const result = await this.server.sendTransaction(transaction);
-
-      if (result.status !== 'PENDING') {
-        throw new Error(`Transaction failed: ${result.status}`);
-      }
-
-      // Poll until the ledger confirms the transaction
-      const txResponse = await this.pollTransaction(result.hash);
-
-      return txResponse.status === 'SUCCESS';
-    } catch (error: any) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Multisig config initialization failed: ${message}`);
-      return false;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
-  }
-
-  /**
-   * Helper method to get issuer keypair (this would need proper key management)
-   */
-  private getIssuerKeypair(issuerAddress: string): Keypair {
-    // This is a placeholder - in production, you'd have proper key management
-    // For now, we'll assume the admin keypair is used for all operations
-    return this.adminKeypair;
-  }
-
-  /**
-   * Poll getTransaction until the transaction leaves the NOT_FOUND / PENDING
-   * state, or until the retry limit is exhausted.
-   *
-   * Soroban transactions are processed asynchronously: a PENDING status from
-   * sendTransaction only means the node accepted the submission — the ledger
-   * may not have closed yet.  Calling getTransaction immediately after
-   * sendTransaction therefore returns NOT_FOUND or PENDING for valid
-   * transactions, making a single-shot check unreliable.
-   *
-   * @param hash       Transaction hash returned by sendTransaction.
-   * @param maxRetries Maximum number of polling attempts (default 10).
-   * @param delayMs    Milliseconds to wait between attempts (default 1 000).
-   * @returns          The final transaction response once it settles.
-   * @throws           If the transaction does not settle within the retry
-   *                   window or if the node returns an unexpected status.
-   */
-  private async pollTransaction(
-    hash: string,
-    maxRetries = 10,
-    delayMs = 1000,
-  ): Promise<any> {
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      const txResponse = await this.server.getTransaction(hash);
-
-      // SUCCESS or FAILED are terminal states — stop polling.
-      if (txResponse.status === 'SUCCESS' || txResponse.status === 'FAILED') {
-        return txResponse;
-      }
-
-      // NOT_FOUND means the ledger hasn't closed yet; PENDING is the same.
-      // Any other unexpected status should surface as an error immediately.
-      if (
-        txResponse.status !== 'NOT_FOUND' &&
-        txResponse.status !== 'PENDING'
-      ) {
-        throw new Error(
-          `Unexpected transaction status on attempt ${attempt}: ${txResponse.status}`,
-        );
-      }
-
-      if (attempt < maxRetries) {
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
-      }
-    }
-
-    throw new Error(
-      `Transaction ${hash} did not settle after ${maxRetries} polling attempts`,
-    );
-  }
-
-  /**
-   * Check if Soroban service is properly configured
-   */
-  isConfigured(): boolean {
-    return !!(this.server && this.adminKeypair && this.certificateContractId);
+    throw new Error(`Transaction ${hash} not confirmed in time`);
   }
 }
