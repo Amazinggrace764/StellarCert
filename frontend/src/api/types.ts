@@ -1,4 +1,4 @@
-/**
+/*
  * User roles in the system
  */
 export enum UserRole {
@@ -17,7 +17,7 @@ export enum UserRole {
  * authentication flow (e.g. Stellar-only sign-in, invite acceptance, or
  * legacy accounts migrated from an email-only store) knows the user's name.
  * Consumers must not assume these fields are present; use `getUserDisplayName`
- * (or an explicit `'firstName' in user` guard) instead of accessing them directly.
+ * (or an explicit `'firstName' in user' guard) instead of accessing them directly.
  */
 export interface User {
   id: string;
