@@ -83,10 +83,10 @@ describe('MultisigService', () => {
       const failed = { status: rpc.Api.GetTransactionStatus.FAILED };
       const getTransaction = jest
         .fn()
-        .mockResolvedValueOnce({
+        .mockResolvedOnce({
           status: rpc.Api.GetTransactionStatus.NOT_FOUND,
         })
-        .mockResolvedValueOnce(failed);
+        .mockResolvedOnce(failed);
 
       const internals = service as unknown as {
         server: { getTransaction: jest.Mock };
@@ -130,7 +130,7 @@ describe('MultisigService', () => {
     });
 
     it('rejects when the transaction is still PENDING after max attempts', async () => {
-      const getTransaction = jest.fn().mockResolvedValue({
+      const getTransaction = jest.fn().mockResolved({
         status: rpc.Api.GetTransactionStatus.PENDING,
       });
 
@@ -219,7 +219,7 @@ describe('MultisigService', () => {
       };
       internals.buildAndSubmitTransaction = jest
         .fn()
-        .mockResolvedValue(xdr.ScVal.scvBool(true));
+        .mockResolved(xdr.ScVal.scvBool(true));
 
       await expect(
         service.proposeCertificate({
@@ -249,6 +249,34 @@ describe('MultisigService', () => {
         } as never),
       ).rejects.toThrow('contract call failed');
     });
+
+    it('requires an issuer to be present on the request', async () => {
+      await expect(
+        service.proposeCertificate({
+          certificateId: 'cert-1',
+          signers: ['signer-1'],
+          threshold: 1,
+        } as never),
+      ).rejects.toThrow();
+    });
+
+    it('passes the issuer through to the transaction builder', async () => {
+      const internals = service as unknown as {
+        buildAndSubmitTransaction: jest.Mock;
+      };
+      internals.buildAndSubmitTransaction = jest
+        .fn()
+        .mockResolved(xdr.ScVal.scvBool(true));
+
+      await service.proposeCertificate({
+        issuer: 'issuer',
+        certificateId: 'cert-1',
+        signers: ['signer-1'],
+        threshold: 1,
+      } as never);
+
+      expect(internals.buildAndSubmitTransaction).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('approveRequest', () => {
@@ -262,7 +290,7 @@ describe('MultisigService', () => {
       };
       internals.buildAndSubmitTransaction = jest
         .fn()
-        .mockResolvedValue(xdr.ScVal.scvBool(true));
+        .mockResolved(xdr.ScVal.scvBool(true));
 
       await expect(
         service.approveRequest({ requestId: 'req-1', signer: 'signer-1' } as never),
@@ -276,7 +304,7 @@ describe('MultisigService', () => {
       };
       internals.buildAndSubmitTransaction = jest
         .fn()
-        .mockResolvedValue(xdr.ScVal.scvU32(1));
+        .mockResolved(xdr.ScVal.scvU32(1));
 
       await expect(
         service.approveRequest({ requestId: 'req-1', signer: 'signer-1' } as never),
