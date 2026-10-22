@@ -157,3 +157,48 @@ describe("VerifyCertificate share actions (toast, not alert)", () => {
     expect(alertSpy).not.toHaveBeenCalled();
   });
 });
+
+describe("VerifyCertificate submission and keystroke gating (#97)", () => {
+  beforeEach(() => {
+    verifyMock.mockReset();
+    verifyMock.mockResolvedValue(VALID_RESULT);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("does not fire API verification calls while typing serial until explicit submit", async () => {
+    renderWithProviders(<VerifyCertificate />, {
+      queryClient: createTestQueryClient(),
+      routerEntries: ["/verify"],
+    });
+
+    const input = screen.getByLabelText(/Certificate Serial Number/i);
+
+    // User types keystrokes
+    fireEvent.change(input, { target: { value: "ABC" } });
+    fireEvent.change(input, { target: { value: "ABCD" } });
+    fireEvent.change(input, { target: { value: "ABCDE-1234" } });
+
+    // No API calls should be triggered purely from typing
+    expect(verifyMock).not.toHaveBeenCalled();
+
+    // Now user explicitly submits the form
+    const submitBtn = screen.getByRole("button", { name: /Verify Certificate/i });
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => expect(verifyMock).toHaveBeenCalledTimes(1));
+    expect(verifyMock).toHaveBeenCalledWith("ABCDE-1234");
+  });
+
+  it("auto-verifies when seeded with URL serial parameter", async () => {
+    renderWithProviders(<VerifyCertificate />, {
+      queryClient: createTestQueryClient(),
+      routerEntries: ["/verify?serial=SEEDED-URL-SERIAL"],
+    });
+
+    await waitFor(() => expect(verifyMock).toHaveBeenCalledTimes(1));
+    expect(verifyMock).toHaveBeenCalledWith("SEEDED-URL-SERIAL");
+  });
+});
