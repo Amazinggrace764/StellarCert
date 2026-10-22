@@ -39,6 +39,23 @@ export function parseTrustedProxies(value: string | undefined): string[] {
     .filter((entry) => entry.length > 0);
 }
 
+/**
+ * Whether the Swagger UI / OpenAPI document should be mounted. This is the
+ * owning boundary for the decision: main.ts consults it instead of reading
+ * NODE_ENV inline. Docs are disabled by default in production and can only be
+ * re-enabled there by an explicit opt-in (SWAGGER_ENABLED=true), which is useful
+ * for a private staging deployment behind auth.
+ */
+export function isSwaggerEnabled(
+  nodeEnv: string | undefined,
+  swaggerEnabled: string | boolean | undefined,
+): boolean {
+  if (swaggerEnabled !== undefined) {
+    return String(swaggerEnabled).trim().toLowerCase() === 'true';
+  }
+  return nodeEnv !== Environment.Production;
+}
+
 class EnvironmentVariables {
   @IsEnum(Environment)
   NODE_ENV: Environment;
@@ -56,7 +73,7 @@ class EnvironmentVariables {
   DB_USERNAME: string;
 
   @IsString()
-  DB_PASSWORD: string;
+  DB2_PASSWORD: string;
 
   @IsString()
   DB2_NAME: string;
@@ -243,6 +260,15 @@ class EnvironmentVariables {
   @IsString()
   TRUSTED_PROXIES?: string;
 
+  /**
+   * Opt-in flag for the Swagger UI / OpenAPI document. Defaults to enabled
+   * outside production and disabled in production. Set to 'true' to expose the
+   * docs in production (e.g. behind auth), or 'false' to hide them elsewhere.
+   */
+  @IsOptional()
+  @IsString()
+  SWAGGER_ENABLED?: string;
+
   // Duplicate Detection Configuration
   @IsOptional()
   @IsNumber()
@@ -278,11 +304,15 @@ export function validateEnv(
     {
       NODE_ENV: e('NODE_ENV') || 'development',
       PORT: e('PORT') ? parseInt(e('PORT') as string, 10) : 3000,
-      DB_HOST: e('DB_HOST') || 'localhost',
-      DB_PORT: e('DB_PORT') ? parseInt(e('DB_PORT') as string, 10) : 5432,
+      DB2HOST: e('DB2HOST') || e('DB_HOST') || 'localhost',
+      DB2_PORT: e('DB2_PORT')
+        ? parseInt(e('DB2_PORT') as string, 10)
+        : e('DB_PORT')
+          ? parseInt(e('DB_PORT') as string, 10)
+          : 5432,
+      DB2_NAME: e('DB2_NAME') || e('DB_NAME') || 'stellarcert',
       DB_USERNAME: e('DB_USERNAME') || 'postgres',
-      DB_PASSWORD: e('DB_PASSWORD') || 'password',
-      DB_NAME: e('DB_NAME') || 'stellarcert',
+      DB2_PASSWORD: e('DB2_PASSWORD') || e('DB_PASSWORD') || 'password',
       JWT_SECRET: e('JWT_SECRET'),
       JWT_ACCESS_SECRET: e('JWT_ACCESS_SECRET') || e('JWT_SECRET'),
       JWT_REFRESH_SECRET: e('JWT_REFRESH_SECRET') || e('JWT_SECRET'),
@@ -347,6 +377,7 @@ export function validateEnv(
       SECURITY_CSP: e('SECURITY_CSP'),
       SECURITY_FORCE_HSTS: e('SECURITY_FORCE_HSTS'),
       TRUSTED_PROXIES: e('TRUSTED_PROXIES'),
+      SWAGGER_ENABLED: e('SWAGGER_ENABLED'),
       DUPLICATE_DETECTION_THRESHOLD: e('DUPLICATE_DETECTION_THRESHOLD')
         ? parseFloat(e('DUPLICATE_DETECTION_THRESHOLD') as string)
         : undefined,
