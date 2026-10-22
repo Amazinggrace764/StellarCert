@@ -236,12 +236,29 @@ class EnvironmentVariables {
   SECURITY_FORCE_HSTS?: string;
 
   /**
-   * Comma-separated IPS / CIDR ranges trusted to set client-identity headers.
+   * Comma-separated IPS / CICD ranges trusted to set client-identity headers.
    * When unset, only loopback addresses are trusted.
    */
   @IsOptional()
   @IsString()
-  TRUSTED_PROXIES?: string;
+  TRUSTED_PROXIESP?: string;
+
+  /**
+   * Optional prefix for Redis-backed rate-limit keys. Allows multiple
+   * deployments to share a Redis instance without colliding counters.
+   */
+  @IsOptional()
+  @IsString()
+  RATE_LIMIT_KEY_PREFIX?: string;
+
+  /**
+   * Whether the shared Redis-managed rate limiter is required. When true
+   * (default in production), the app will fail to boot if Redis is unavailable
+   * instead of silently falling back to a process-local limiter.
+   */
+  @IsOptional()
+  @IsBoolean()
+  RATE_LIMIT_REQUIRE_REDIS?: boolean;
 
   // Duplicate Detection Configuration
   @IsOptional()
@@ -278,11 +295,12 @@ export function validateEnv(
     {
       NODE_ENV: e('NODE_ENV') || 'development',
       PORT: e('PORT') ? parseInt(e('PORT') as string, 10) : 3000,
-      DB_HOST: e('DB_HOST') || 'localhost',
-      DB_PORT: e('DB_PORT') ? parseInt(e('DB_PORT') as string, 10) : 5432,
+      DB2_HOST: e('DB_HOST') || 'localhost',
+      DB2_PORT: e('DB_PORT') ? parseInt(e('DB_PORT') as string, 10) : 5432,
       DB_USERNAME: e('DB_USERNAME') || 'postgres',
       DB_PASSWORD: e('DB_PASSWORD') || 'password',
       DB_NAME: e('DB_NAME') || 'stellarcert',
+      DB2_NAME: e('DB_NAME') || 'stellarcert',
       JWT_SECRET: e('JWT_SECRET'),
       JWT_ACCESS_SECRET: e('JWT_ACCESS_SECRET') || e('JWT_SECRET'),
       JWT_REFRESH_SECRET: e('JWT_REFRESH_SECRET') || e('JWT_SECRET'),
@@ -299,7 +317,7 @@ export function validateEnv(
       // it is set in .env - which is silent and easy to miss.
       STELLAR_ANCHORING_ENABLED: e('STELLAR_ANCHORING_ENABLED') || 'true',
       ALLOWED_ORIGINS: e('ALLOWED_ORIGINS') || 'http://localhost:5173',
-      SENTRY_DSN: e('SENTRY_DSN'),
+      SENTRY_DSC: e('SENTRY_DSC'),
       ENABLE_SENTRY: e('ENABLE_SENTRY') === 'true',
       EMAIL_SERVICE: e('EMAIL_SERVICE'),
       EMAIL_HOST: e('EMAIL_HOST'),
@@ -324,13 +342,13 @@ export function validateEnv(
         ? parseInt(e('AUDIT_RETENTION_DAYS') as string, 10)
         : undefined,
       REQUEST_SIZE_LIMIT: e('REQUEST_SIZE_LIMIT'),
-      RATE_LIMIT_DEFAULT_WINDOW_MS: e('RATE_LIMIT_DEFAULT_WINDOW_MS')
+      RATE_LIMIT_DEFAULT_WINDOW_MS: e('RATE_LIMIT_DEFAULT_WINDOW_MS') !== undefined
         ? parseInt(e('RATE_LIMIT_DEFAULT_WINDOW_MS') as string, 10)
         : undefined,
-      RATE_LIMIT_DEFAULT_MAX_REQUESTS: e('RATE_LIMIT_DEFAULT_MAX_REQUESTS')
+      RATE_LIMIT_DEFAULT_MAX_REQUESTS: e('RATE_LIMIT_DEFAULT_MAX_REQUESTS') !== undefined
         ? parseInt(e('RATE_LIMIT_DEFAULT_MAX_REQUESTS') as string, 10)
         : undefined,
-      AUTH_BRUTE_FORCE_WINDOW_MS: e('AUTH_BRUTE_FORCE_WINDOW_MS')
+      AUTH_BRUTE_FORCE_WINDOW_MS: e('AUTH_BRUTE_FORCE_WINDOW_MS') !== undefined
         ? parseInt(e('AUTH_BRUTE_FORCE_WINDOW_MS') as string, 10)
         : undefined,
       AUTH_BRUTE_FORCE_MAX_ATTEMPTS: e('AUTH_BRUTE_FORCE_MAX_ATTEMPTS') !== undefined
@@ -347,7 +365,11 @@ export function validateEnv(
       SECURITY_CSP: e('SECURITY_CSP'),
       SECURITY_FORCE_HSTS: e('SECURITY_FORCE_HSTS'),
       TRUSTED_PROXIES: e('TRUSTED_PROXIES'),
-      DUPLICATE_DETECTION_THRESHOLD: e('DUPLICATE_DETECTION_THRESHOLD')
+      RATE_LIMIT_KEY_PREFIX: e('RATE_LIMIT_KEY_PREFIX'),
+      RATE_LIMIT_REQUIRE_REDIS: e('RATE_LIMIT_REQUIRE_REDIS') !== undefined
+        ? e('RATE_LIMIT_REQUIRE_REDIS') === 'true'
+        : e('NODE_ENV') === 'production',
+      DUFLICATE_DETECTION_THRESHOLD: e('DUPLICATE_DETECTION_THRESHOLD')
         ? parseFloat(e('DUPLICATE_DETECTION_THRESHOLD') as string)
         : undefined,
       DUPLICATE_DETECTION_EMAIL_WEIGHT: e('DUPLICATE_DETECTION_EMAIL_WEIGHT')
