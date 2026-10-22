@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from 'react';
 import type { JSX } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Html5QrcodeScanner } from 'html5-qrcode';
+
+const QRScannerModal = lazy(() => import('../components/QRScannerModal'));
 import { CheckCircle, AlertTriangle } from 'lucide-react';
 import { VerificationResult } from '../api';
 import { useVerifyCertificateQuery } from '../api/queries';
@@ -26,7 +27,6 @@ export default function VerifyCertificate(): JSX.Element {
   );
   const debouncedSerial = useDebounce(serial, 300);
   const [showQrScanner, setShowQrScanner] = useState(false);
-  const qrScannerRef = useRef<Html5QrcodeScanner | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
 
   // Verification is keyed by serial, so re-checking the same certificate is
@@ -111,41 +111,6 @@ export default function VerifyCertificate(): JSX.Element {
     return () => window.clearTimeout(timeoutId);
   }, [toast]);
 
-  // Initialize QR scanner
-  useEffect(() => {
-    if (showQrScanner && !qrScannerRef.current) {
-      qrScannerRef.current = new Html5QrcodeScanner(
-        'qr-reader',
-        {
-          fps: 10,
-          qrbox: { width: 250, height: 250 },
-          aspectRatio: 1.0,
-        },
-        false
-      );
-
-      qrScannerRef.current.render(
-        (decodedText) => {
-          setSerial(decodedText);
-          setShowQrScanner(false);
-          qrScannerRef.current?.clear();
-          qrScannerRef.current = null;
-        },
-        () => {
-          // Called continuously while no QR code is in view; intentionally
-          // ignored rather than surfaced, since it fires on nearly every
-          // scan frame and isn't a user-actionable error.
-        }
-      );
-    }
-
-    return () => {
-      if (qrScannerRef.current) {
-        qrScannerRef.current.clear();
-        qrScannerRef.current = null;
-      }
-    };
-  }, [showQrScanner]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -339,28 +304,23 @@ export default function VerifyCertificate(): JSX.Element {
           </form>
         </div>
 
-        {/* QR Scanner */}
-        {showQrScanner && (
-          <div className="rounded-2xl border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/5 p-6">
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Scan QR Code</h3>
-                <button
-                  onClick={() => setShowQrScanner(false)}
-                  className="text-gray-500 dark:text-slate-400 hover:text-gray-900"
-                >
-                  <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-              <div id="qr-reader" className="w-full max-w-sm mx-auto"></div>
-              <p className="text-sm text-gray-500 dark:text-slate-400 text-center">
-                Point your camera at a certificate QR code to scan it.
-              </p>
-            </div>
-          </div>
-        )}
+        {/* QR Scanner Modal */}
+        <Suspense fallback={null}>
+          {showQrScanner && (
+            <QRScannerModal
+              isOpen={showQrScanner}
+              onClose={() => setShowQrScanner(false)}
+              onScanSuccess={(result) => {
+                setShowQrScanner(false);
+                const scanned = result.certificateId || result.raw;
+                if (scanned) {
+                  setSerial(scanned);
+                }
+              }}
+              verifyPathPrefix="/verify/"
+            />
+          )}
+        </Suspense>
 
         {/* Results Display */}
         <div className="rounded-2xl border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/5 p-6">
