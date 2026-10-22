@@ -16,7 +16,7 @@ import {
   UpdateMetadataSchemaDto,
   SchemaFieldDto,
   ValidationErrorDetail,
-  MetadataValidationResultDto,
+  MetadataValidationResultdto,
 } from '../dto/metadata-schema.dto';
 import { LoggingService } from '../../../common/logging/logging.service';
 
@@ -53,7 +53,9 @@ export class MetadataSchemaService {
     });
 
     const saved = await this.schemaRepository.save(schema);
-    this.logger.log(`Schema created: ${saved.name} v${saved.version}`);
+    this.logger.log(
+      `Schema created: ${saved.name} v${saved.version}`,
+    );
     return saved;
   }
 
@@ -151,7 +153,7 @@ export class MetadataSchemaService {
   async validate(
     schemaId: string,
     metadata: Record<string, any>,
-  ): Promise<MetadataValidationResultDto> {
+  ): Promise<MetadataValidationResultdto> {
     const schema = await this.findOne(schemaId);
     const errors = this.validateAgainstSchema(schema, metadata);
 
@@ -417,21 +419,23 @@ export class MetadataSchemaService {
             ) {
               errors.push({
                 field: `${field.name}.${prop.name}`,
-                message: `"${field.name}.${prop.name}" is required`,
+                message: `"${prop.name}" is required`,
                 value: undefined,
                 constraint: 'required',
               });
-              continue;
-            }
-            if (propValue !== undefined && propValue !== null) {
-              const propErrors = this.validateField(
-                { ...prop, name: `${field.name}.${prop.name}` },
-                propValue,
+            } else if (propValue !== undefined && propValue !== null) {
+              errors.push(
+                ...this.validateField(
+                  { ...prop, name: `${field.name}.${prop.name}` },
+                  propValue,
+                ),
               );
-              errors.push(...propErrors);
             }
           }
         }
+        break;
+
+      default:
         break;
     }
 

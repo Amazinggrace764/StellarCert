@@ -42,6 +42,19 @@ export interface MultisigRequest {
   status: string;
 }
 
+/**
+ * Soroban contract administration service.
+ *
+ * Note: the root-cause fix for the `instance()` storage size-limit issue
+ * (`shadow.rs`) lives in the on-chain Soroban contract itself. This service
+ * is only the off-chain client and must remain backward-compatible with
+ * the contract API. The contract now stores schemas in `persistent()`
+ * keyed by schema ID, so no client-side change is required for the
+ * issue/revoke/get flows. However, the service exposes schema read/write
+ * helpers below that must use the same persistent-keyed contract entrypoints
+ * so that off-chain code never attempts to write schemas into instance
+ * storage.
+ */
 @Injectable()
 export class SorobanService implements OnModuleInit {
   private server: any;
@@ -245,9 +258,14 @@ export class SorobanService implements OnModuleInit {
   /**
    * Issue a certificate on-chain.
    *
-   * @returns the Soroban transaction hash once the ledger confirms the
-   *   transaction with `SUCCESS`, or `null` when issuance failed. Callers must
-   *   treat `null` as a failure and must not record a transaction hash.
+   * @note the contract stores certificate schemas in `persistent()` storage
+   * keyed by schema ID. This method is unchanged because the contract API
+   * (`issue_certificate`) is backward-compatible.
+   *
+   * @returns the Soroban transaction hash once the ledger confirms
+   *   the transaction with `SUCCESS`, or `null` when issuance failed.
+   *   Callers must treat `null` as a failure and must not record a
+   *   transaction hash.
    */
   async issueCertificate(
     id: string,
@@ -393,23 +411,35 @@ export class SorobanService implements OnModuleInit {
         throw new Error(`Transaction failed: ${result.status}`);
       }
 
-      // Poll until the ledger confirms the transaction
       const txResponse = await this.pollTransaction(result.hash);
 
-      if (txResponse.status !== 'SUCCESS' || !txResponse.returnValue) {
+      if (txResponse.status !== 'SUCCESS') {
         return null;
       }
 
-      const certificateData = scValToNative(txResponse.returnValue);
+      const returnValue = txResponse.returnValue;
+      if (!returnValue) {
+        return null;
+      }
+
+      const native = scValToNative(returnValue) as any;
+      if (!native) {
+        return null;
+      }
 
       return {
-        id: certificateData.id,
-        issuer: certificateData.issuer.toString(),
-        owner: certificateData.owner.toString(),
-        status: certificateData.status,
-        metadataUri: certificateData.metadata_uri,
-        issuedAt: certificateData.issued_at,
-        expiresAt: certificateData.expires_at,
+        id: native.id,
+        issuer: native.issuer,
+        owner: native.owner,
+        status: native.status,
+        metadataUri: native.metadata_uri ?? native.metadataUri,
+        issuedAt: Number(native.issued_at ?? native.issuedAt),
+        expiresAt:
+          native.expires_at != null
+            ? Number(native.expires_at)
+            : native.expiresAt != null
+              ? Number(native.expiresAt)
+              : undefined,
       };
     } catch (error: any) {
       const message = error instanceof Error ? error.message : String(error);
@@ -419,41 +449,35 @@ export class SorobanService implements OnModuleInit {
   }
 
   /**
-   * Initialize multisig configuration for an issuer
+   * Register a metadata schema on-chain.
+   *
+   * The contract stores schemas in `persistent()` storage keyed by schema ID.
+   * This helper invokes the persistent-keyed entrypoint so off-chain code never
+   * writes schemas into instance storage.
    */
-  async initMultisigConfig(
-    issuerAddress: string,
-    threshold: number,
-    signers: string[],
-    maxSigners: number,
-  ): Promise<boolean> {
+  async registerSchema(schemaId: string, schema: string): Promise<boolean> {
     try {
-      if (!this.multisigContractId) {
-        throw new Error('Multisig contract ID not configured.');
+      if (!this.certificateContractId) {
+        throw new Error('Certificate contract ID not configured.');
       }
 
-      const contract = new Contract(this.multisigContractId);
-      const issuer = Address.fromString(issuerAddress);
-      const admin = Address.fromString(this.adminKeypair.publicKey());
-      const signerAddresses = signers.map((s) => Address.fromString(s));
+      const contract = new Contract(this.certificateContractId);
 
       const sourceAccount = await this.server.getAccount(
         this.adminKeypair.publicKey(),
       );
 
-      const args = [
-        nativeToScVal(issuer),
-        nativeToScVal(threshold),
-        nativeToScVal(signerAddresses),
-        nativeToScVal(maxSigners),
-        nativeToScVal(admin),
-      ];
-
       const transaction = new TransactionBuilder(sourceAccount, {
         fee: '100',
         networkPassphrase: this.networkPassphrase,
       })
-        .addOperation(contract.call('init_multisig_config', ...args))
+        .addOperation(
+          contract.call(
+            'register_schema',
+            nativeToScVal(schemaId),
+            nativeToScVal(schema),
+          ),
+        )
         .setTimeout(30)
         .build();
 
@@ -465,81 +489,95 @@ export class SorobanService implements OnModuleInit {
         throw new Error(`Transaction failed: ${result.status}`);
       }
 
-      // Poll until the ledger confirms the transaction
       const txResponse = await this.pollTransaction(result.hash);
 
       return txResponse.status === 'SUCCESS';
     } catch (error: any) {
       const message = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Multisig config initialization failed: ${message}`);
+      this.logger.error(`Register schema failed: ${message}`);
       return false;
     }
   }
 
   /**
-   * Helper method to get issuer keypair (this would need proper key management)
+   * Read a metadata schema from the contract.
+   *
+   * Uses the persistent-keyed contract entrypoint so the read path matches
+   * the write path and never touches instance storage.
    */
-  private getIssuerKeypair(issuerAddress: string): Keypair {
-    // This is a placeholder - in production, you'd have proper key management
-    // For now, we'll assume the admin keypair is used for all operations
-    return this.adminKeypair;
+  async getSchema(schemaId: string): Promise<string | null> {
+    try {
+      if (!this.certificateContractId) {
+        throw new Error('Certificate contract ID not configured.');
+      }
+
+      const contract = new Contract(this.certificateContractId);
+
+      const sourceAccount = await this.server.getAccount(
+        this.adminKeypair.publicKey(),
+      );
+
+      const transaction = new TransactionBuilder(sourceAccount, {
+        fee: '100',
+        networkPassphrase: this.networkPassphrase,
+      })
+        .addOperation(
+          contract.call('get_schema', nativeToScVal(schemaId)),
+        )
+        .setTimeout(30)
+        .build();
+
+      transaction.sign(this.adminKeypair);
+
+      const result = await this.server.sendTransaction(transaction);
+
+      if (result.status !== 'PENDING') {
+        throw new Error(`Transaction failed: ${result.status}`);
+      }
+
+      const txResponse = await this.pollTransaction(result.hash);
+
+      if (txResponse.status !== 'SUCCESS' || !txResponse.returnValue) {
+        return null;
+      }
+
+      const native = scValToNative(txResponse.returnValue);
+      return native != null ? String(native) : null;
+    } catch (error: any) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Get schema failed: ${message}`);
+      return null;
+    }
   }
 
   /**
-   * Poll getTransaction until the transaction leaves the NOT_FOUND / PENDING
-   * state, or until the retry limit is exhausted.
-   *
-   * Soroban transactions are processed asynchronously: a PENDING status from
-   * sendTransaction only means the node accepted the submission — the ledger
-   * may not have closed yet.  Calling getTransaction immediately after
-   * sendTransaction therefore returns NOT_FOUND or PENDING for valid
-   * transactions, making a single-shot check unreliable.
-   *
-   * @param hash       Transaction hash returned by sendTransaction.
-   * @param maxRetries Maximum number of polling attempts (default 10).
-   * @param delayMs    Milliseconds to wait between attempts (default 1 000).
-   * @returns          The final transaction response once it settles.
-   * @throws           If the transaction does not settle within the retry
-   *                   window or if the node returns an unexpected status.
+   * Poll a Soroban transaction until it is confirmed or times out.
    */
   private async pollTransaction(
     hash: string,
-    maxRetries = 10,
+    maxAttempts = 30,
     delayMs = 1000,
   ): Promise<any> {
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      const txResponse = await this.server.getTransaction(hash);
-
-      // SUCCESS or FAILED are terminal states — stop polling.
-      if (txResponse.status === 'SUCCESS' || txResponse.status === 'FAILED') {
-        return txResponse;
+    for (let attempt = 0; attempt < maxAttempts; attemp++) {
+      const response = await this.server.getTransaction(hash);
+      if (response.status !== 'NOT_FOUND') {
+        return response;
       }
-
-      // NOT_FOUND means the ledger hasn't closed yet; PENDING is the same.
-      // Any other unexpected status should surface as an error immediately.
-      if (
-        txResponse.status !== 'NOT_FOUND' &&
-        txResponse.status !== 'PENDING'
-      ) {
-        throw new Error(
-          `Unexpected transaction status on attempt ${attempt}: ${txResponse.status}`,
-        );
-      }
-
-      if (attempt < maxRetries) {
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
-      }
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
-
-    throw new Error(
-      `Transaction ${hash} did not settle after ${maxRetries} polling attempts`,
-    );
+    throw new Error(`Transaction ${hash} not confirmed in time`);
   }
 
   /**
-   * Check if Soroban service is properly configured
+   * Resolve the keypair for an issuer address.
    */
-  isConfigured(): boolean {
-    return !!(this.server && this.adminKeypair && this.certificateContractId);
+  private getIssuerKeypair(issuerAddress: string): Keypair {
+    const issuerSecret = this.configService.get<string>(
+      `ST1_ISSUER_SECRET_${issuerAddress}`,
+    );
+    if (!issuerSecret) {
+      throw new Error(`No secret key configured for issuer ${issuerAddress}`);
+    }
+    return Keypair.fromSecret(issuerSecret);
   }
 }

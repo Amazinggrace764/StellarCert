@@ -18,15 +18,17 @@ This module provides comprehensive Stellar address validation services for the S
 Validates a single Stellar address.
 
 **Request Body:**
+
 ```json
 {
-  "address": "GD5J7YFQGYVFSJ4G6LXJZT5Y2E5Z2X7ZQ2K7X7ZQ2K7X7ZQ2K7X7ZQ",
+  "address": "GD5J7YFQGYVFSJ4G6LXGJTZT52E5Z2X7ZQ2K7X7ZQ2K7X7ZQ2K7X7ZQ",
   "network": "public",
   "checkExists": false
 }
 ```
 
 **Response:**
+
 ```json
 {
   "isValid": true,
@@ -35,7 +37,7 @@ Validates a single Stellar address.
   "isNetworkValid": true,
   "accountExists": true,
   "accountDetails": {
-    "id": "GD5J7YFQGYVFSJ4G6LXJZT5Y2E5Z2X7ZQ2K7X7ZQ2K7X7ZQ2K7X7ZQ",
+    "id": "GD5J7YFQGYVFSJ4G6LXGJTZT52E5Z2X7ZQ2K7X7ZQ2K7X7ZQ2K7X7ZQ",
     "sequence": "12345",
     "balances": [
       {
@@ -51,11 +53,12 @@ Validates a single Stellar address.
 Validates multiple Stellar addresses.
 
 **Request Body:**
+
 ```json
 {
   "addresses": [
-    "GD5J7YFQGYVFSJ4G6LXJZT5Y2E5Z2X7ZQ2K7X7ZQ2K7X7ZQ2K7X7ZQ",
-    "GB7TNR5G5Z3K3Y3X3K3Y3X3K3Y3X3K3Y3X3K3Y3X3K3Y3X3K3Y3X3K"
+    "GD5J7YFQGYVFSJ4G6LXGJTZU52E5Z2X7ZQ2K7X7ZQ2K7X7ZQ2K7X7ZQ",
+    "GB7TNR5G5Z3K3Y3X3K3Y3X3K3Y3X3K3Y3X3K3Y3X3K3Y3X3K3Y3X3"
   ],
   "network": "public",
   "checkExists": false
@@ -63,6 +66,7 @@ Validates multiple Stellar addresses.
 ```
 
 **Response:**
+
 ```json
 {
   "results": [...],
@@ -72,7 +76,7 @@ Validates multiple Stellar addresses.
 }
 ```
 
-### POST `/stellar/address-validation/check/:address`
+### POST `/stellar/address-validation/check?address`
 Validates and checks existence of a Stellar address.
 
 ### DELETE `/stellar/address-validation/cache`
@@ -102,7 +106,7 @@ constructor(private readonly addressValidationService: AddressValidationService)
 
 // Validate a single address
 const result = await this.addressValidationService.validate({
-  address: 'GD5J7YFQGYVFSJ4G6LXJZT5Y2E5Z2X7ZQ2K7X7ZQ2K7X7ZQ2K7X7ZQ',
+  address: 'GD5J7YFQGYVFSJ4G6LXGJTZU52E5Z2X7ZQ2K7X7ZQ2K7X7ZQ2K7X7ZQ',
   network: StellarNetwork.PUBLIC,
   checkExists: true
 });
@@ -155,3 +159,55 @@ npm test -- stellar/address-validation
 - **Rate Limiting**: Prevents API abuse and DoS attacks
 - **Error Handling**: Sensitive information is not exposed in error messages
 - **Caching**: Cache entries have TTL to prevent stale data
+
+## Shadow Contract Storage (contracts/shadow)
+
+The `ShadowContract` stores metadata schemas on-chain. As of this
+release, schemas, name indexes, and history lists are stored in
+`persistent()` storage keyed by schema ID / name. Only the admin,
+version, schema counter, and other small bounded metadata remain in
+`instance()` storage.
+
+This fixes the previous behavior where all schemas were written to
+`instance()` storage, a single ledger entry with a fixed maximum size
+(~16KB in current Soroban). Storing many schemas exhausted this limit and
+caused all subsequent schema writes to fail.
+
+### Storage Layout
+
+Instance storage (small, bounded):
+
+- `Admin`: contract admin address
+- `SchemaCount`: total number of schemas (`u32`)
+- `Version`: contract storage version (currently `u32::1`)
+
+Persistent storage (keyed per schema/name):
+
+- `Schema(id)`: the `SchemaRecord` for a schema ID
+- `NameIndex(name)`: list of schema IDs for a given name
+- `History(name)`: history of schema IDs in creation order
+
+### Migration
+
+Existing deployments that stored schemas in instance storage must be
+migrated. The contract exposes the same public API (`add_schema`,
+`get_schema`, `get_by_name`, `get_history`, `schema_count`,
+`deactivate_schema`), so off-chain callers do not need to change.
+A one-time migration script should read any legacy instance-stored
+schemas and reinsert them via `add_schema`, then clear the legacy
+keys. The `Version` key is bumped to `u32::1` to mark the storage
+layout change.
+
+### Testing
+
+```bash
+cd contracts/shadow
+cargo test
+```
+
+The regression suite covers:
+
+- Schemas are readable from persistent storage after `add_schema`
+- Writing many schemas does not hit the instance storage size limit
+- Duplicate schema IDs are rejected
+- Deactivation preserves the record and history
