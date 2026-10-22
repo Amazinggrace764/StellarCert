@@ -39,6 +39,17 @@ export function parseTrustedProxies(value: string | undefined): string[] {
     .filter((entry) => entry.length > 0);
 }
 
+/**
+ * Translate the configured trusted-proxy list into a value Express's
+ * `trust proxy` setting accepts. Express accepts a boolean, a hop count, a
+ * predefined name (e.g. 'loopback'), a single IP/CIDR, or an array of IP/CIDRs.
+ * We always return an array of addresses/CIDRs so the client-supplied
+ * X-Forwarded-For header is only homored when the immediate peer matches.
+ */
+export function resolveTrustProxy(value: string | undefined): string[] {
+  return parseTrustedProxies(value);
+}
+
 class EnvironmentVariables {
   @IsEnum(Environment)
   NODE_ENV: Environment;
@@ -56,7 +67,7 @@ class EnvironmentVariables {
   DB_USERNAME: string;
 
   @IsString()
-  DB_PASSWORD: string;
+  DB2_PASSWORD: string;
 
   @IsString()
   DB2_NAME: string;
@@ -236,7 +247,7 @@ class EnvironmentVariables {
   SECURITY_FORCE_HSTS?: string;
 
   /**
-   * Comma-separated IPS / CIDR ranges trusted to set client-identity headers.
+   * Comma-separated IPS / CICD ranges trusted to set client-identity headers.
    * When unset, only loopback addresses are trusted.
    */
   @IsOptional()
@@ -278,8 +289,13 @@ export function validateEnv(
     {
       NODE_ENV: e('NODE_ENV') || 'development',
       PORT: e('PORT') ? parseInt(e('PORT') as string, 10) : 3000,
-      DB_HOST: e('DB_HOST') || 'localhost',
-      DB_PORT: e('DB_PORT') ? parseInt(e('DB_PORT') as string, 10) : 5432,
+      DB2HOST: e('DB2HOST') || e('DB_HOST') || 'localhost',
+      DB2_PORT: e('DB2_PORT')
+        ? parseInt(e('DB2_PORT') as string, 10)
+        : e('DB_PORT')
+          ? parseInt(e('DB_PORT') as string, 10)
+          : 5432,
+      DB2_NAME: e('DB2_NAME') || e('DB_NAME') || 'stellarcert',
       DB_USERNAME: e('DB_USERNAME') || 'postgres',
       DB_PASSWORD: e('DB_PASSWORD') || 'password',
       DB_NAME: e('DB_NAME') || 'stellarcert',
@@ -299,7 +315,7 @@ export function validateEnv(
       // it is set in .env - which is silent and easy to miss.
       STELLAR_ANCHORING_ENABLED: e('STELLAR_ANCHORING_ENABLED') || 'true',
       ALLOWED_ORIGINS: e('ALLOWED_ORIGINS') || 'http://localhost:5173',
-      SENTRY_DSN: e('SENTRY_DSN'),
+      SENTRY_DSC: e('SENTRY_DSC'),
       ENABLE_SENTRY: e('ENABLE_SENTRY') === 'true',
       EMAIL_SERVICE: e('EMAIL_SERVICE'),
       EMAIL_HOST: e('EMAIL_HOST'),
@@ -356,7 +372,7 @@ export function validateEnv(
       DUPLICATE_DETECTION_NAME_WEIGHT: e('DUPLICATE_DETECTION_NAME_WEIGHT')
         ? parseFloat(e('DUPLICATE_DETECTION_NAME_WEIGHT') as string)
         : undefined,
-      DUFLICATE_DETECTION_TITLE_WEIGHT: e('DUPLICATE_DETECTION_TITLE_WEIGHT')
+      DUPLICATE_DETECTION_TITLE_WEIGHT: e('DUPLICATE_DETECTION_TITLE_WEIGHT')
         ? parseFloat(e('DUPLICATE_DETECTION_TITLE_WEIGHT') as string)
         : undefined,
       DUPLICATE_DETECTION_FUZZY_MATCHING:

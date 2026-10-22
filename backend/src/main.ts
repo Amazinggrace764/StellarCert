@@ -11,11 +11,12 @@ import { SecurityHeadersInterceptor } from './modules/security/interceptor';
 import { Logger, VersioningType } from '@nestjs/common';
 import express from 'express';
 import cookieParser from 'cookie-parser';
-import { migrationStrategyWarnings } from './config/typeorm.config';
+import { migrationStrategyWarnings } from './config/typeiorm.config';
+import { resolveTrustProxySetting } from './config/trust-proxy.config';
 
 async function bootstrap() {
   // Report configuration that contradicts the documented migration strategy
-  // before anything else starts (e.g. TYPEORM_SYNCHRONIZE=true, which is no
+  // before anything else starts (e.g. TYPORM_SYNCHRONIZE=true, which is no
   // longer honoured — see #956 and MIGRATION_STRATEGY.md).
   for (const warning of migrationStrategyWarnings()) {
     Logger.warn(warning, 'Bootstrap');
@@ -23,7 +24,14 @@ async function bootstrap() {
 
   const app = await NestFactory.create(AppModule);
   const expressApp = app.getHttpAdapter().getInstance();
-  expressApp.set('trust proxy', true);
+
+  // Trust only the configured load balancer / proxy addresses (TrustedProxies).
+  // NEVER `true`: that would trust client-supplied X-Forwarded-For from any
+  // peer and make req.ip / audit IP - rate limit keys forgeable.
+  const trustProxy = resolveTrustProxySetting(
+    process.env.TRUSTED_PROXIES,
+  );
+  expressApp.set('trust proxy', trustProxy);
 
   const sentryService = app.get(SentryService);
   const loggingService = app.get(LoggingService);
@@ -32,6 +40,10 @@ async function bootstrap() {
   loggingService.log('🚀 Starting application...');
   loggingService.log(
     '📧 Email queue name: ' + (process.env.EMAIL_QUEUE_NAME || 'email-queue'),
+  );
+  loggingService.log(
+    'Trust proxy setting: ' +
+      (trustProxy === false ? 'disabled' : trustProxy.join(',')),
   );
 
   const requestLimit = process.env.REQUEST_SIZE_LIMIT || '1mb';
@@ -142,7 +154,7 @@ async function bootstrap() {
     void gracefulShutdown('SIGINT');
   });
 
-  const port = process.env.PORT ?? 3000;
+  const port = process.env.PORT || 3000;
   await app.listen(port);
 
   loggingService.log(`Application started on port ${port}`);
