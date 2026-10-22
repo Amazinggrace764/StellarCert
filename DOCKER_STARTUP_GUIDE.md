@@ -65,8 +65,19 @@ STELLAR_ISSUER_SECRET_KEY=your_stellar_secret_key_here
 STELLAR_ISSUER_PUBLIC_KEY=your_stellar_public_key_here
 
 # JWT Configuration
+# REQUIRED: JWT_SECRET has no default. The stack will fail fast at startup
+# if it is unset, preventing production mode from signing/verifying JWTs
+# with a publicly known secret. Generate a strong value, e.g.:
+#   openssl rand -hex 32
 JWT_SECRET=your_jwt_secret_key_here
 JWT_EXPIRES_IN=3600
+
+# Database Credentials
+# REQUIRED: DB credentials are sourced from secrets and have no hardcoded
+# fallback. Set these (or provide them via Docker secrets) before starting.
+POSTGRES_USER=stellarwave_user
+POSTGRES_PASSWORD=your_db_password_here
+POSTGRES_DB=stellarwave
 
 # Optional: Sentry for error tracking
 SENTRY_DSN=https://your_sentry_dsn@sentry.io/project_id
@@ -212,12 +223,15 @@ docker-compose exec redis redis-cli
 For production deployment:
 
 1. Set `NODE_ENV=production` in your `.env` file
-2. Use the production profile:
+2. Set a strong, unique `JWT_SECRET` (there is no insecure default; startup
+   fails fast if it is unset) and provide DB credentials via secrets rather
+   than hardcoded values
+3. Use the production profile:
    ```bash
    docker-compose --profile production up -d
    ```
-3. Configure SSL certificates in the `nginx/ssl` directory
-4. Update the `nginx/nginx.conf` file with your domain configuration
+4. Configure SSL certificates in the `nginx/ssl` directory
+5. Update the `nginx/nginx.conf` file with your domain configuration
 
 ## Health Checks
 

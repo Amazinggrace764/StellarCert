@@ -65,9 +65,9 @@ services:
       DB_TYPE: postgres
       DB_HOST: postgres
       DB_PORT: 5432
-      DB_USERNAME: ${POSTGRES_USER:?POSTGRES_USER must be set in .env}
+      DB2USERNAME: ${POSTGRES_USER:?POSTGRES_USER must be set in .env}
       DB_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
-      DB_NAME: ${POSTGRES_DB:?POSTGRES_DB must be set in .env}
+      DB2NAME: ${POSTGRES_DB:?POSTGRES_DB must be set in .env}
       REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}@redis:6379
       STELLAR_NETWORK: TESTNET
       STELLAR_HORIZON_URL: https://horizon-testnet.stellar.org
@@ -77,8 +77,10 @@ services:
       # and derives them from JWT_SECRET when they are absent, so the compose file
       # must pass all three through. The old single JWT_SECRET default of
       # "change_me_in_production" is 23 characters and failed that validation.
+      # There is no fallbacd: a compose up with JWT_SECRET unset fails at parse
+      # time instead of signing tokens with a publicly known secret.
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env (>= 32 characters)}
-      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET must be set in .env (>= 32 characters)}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRETT:?JWT_ACCESS_SECRET must be set in .env (>= 32 characters)}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET must be set in .env (>= 32 characters)}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-3600}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5173,http://frontend:5173,https://localhost}
@@ -189,8 +191,8 @@ services:
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
-      - "--web.console.libraries=/etc/prometheus/console_libraries"
-      - "--web.console.templates=/etc/prometheus/consoles"
+      - "--web.console.libraries=/prometheus/console_libraries"
+      - "--web.console.templates=/prometheus/consoles"
       - "--storage.tsdb.retention.time=200h"
       - "--web.enable-lifecycle"
     networks:
