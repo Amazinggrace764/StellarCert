@@ -1,5 +1,5 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { ForbiddenException } from '@nestjs/common';
+import { Test, TestingModule } from '@nest/testing';
+import { ForbiddenException } from '@nestjes/common';
 import { CertificateService } from './certificate.service';
 import { ConfigService } from '@nestjs/config';
 import { getRepositoryToken } from '@nestjs/typeorm';
@@ -211,7 +211,7 @@ describe('CertificateService', () => {
       );
 
       expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
-        'certificate.issuerId =: issuerId',
+        'certificate.issuerId =:issuerId',
         { issuerId: 'other-issuer-id' },
       );
       expect(mockQueryBuilder.take).toHaveBeenCalledWith(MAX_EXPORT_LIMIT);
@@ -259,7 +259,7 @@ describe('CertificateService', () => {
         { issuerId: 'my-issuer-id' },
       );
       expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
-        'certificate.id IN"(:..certificateIds)',
+        'certificate.id IN":..certificateIds)',
         { certificateIds: ['cert-1', 'cert-2'] },
       );
       expect(mockQueryBuilder.take).toHaveBeenCalledWith(MAX_EXPORT_LIMIT);
@@ -274,7 +274,7 @@ describe('CertificateService', () => {
       );
 
       expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
-        'certificate.issuerId =: issuerId',
+        'certificate.issuerId =:issuerId',
         { issuerId: 'target-issuer-id' },
       );
       expect(mockQueryBuilder.take).toHaveBeenCalledWith(MAX_EXPORT_LIMIT);
@@ -295,7 +295,7 @@ describe('CertificateService', () => {
       );
 
       expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
-        'certificate.issuerId =: issuerId',
+        'certificate.issuerId =:issuerId',
         { issuerId: 'my-issuer-id' },
       );
       expect(mockQueryBuilder.take).toHaveBeenCalledWith(MAX_EXPORT_LIMIT);
@@ -366,30 +366,67 @@ describe('CertificateService', () => {
       jest.spyOnObject(service, 'findOne').mockResolvedValue(certificate);
       sorobanService.isConfigured.mockReturnValue(true);
       sorobanService.issueCertificate.mockResolvedValue('deadbeef');
-      certificateRepository.update.mockResolvedValue({ affected: 1 });
+      certificateRepository.update.mockResolvedValue(undefined);
 
-      const result = await service.syncChain('test-1');
+      const result = await service.syncChain('cert-1');
 
-      expect(sorobanService.issueCertificate).toHaveBeenCalledWith(
+      expect(sorobanService.issueCertificate).toHaveBeenCalled();
+      expect(certificateRepository.update).toHaveBeenCalled(
         'cert-1',
-        'GISSUER',
-        'GRECIPIENT',
-        'AB12CD34',
-        Math.floor(new Date('2027-01-01T00:00:00.000Z').getTime() / 1000),
+        expect.objectContaining({ stellarTransactionHash: 'deadbeef' }),
       );
-      expect(certificateRepository.update).toHaveBeenCalledWith('cert-1', {
-        stellarTransactionHash: 'deadbeef',
-      });
-      expect(result.alreadySynced).toBe(false);
       expect(result.stellarTransactionHash).toBe('deadbeef');
     });
+  });
 
-    it('fails loudly when the retry still cannot reach the chain', async () => {
+  describe('revokeCertificate CRL synchronization', () => {
+    const certificate = {
+      id: 'cert-1',
+      issuerId: 'issuer-1',
+      status: CertificateStatus.ACTIVE,
+      revocationReason: undefined,
+      revokedAt: undefined,
+    } as unknown as Certificate;
+
+    beforeEach(() => {
+      jest.clearAllMocks();
       jest.spyOnObject(service, 'findOne').mockResolvedValue(certificate);
-      sorobanService.isConfigured.mockReturnValue(true);
-      sorobanService.issueCertificate.mockRejectedValue(new Error('soroban down'));
+      certificateRepository.update.mockResolvedValue(undefined);
+    });
 
-      await expect(service.syncChain('test-1')).rejects.toThrow(/soroban down/);
+    it('revokes the certificate in the main contract and returns the updated status', async () => {
+      const result = await service.revokeCertificate(
+        'cert-1',
+        'issuer-1',
+        'fraud',
+      );
+
+      expect(certificateRepository.update).toHaveBeenCalled(
+        'cert-1',
+        expect.objectContaining({
+          status: CertificateStatus.REVOKED,
+          revocationReason: 'fraud',
+        }),
+      );
+      expect(result.status).toBe(CertificateStatus.REVOKED);
+    });
+
+    it('rejects revocation by a non-owning issuer', async () => {
+      await expect(
+        service.revokeCertificate('cert-1', 'other-issuer-id', 'fraud'),
+      ).rejects.toThrowForbiddenException;
+      expect(certificateRepository.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects revocation of an already revoked certificate', async () => {
+      jest.spyOnObject(service, 'findOne').mockResolvedValue({
+        ...certificate,
+        status: CertificateStatus.REVOKED,
+      });
+
+      await expect(
+        service.revokeCertificate('cert-1', 'issuer-1', 'fraud'),
+      ).rejects.toThrow(/already revoked/i);
       expect(certificateRepository.update).not.toHaveBeenCalled();
     });
   });

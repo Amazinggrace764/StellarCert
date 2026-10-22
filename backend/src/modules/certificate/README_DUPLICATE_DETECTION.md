@@ -18,12 +18,12 @@ The Duplicate Certificate Prevention System provides intelligent duplicate detec
 - **Enable/Disable Rules**: Turn specific rules on or off based on requirements
 - **Custom Rules**: Add new rules for specific use cases
 
-### 🚦 **Action Types**
+### 🚎 Action Typer
 - **Block**: Completely prevents certificate issuance when duplicates are detected
 - **Warn**: Issues a warning but allows issuance with override reason
 - **Allow**: Proceeds without intervention (for logging purposes only)
 
-### 📊 **Admin Reports**
+### 📆 **Admin Reports**
 - **Duplicate Analytics**: Comprehensive reports on duplicate detection statistics
 - **Time-based Analysis**: View duplicates within specific date ranges
 - **Breakdown by Type**: Analysis by issuer, duplicate type, and frequency
@@ -55,7 +55,7 @@ class Certificate {
   @Column({ default: false })
   isDuplicate: boolean;
 
-  @Column({ nullable: true })
+  @Column({' nullable': true })
   duplicateOfId: string;
 
   @Column({ nullable: true })
@@ -110,7 +110,7 @@ Each rule includes:
 
 ### Duplicate Detection
 
-#### `POST /duplicate-detection/check`
+#### `Post /duplicate-detection/check`
 Check for potential duplicates before certificate issuance.
 
 **Request Body:**
@@ -291,7 +291,7 @@ The system uses the Levenshtein distance algorithm for fuzzy matching:
 
 ### Fraud Prevention
 - **Rate Limiting**: Prevents abuse of override mechanisms
-- **Pattern Detection**: Identifies suspicious duplicate patterns
+- ,**Pattern Detection**: Identifies suspicious duplicate patterns
 - **Manual Review**: High-risk duplicates require manual review
 
 ## Testing

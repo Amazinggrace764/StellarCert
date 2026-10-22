@@ -1,4 +1,3 @@
-import { BadRequestException as _BadRequestException } from '@nestjs/common';
 import {
   BadRequestException,
   BadGatewayException,
@@ -29,6 +28,7 @@ import { WebhookEvent } from '../webhooks/entities/webhook-subscription.entity';
 import { MetadataSchemaService } from '../metadata-schema/services/metadata-schema.service';
 import { SorobanService } from '../stellar/services/soroban.service';
 import { IssuersService } from '../issuers/issuers.service';
+import { CrlService } from '../crl/crl.service';
 import { MAX_EXPORT_LIMIT, MAX_PAGE_LIMIT } from './dto/export-filters.dto';
 import { ConfigService } from '@nestjs/config';
 import { CryptoUtils } from '../../common/utils/crypto.utils';
@@ -53,6 +53,7 @@ export class CertificateService {
     private readonly sorobanService: SorobanService,
     private readonly configService: ConfigService,
     private readonly issuersService: IssuersService,
+    private readonly crlService: CrlService,
   ) {}
 
   async create(
@@ -491,6 +492,24 @@ export class CertificateService {
 
     const savedCertificate = await this.certificateRepository.save(certificate);
 
+    // Keep the CRL in sync with the main contract. Revocation is only
+    // meaningful if the certificate is also on the CRL; otherwise a revoked
+    // certificate would still pass CRL checks. If the CRL update fails we
+    // roll the main-contract status back so the two never diverge.
+    try {
+      await this.crlService.revokeCertificate(savedCertificate.id, reason);
+    } catch (crlError: any) {
+      this.logger.error(
+        `Failed to revoke certificate ${savedCertificate.id} on the CRL: ${crlError.message}`,
+        crlError.stack,
+      );
+      certificate.status = CertificateStatus.ACTIVE;
+      await this.certificateRepository.save(certificate);
+      throw new InternalServerErrorException(
+        `Failed to synchronize revocation for certificate ${savedCertificate.id}`,
+      );
+    }
+
     // Trigger webhook event
     await this.webhooksService.triggerEvent(
       WebhookEvent.CERTIFICATE_REVOKED,
@@ -546,6 +565,22 @@ export class CertificateService {
 
     const savedCertificate = await this.certificateRepository.save(certificate);
 
+    // A frozen certificate must not remain valid on the CRL either; mirror
+    // the freeze so CRL checks agree with the main contract status.
+    try {
+      await this.crlService.revokeCertificate(savedCertificate.id, reason);
+    } catch (crlError: any) {
+      this.logger.error(
+        `Failed to freeze certificate ${savedCertificate.id} on the CRL: ${crlError.message}`,
+        crlError.stack,
+      );
+      certificate.status = CertificateStatus.ACTIVE;
+      await this.certificateRepository.save(certificate);
+      throw new InternalServerErrorException(
+        `Failed to synchronize freeze for certificate ${savedCertificate.id}`,
+      );
+    }
+
     // Trigger webhook event
     await this.webhooksService.triggerEvent(
       WebhookEvent.CERTIFICATE_FROZEN,
@@ -590,6 +625,22 @@ export class CertificateService {
     }
 
     const savedCertificate = await this.certificateRepository.save(certificate);
+
+    // Unfreezing restores the certificate to active, so it must be removed
+    // from the CRL as well to keep both stores consistent.
+    try {
+      await this.crlService.unrevokeCertificate(savedCertificate.id);
+    } catch (crlError: any) {
+      this.logger.error(
+        `Failed to unfreeze certificate ${savedCertificate.id} on the CRL: ${crlError.message}`,
+        crlError.stack,
+      );
+      certificate.status = CertificateStatus.FROZEN;
+      await this.certificateRepository.save(certificate);
+      throw new InternalServerErrorException(
+        `Failed to synchronize unfreeze for certificate ${savedCertificate.id}`,
+      );
+    }
 
     // Trigger webhook event
     await this.webhooksService.triggerEvent(
