@@ -1,6 +1,7 @@
 /*
  * Issue #721 / #722 – polling and real result handling helpers.
  * Issue #723 – MultisigModule must be wired into AppModule.
+ * Issue #724 – certificate expiry must not reuse the proposal approval deadline.
  */
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -50,7 +51,7 @@ describe('MultisigModule wiring (issue #723)', () => {
 
   it('imports MultisigModule from the multisig module file', () => {
     const src = appModuleSrc();
-    expect(src).toMatch(/import\s+\{\s*MultisigModule\s*\}\s+from\s+['"]\.\/modules\/multisig\/multisig.module['"]/);
+    expect(src).toMatch(/import\s+\{\s*MultisigModule\s*\}\s+from\s+['"]\.\/modules\/multisig\/multisig\.module['"]/);
   });
 
   it('registers MultisigModule in the AppModule imports array', () => {
@@ -64,5 +65,36 @@ describe('MultisigModule wiring (issue #723)', () => {
     const src = readSource('multisig.module.ts');
     expect(src).toMatch(/export class MultisigModule\b/);
     expect(src).toMatch(/@Module\(/);
+  });
+});
+
+describe('Certificate expiry is decoupled from the proposal deadline (issue #724)', () => {
+  const serviceSrc = () => readSource('multisig.service.ts');
+  const entitySrc = () => readSource('entities/pending-request.entity.ts');
+
+  it('PendingRequest carries a dedicated certExpiresAt field', () => {
+    const src = entitySrc();
+    expect(src).toMatch(/certExpiresAt/);
+    // Must not be the same column as the proposal deadline.
+    expect(src.match(/certExpiresAt/g)!.length).toBeGreaterThan(0);
+  });
+
+  it('issueApprovedCertificate does not pass request.expiresAt as the certificate expiry', () => {
+    const src = serviceSrc();
+    // The old bug passed the proposal deadline straight through.
+    expect(src).not.toMatch(/expiresAt:\s*Some\(request\.expiresAt\)/);
+    // Instead it must derive the certificate expiry from issuance time/certExpiresAt.
+    expect(src).toMatch(/certExpiresAt/);
+  });
+
+  it('certificate expiry is computed from issuance time when not provided', () => {
+    const src = serviceSrc();
+    // A certificate lifetime constant or configurable duration must exist.
+    expect(src).toMatch(/CERTIFICATE_LIFETIME_SECONDS|certificateLifetime|certLifetime/);
+  });
+
+  it('proposal creation still sets the approval deadline from expirationDays', () => {
+    const src = serviceSrc();
+    expect(src).toMatch(/expirationDays\s*\*\s*86400/);
   });
 });

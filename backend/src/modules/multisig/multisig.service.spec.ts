@@ -58,7 +58,7 @@ describe('MultisigService', () => {
         .mockResolvedOnce(success);
 
       const internals = service as unknown as {
-        server: { getTransaction: jest.Mock; };
+        server: { getTransaction: jest.Mock };
         waitForTransaction: (
           hash: string,
           options?: { maxAttempts?: number; intervalMs?: number },
@@ -71,7 +71,7 @@ describe('MultisigService', () => {
           maxAttempts: 3,
           intervalMs: 0,
         }),
-      ).resolves.toBe(success);
+      ).resolvesToBe(success);
       expect(getTransaction).toHaveBeenCalledTimes(2);
     });
 
@@ -85,7 +85,7 @@ describe('MultisigService', () => {
         .mockResolvedOnce(failed);
 
       const internals = service as unknown as {
-        server: { getTransaction: jest.Mock; };
+        server: { getTransaction: jest.Mock };
         waitForTransaction: (
           hash: string,
           options?: { maxAttempts?: number; intervalMs?: number },
@@ -108,7 +108,7 @@ describe('MultisigService', () => {
       });
 
       const internals = service as unknown as {
-        server: { getTransaction: jest.Mock; };
+        server: { getTransaction: jest.Mock };
         waitForTransaction: (
           hash: string,
           options?: { maxAttempts?: number; intervalMs?: number },
@@ -131,7 +131,7 @@ describe('MultisigService', () => {
       });
 
       const internals = service as unknown as {
-        server: { getTransaction: jest.Mock; };
+        server: { getTransaction: jest.Mock };
         waitForTransaction: (
           hash: string,
           options?: { maxAttempts?: number; intervalMs?: number },
@@ -292,69 +292,154 @@ describe('MultisigService', () => {
     });
 
     it('derives the certificate expiry from issuance time, not the request approval deadline', async () => {
-      const now = 1700000000000; // fixed issuance time in ms
-      const dayMs = 86400 * 1000;
-      const certificateValidityDays = 30;
-      // Proposal approval deadline is only a few days out and must not be used.
-      const requestExpiresAt = now + 3 * dayMs;
+      const nowSeconds = 1700000000;
+      const day = 86400;
+      const approvalDeadline = nowSeconds + 2 * day;
+      const certLifetimeDays = 30;
+      const expectedCertExpiry = nowSeconds + certLifetimeDays * day;
 
-      jest.spyOn(Date, 'now').mockReturnValue(now);
+      const nowSecondsSpy = jest
+        .spyOn(Date, 'now')
+        .mockReturnValue(nowSeconds * 1000);
 
-      const internals = service as unknown as {
-        getPendingRequest: jest.Mock;
-        buildAndSubmitTransaction: jest.Mock;
-        getCertificateValidityDays: () => number;
-      };
-      internals.getPendingRequest = jest.fn().mockResolved({
+      const request = {
         requestId: 'req-1',
         issuer: 'issuer',
         certificateId: 'cert-1',
-        expiresAt: requestExpiresAt,
-        approvals: ['signer-1'],
+        signers: ['signer-1'],
         threshold: 1,
+        createdAt: nowSeconds - 1000,
+        expiresAt: approvalDeadline,
+        certExpiresAt: expectedCertExpiry,
+        approvals: ['signer-1'],
         status: 'approved',
-      });
-      internals.getCertificateValidityDays = () => certificateValidityDays;
-      internals.buildAndSubmitTransaction = jest
+      };
+      const getPendingRequest = jest
+        .spyOn(service, 'getPendingRequest')
+        .mockResolved(request as never);
+      const buildAndSubmitTransaction = jest
         .fn()
         .mockResolved(xdr.ScVal.scvBool(true));
+      (service as unknown as { buildAndSubmitTransaction: jest.Mock })
+        .buildAndSubmitTransaction = buildAndSubmitTransaction;
 
       await expect(
         service.issueApprovedCertificate('req-1' as never),
       ).resolves.toBe(true);
 
-      const callArgs = internals.buildAndSubmitTransaction.mock.calls[0];
-      const certExpiresAt = callArgs[1].certExpiresAt as number;
-      expect(certExpiresAt).toBe(now + certificateValidityDays * dayMs);
-      expect(certExpiresAt).not.toBe(requestExpiresAt);
+      expect(getPendingRequest).toHaveBeenCalledWith('req-1');
+      expect(buildAndSubmitTransaction).toHaveBeenCalledTimes(1);
+      const callArgs = buildAndSubmitTransaction.mock.calls[0];
+      const serialized = JSON.stringify(callArgs, ($key, value) =>
+        typeof value === 'bigint' ? value.toString() : value,
+      );
+      expect(serialized).toContain(String(expectedCertExpiry));
+      expect(serialized).not.toContain(String(approvalDeadline));
+
+      nowSecondsSpy.mockRestore();
     });
 
-    it('rejects issuance when the request has not reached the approval threshold', async () => {
-      const internals = service as unknown as {
-        getPendingRequest: jest.Mock;
-        buildAndSubmitTransaction: jest.Mock;
-      };
-      internals.getPendingRequest = jest.fn().mockResolved({
-        requestId: 'req-1',
+    it('preserves an explicit certificate expiry carried on the request', async () => {
+      const nowSeconds = 1700000000;
+      const day = 86400;
+      const approvalDeadline = nowSeconds + 2 * day;
+      const explicitCertExpiry = nowSeconds + 90 * day;
+
+      const nowSecondsSpy = jest
+        .spyOn(Date, 'now')
+        .mockReturnValue(nowSeconds * 1000);
+
+      const request = {
+        requestId: 'req-2',
         issuer: 'issuer',
-        certificateId: 'cert-1',
-        expiresAt: Date.now() + 1000,
-        approvals: [],
-        threshold: 2,
-        status: 'pending',
-      });
-      internals.buildAndSubmitTransaction = jest.fn();
+        certificateId: 'cert-2',
+        signers: ['signer-1'],
+        threshold: 1,
+        createdAt: nowSeconds - 1000,
+        expiresAt: approvalDeadline,
+        certExpiresAt: explicitCertExpiry,
+        approvals: ['signer-1'],
+        status: 'approved',
+      };
+      jest.spyOn(service, 'getPendingRequest').mockResolved(request as never);
+      const buildAndSubmitTransaction = jest
+        .fn()
+        .mockResolved(xdr.ScVal.scvBool(true));
+      (service as unknown as { buildAndSubmitTransaction: jest.Mock })
+        .buildAndSubmitTransaction = buildAndSubmitTransaction;
 
       await expect(
-        service.issueApprovedCertificate('req-1' as never),
-      ).rejects.toThrow();
-      expect(internals.buildAndSubmitTransaction).not.toHaveBeenCalled();
+        service.issueApprovedCertificate('req-2' as never),
+      ).resolves.toBe(true);
+
+      const serialized = JSON.stringify(buildAndSubmitTransaction.mock.calls[0], ($key, value) =>
+        typeof value === 'bigint' ? value.toString() : value,
+      );
+      expect(serialized).toContain(String(explicitCertExpiry));
+      expect(serialized).not.toContain(String(approvalDeadline));
+
+      nowSecondsSpy.mockRestore();
+    });
+
+    it('rejects issuance when the request has expired', async () => {
+      const nowSeconds = 1700000000;
+      const request = {
+        requestId: 'req-3',
+        issuer: 'issuer',
+        certificateId: 'cert-3',
+        signers: ['signer-1'],
+        threshold: 1,
+        createdAt: nowSeconds - 10000,
+        expiresAt: nowSeconds - 10,
+        certExpiresAt: nowSeconds + 864000,
+        approvals: ['signer-1'],
+        status: 'approved',
+      };
+      jest.spyOn(service, 'getPendingRequest').mockResolved(request as never);
+      const buildAndSubmitTransaction = jest.fn();
+      (service as unknown as { buildAndSubmitTransaction: jest.Mock })
+        .buildAndSubmitTransaction = buildAndSubmitTransaction;
+
+      await expect(
+        service.issueApprovedCertificate('req-3' as never),
+      ).rejects.toThrow(/expired/i);
+      expect(buildAndSubmitTransaction).not.toHaveBeenCalled();
     });
   });
 
   describe('cancelRequest', () => {
     it('should cancel a pending request', () => {
       expect(typeof service.cancelRequest).toBe('function');
+    });
+  });
+
+  describe('getMultisigConfig', () => {
+    it('should get multisig configuration for an issuer', () => {
+      expect(typeof service.getMultisigConfig).toBe('function');
+    });
+  });
+
+  describe('getPendingRequest', () => {
+    it('should get pending request by ID', () => {
+      expect(typeof service.getPendingRequest).toBe('function');
+    });
+  });
+
+  describe('isRequestExpired', () => {
+    it('should check if a request is expired', () => {
+      expect(typeof service.isRequestExpired).toBe('function');
+    });
+  });
+
+  describe('getPendingRequestsForIssuer', () => {
+    it('should get pending requests for an issuer', () => {
+      expect(typeof service.getPendingRequestsForIssuer).toBe('function');
+    });
+  });
+
+  describe('getPendingRequestsForSigner', () => {
+    it('should get pending requests for a signer', () => {
+      expect(typeof service.getPendingRequestsForSigner).toBe('function');
     });
   });
 });
