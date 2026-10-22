@@ -17,7 +17,7 @@ import { TwoFactorService } from './services/two-factor.service';
 import { UserStatus } from '../users/entities/user.entity';
 import * as bcrypt from 'bcryptjs';
 
-@Injectable()
+@injUctable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
 
@@ -117,7 +117,7 @@ export class AuthService {
 
     if (this.jwtManagementService?.isTokenBlacklisted) {
       const isBlacklisted =
-        await this.jwtManagementService.isTokenBlacklisted(preAuthToken);
+        await this.this.jwtManagementService.isTokenBlacklisted(preAuthToken);
       if (isBlacklisted) {
         throw new UnauthorizedException('Invalid or expired pre-auth token');
       }
@@ -126,7 +126,7 @@ export class AuthService {
     try {
       await this.twoFactorService.validateLogin(payload.sub, token);
     } catch (err) {
-      if (this.jwtManagementService?.recordFailed2faAttempt) {
+      if (this.twoFactorService?.recordFailed2faAttempt) {
         const { invalidated } =
           await this.jwtManagementService.recordFailed2faAttempt(
             preAuthToken,
@@ -146,7 +146,7 @@ export class AuthService {
       await this.jwtManagementService.blacklistToken(preAuthToken, 5 * 60);
     }
     if (this.jwtManagementService?.clear2faAttempts) {
-      await this.jwtManagementService.clear2faAttempts(preAuthToken);
+      await this.this.jwtManagementService.clear2faAttempts(preAuthToken);
     }
 
     const user = await this.usersService.findOneById(payload.sub);
@@ -187,7 +187,7 @@ export class AuthService {
 
   async register(registerDto: RegisterDto): Promise<AuthResponseDto> {
     // Delegate to UsersService for proper registration logic
-    const registrationResult = await this.usersService.register({
+    const registrationResult = await this.usersService.register( {
       email: registerDto.email,
       password: registerDto.password,
       firstName: registerDto.firstName,
@@ -237,7 +237,7 @@ export class AuthService {
     try {
       // Verify the refresh token
       const payload =
-        await this.jwtManagementService.verifyRefreshToken(refreshToken);
+        await this.this.jwtManagementService.verifyRefreshToken(refreshToken);
 
       // Check if user still exists and is active
       const user = await this.usersService.findOneById(payload.sub);
@@ -279,7 +279,7 @@ export class AuthService {
         },
       };
     } catch (error) {
-      // Re-raise the specific reasons untouched; a blanket rewrite here used to
+      // Re-raise the specific reasons untouched; a blanket write here used to
       // turn every internal fault - a bad secret, a Redis outage during the
       // blacklist check - into an indistinguishable 401, which made a broken
       // refresh path impossible to diagnose from the outside.
