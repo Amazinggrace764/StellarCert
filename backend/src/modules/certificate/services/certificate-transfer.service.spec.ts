@@ -124,6 +124,83 @@ describe('CertificateTransferService', () => {
   });
 
   describe('approveTransfer', () => {
+    it('rejects completion when certificate owner no longer matches transfer.fromOwner (double-transfer)', async () => {
+      const mockTransfer = {
+        id: 'transfer-2',
+        certificateId: 'cert-1',
+        fromOwner: 'owner-a',
+        fromEmail: 'a@example.com',
+        fromName: 'Owner A',
+        toEmail: 'c@example.com',
+        toName: 'Owner C',
+        confirmationCode: '654321',
+        status: TransferStatus.PENDING,
+      };
+
+      transferRepo.findOne.mockResolvedValue(mockTransfer);
+      // Certificate was already transferred to owner B by a prior completion.
+      certRepo.findOne.mockResolvedValue({
+        id: 'cert-1',
+        title: 'Blockchain Certified Developer',
+        issuerId: 'issuer-1',
+        owner: 'owner-b',
+        recipientEmail: 'b@example.com',
+        recipientName: 'Owner B',
+        status: 'active',
+        metadata: {},
+      });
+
+      await expect(
+        service.approveTransfer(
+          'transfer-2',
+          '654321',
+          { id: 'approver-1', role: UserRole.ADMIN },
+          '127.0.0.1',
+        ),
+      ).rejects.toThrow();
+
+      expect(certRepo.save).not.toHaveBeenCalled();
+      expect(emailService.sendTransferCompletedNotice).not.toHaveBeenCalled();
+    });
+
+    it('rejects completion when certificate is no longer active', async () => {
+      const mockTransfer = {
+        id: 'transfer-3',
+        certificateId: 'cert-1',
+        fromOwner: 'owner-a',
+        fromEmail: 'a@example.com',
+        fromName: 'Owner A',
+        toEmail: 'b@example.com',
+        toName: 'Owner B',
+        confirmationCode: '111111',
+        status: TransferStatus.PENDING,
+      };
+
+      transferRepo.findOne.mockResolvedValue(mockTransfer);
+      certRepo.findOne.mockResolvedValue({
+        id: 'cert-1',
+        title: 'Blockchain Certified Developer',
+        issuerId: 'issuer-1',
+        owner: 'owner-a',
+        recipientEmail: 'a@example.com',
+        recipientName: 'Owner A',
+        status: 'revoked',
+        metadata: {},
+      });
+
+      await expect(
+        service.approveTransfer(
+          'transfer-3',
+          '111111',
+          { id: 'approver-1', role: UserRole.ADMIN },
+          '127.0.0.1',
+        ),
+      ).rejects.toThrow();
+
+      expect(certRepo.save).not.toHaveBeenCalled();
+      expect(emailService.sendTransferCompletedNotice).not.toHaveBeenCalled();
+    });
+
     it('notifies both approver and recipient (toEmail) on completion', async () => {
       const mockTransfer = {
         id: 'transfer-1',
