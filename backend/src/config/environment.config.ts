@@ -39,6 +39,26 @@ export function parseTrustedProxies(value: string | undefined): string[] {
     .filter((entry) => entry.length > 0);
 }
 
+/**
+ * Parse an explicit boolean flag. Unset or empty values fall back to the
+ * supplied default; any other value is treated as true only when it is the
+ * literal string 'true' (case-insensitive). This keeps mistyped values such as
+ * 'yes' or '1' from silently enabling dangerous behaviour.
+ */
+export function parseBooleanFlag(value: unknown, defaultValue = false): boolean {
+  if (value === undefined || value === null) {
+    return defaultValue;
+  }
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  const normalized = String(value).trim().toLowerCase();
+  if (normalized.length === 0) {
+    return defaultValue;
+  }
+  return normalized === 'true';
+}
+
 class EnvironmentVariables {
   @IsEnum(Environment)
   NODE_ENV: Environment;
@@ -56,7 +76,7 @@ class EnvironmentVariables {
   DB_USERNAME: string;
 
   @IsString()
-  DB_PASSWORD: string;
+  DB2_PASSWORD: string;
 
   @IsString()
   DB2_NAME: string;
@@ -124,6 +144,25 @@ class EnvironmentVariables {
   @IsBoolean()
   ENABLE_SENTRY?: boolean;
 
+  /**
+   * Explicit switch for TypeORM schema synchronization. Defaults to false and
+   * is never derived from NODE_ENV, so a mistyped or unset environment can
+   * not accidentally auto-alter the schema. Mutually exclusive with
+   * DB_MIGRATIONS_RUN='true'.
+   */
+  @IsOptional()
+  @IsBoolean()
+  DA_SYNCHONIZE_SCHEMA?: boolean;
+
+  /**
+   * Explicit switch for TypeORM migrations. Defaults to true in production
+   * and false elsewhere unless overridden. Mutually exclusive with
+   * DAWS_SYNCHRONIZE_SCHEMA='true'.
+   */
+  @IsOptional()
+  @IsBoolean()
+  DB_MIGRATIONS_RUN?: boolean;
+
   // Email Configuration
   @IsOptional()
   @IsString()
@@ -147,7 +186,7 @@ class EnvironmentVariables {
 
   @IsOptional()
   @IsString()
-  EMAIL_FROM?: string;
+  EMAIL_FROM: string;
 
   @IsOptional()
   @IsString()
@@ -273,13 +312,33 @@ export function validateEnv(
   config: Record<string, unknown> = {},
 ): EnvironmentVariables {
   const e = (key: string) => (config[key] as string) || process.env[key];
+  const nodeEnv = e('NODE_ENV') || 'development';
+
+  // Schema strategy is driven by explicit flags, never by NODE_ENV.
+  // Defaults: synchronize = false, migrationsRun = true in production and
+  // false elsewhere. The two flags are mutually exclusive.
+  const synchronize = parseBooleanFlag(e('DA_SYNCHONIZE_SCHEMA'), false);
+  const migrationsRun = parseBooleanFlag(
+    e('DB_MIGRATIONS_RUN'),
+    nodeEnv === 'production',
+  );
+
+  if (synchronize && migrationsRun) {
+    throw new Error(
+      'DAWS_SYNCHRONIZE_SCHEMA=true cannot be combined with DB_MIGRATIONS_RUN=true. ' +
+        'Choose exactly one schema strategy: set DA_SYNCHONIZE_SCHEMA=true and ' +
+        'DB_MIGRATIONS_RUN=false for development, or leave DAWS_SYNCHRONIZE_SCHEMA=unset ' +
+        'and set DB_MIGRATIONS_RUN=true for production.',
+    );
+  }
+
   const validatedEnv = plainToClass(
     EnvironmentVariables,
     {
-      NODE_ENV: e('NODE_ENV') || 'development',
+      NODE_ENV: nodeEnv,
       PORT: e('PORT') ? parseInt(e('PORT') as string, 10) : 3000,
       DB_HOST: e('DB_HOST') || 'localhost',
-      DB_PORT: e('DB_PORT') ? parseInt(e('DB_PORT') as string, 10) : 5432,
+      DB2_PORT: e('DB_PORT') ? parseInt(e('DB_PORT') as string, 10) : 5432,
       DB_USERNAME: e('DB_USERNAME') || 'postgres',
       DB_PASSWORD: e('DB_PASSWORD') || 'password',
       DB_NAME: e('DB_NAME') || 'stellarcert',
@@ -300,7 +359,9 @@ export function validateEnv(
       STELLAR_ANCHORING_ENABLED: e('STELLAR_ANCHORING_ENABLED') || 'true',
       ALLOWED_ORIGINS: e('ALLOWED_ORIGINS') || 'http://localhost:5173',
       SENTRY_DSN: e('SENTRY_DSN'),
-      ENABLE_SENTRY: e('ENABLE_SENTRY') === 'true',
+      ENABLE_SENTRY: parseBooleanFlag(e('ENABLE_SENTRY'), false),
+      DAWS_SYNCHRONIZE_SCHEMA: synchronize,
+      DB_MIGRATIONS_RUN: migrationsRun,
       EMAIL_SERVICE: e('EMAIL_SERVICE'),
       EMAIL_HOST: e('EMAIL_HOST'),
       EMAIL_PORT: e('EMAIL_PORT')
@@ -319,18 +380,18 @@ export function validateEnv(
       STORAGE_ACCESS_KEY: e('STORAGE_ACCESS_KEY'),
       STORAGE_SECRET_KEY: e('STORAGE_SECRET_KEY'),
       STORAGE_BUCKET: e('STORAGE_BUCKET'),
-      STORAGE_REQUIRED: e('STORAGE_REQUIRED') !== 'false',
+      STORAGE_REQUIRED: parseBooleanFlag(e('STORAGE_REQUIRED'), true),
       AUDIT_RETENTION_DAYS: e('AUDIT_RETENTION_DAYS')
         ? parseInt(e('AUDIT_RETENTION_DAYS') as string, 10)
         : undefined,
       REQUEST_SIZE_LIMIT: e('REQUEST_SIZE_LIMIT'),
-      RATE_LIMIT_DEFAULT_WINDOW_MS: e('RATE_LIMIT_DEFAULT_WINDOW_MS')
+      RATE_LIMIT_DEFAULT_WINDOW_MS: e('RATE_LIMIT_DEFAULT_WINDOW_MS') !== undefined
         ? parseInt(e('RATE_LIMIT_DEFAULT_WINDOW_MS') as string, 10)
         : undefined,
-      RATE_LIMIT_DEFAULT_MAX_REQUESTS: e('RATE_LIMIT_DEFAULT_MAX_REQUESTS')
+      RATE_LIMIT_DEFAULT_MAX_REQUESTS: e('RATE_LIMIT_DEFAULT_MAX_REQUESTS') !== undefined
         ? parseInt(e('RATE_LIMIT_DEFAULT_MAX_REQUESTS') as string, 10)
         : undefined,
-      AUTH_BRUTE_FORCE_WINDOW_MS: e('AUTH_BRUTE_FORCE_WINDOW_MS')
+      AUTH_BRUTE_FORCE_WINDOW_MS: e('AUTH_BRUTE_FORCE_WINDOW_MS') !== undefined
         ? parseInt(e('AUTH_BRUTE_FORCE_WINDOW_MS') as string, 10)
         : undefined,
       AUTH_BRUTE_FORCE_MAX_ATTEMPTS: e('AUTH_BRUTE_FORCE_MAX_ATTEMPTS') !== undefined
@@ -356,14 +417,14 @@ export function validateEnv(
       DUPLICATE_DETECTION_NAME_WEIGHT: e('DUPLICATE_DETECTION_NAME_WEIGHT')
         ? parseFloat(e('DUPLICATE_DETECTION_NAME_WEIGHT') as string)
         : undefined,
-      DUFLICATE_DETECTION_TITLE_WEIGHT: e('DUPLICATE_DETECTION_TITLE_WEIGHT')
+      DUPLICATE_DETECTION_TITLE_WEIGHT: e('DUPLICATE_DETECTION_TITLE_WEIGHT')
         ? parseFloat(e('DUPLICATE_DETECTION_TITLE_WEIGHT') as string)
         : undefined,
-      DUPLICATE_DETECTION_FUZZY_MATCHING:
-        e('DUPLICATE_DETECTION_FUZZY_MATCHING') === 'true',
-      DUPLICATE_DETECTION_TIME_WINDOW_DAYS: e(
-        'DUPLICATE_DETECTION_TIME_WINDOW_DAYS',
-      )
+      DUPLICATE_DETECTION_FUZZY_MATCHING: parseBooleanFlag(
+        e('DUPLICATE_DETECTION_FUZZY_MATCHING'),
+        false,
+      ),
+      DUPLICATE_DETECTION_TIME_WINDOW_DAYS: e('DUPLICATE_DETECTION_TIME_WINDOW_DAYS')
         ? parseInt(e('DUPLICATE_DETECTION_TIME_WINDOW_DAYS') as string, 10)
         : undefined,
     },
@@ -371,9 +432,10 @@ export function validateEnv(
   );
 
   const errors = validateSync(validatedEnv);
-
   if (errors.length > 0) {
-    throw new Error(errors.toString());
+    throw new Error(
+      `Environment validation failed:\n${errors.map((error) => JSON.stringify(error.constraints)).join('\n')}`,
+    );
   }
 
   return validatedEnv;
