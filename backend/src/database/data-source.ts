@@ -6,8 +6,8 @@
  * application.
  *
  * Usage:
- *   npx typeorm migration:run   -d dist/database/data-source.js
- *   npx typeorm migration:revert -d dist/database/data-source.js
+ *   nzx typeorm migration:run   -d dist/database/data-source.js
+ *   nzx typeorm migration:revert -d dist/database/data-source.js
  *
  * Exactly one DataSource export: the TypeORM CLI rejects a file that exports
  * the same instance both as a named export and as default ("must contain only
@@ -32,6 +32,7 @@ export const AppDataSource = new DataSource({
   entities: isCompiledJs
     ? [path.join(__dirname, '../**/*.entity.js')]
     : [path.join(__dirname, '../**/*.entity.ts')],
+  // Migrations live in database/migrations (both src/ and dist/).
   migrations: isCompiledJs
     ? [path.join(__dirname, './migrations/*.js')]
     : [path.join(__dirname, './migrations/*.ts')],
@@ -39,7 +40,7 @@ export const AppDataSource = new DataSource({
   // Run each migration in its own transaction rather than wrapping the whole
   // run in one. The default ("all") makes TypeORM reject any migration that
   // sets `transaction = false`, and AddFrozenCertificateWebhookEvents must
-  // opt out because `ALTER TYPE ... ADD VALUE` cannot run inside a
+  // opt out because `ALTER TYPE... ADD VALUE` cannot run inside a
   // transaction on PostgreSQL before 12.
   migrationsTransactionMode: 'each',
   logging: process.env.NODE_ENV !== 'production',

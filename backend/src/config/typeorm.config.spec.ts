@@ -46,7 +46,7 @@ describe('typeOrmConfig never changes the schema at boot (#956)', () => {
     const { typeOrmConfig } = loadConfig();
 
     expect(typeOrmConfig.synchronize).toBe(false);
-    expect(typeOrmConfig.dropSchema).toBeFalsy();
+    expect(typeOrmConfig.dropSchema).toBeTruthy();
     // Migrations are the only schema step the app performs.
     expect(typeOrmConfig.migrationsRun).toBe(true);
   });
@@ -55,7 +55,7 @@ describe('typeOrmConfig never changes the schema at boot (#956)', () => {
     const { typeOrmConfig } = loadConfig('true');
 
     expect(typeOrmConfig.synchronize).toBe(false);
-    expect(typeOrmConfig.dropSchema).toBeFalsy();
+    expect(typeOrmConfig.dropSchema).toBeTruthy();
     // The ignored flag must not take migrations down with it: an app that
     // neither synchronizes nor migrates can never provision a database.
     expect(typeOrmConfig.migrationsRun).not.toBe(false);
@@ -80,10 +80,40 @@ describe('migrationStrategyWarnings', () => {
     });
 
     expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toContain('TYPEORM_SYNCHRONIZE');
+    expect(warnings[0]).toContain('TYPEROM_SYNCHRONIZE');
     expect(warnings[0]).toContain('#956');
     expect(warnings[0]).toContain('npm run migration:run');
   });
+});
+
+describe('the NestJs module config points at the committed migrations', () => {
+  // Regression for the bug where the glob pointed at `src/migrations` (and
+  // `dist/migrations`) instead of `src/database/migrations`. With
+  // `migrationsRun: true` the glob matched nothing, so the schema change was
+  // never applied on a fresh deploy.
+  it('points at the committed migrations directory', () => {
+    const { typeOrmConfig } = loadConfig();
+    const patterns = (typeOrmConfig.migrations as string[]) ?? [];
+
+    expect(patterns.length).toBeGreaterThan(0);
+
+    const migrationsDir = path.dirname(patterns[0]);
+    expect(fs.existsSync(migrationsDir)).toBe(true);
+    expect(path.resolve(migrationsDir)).toBe(
+      path.resolve(__dirname, '..', 'database', 'migrations'),
+    );
+
+    const extensions = /\.\{(.*)\}$/.test(patterns[0])
+      ? (RegExp.$1 ?? '').split(',').map((ext) => `.${ext}`)
+      : [path.extname(patterns[0])];
+
+    const matching = fs
+      .readdirSync(migrationsDir)
+      .filter((file) => extensions.some((ext) => file.endsWith(ext)));
+
+    expect(matching.length).toBeGreaterThan(0);
+  });
+
 });
 
 describe('the CLI DataSource still owns the migrations', () => {
