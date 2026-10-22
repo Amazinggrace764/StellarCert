@@ -373,91 +373,34 @@ export class CertificateTransferService {
       metadata: {
         transferId: savedTransfer.id,
         operation: 'transfer_rejected',
-        rejectionReason,
+        reason: rejectionReason,
       },
       status: 'success',
     });
 
-    this.logger.log(`Transfer ${transferId} rejected`);
+    // Notify initiator
+    await this.notificationsService.createNotification(
+      transfer.initiatedBy,
+      NotificationType.WARNING,
+      'Certificate Transfer Rejected',
+      `Transfer of certificate "${transfer.certificate.title}" to ${transfer.toEmail} was rejected. Reason: ${rejectionReason}`,
+    );
+
+    this.logger.log(
+      `Transfer ${transferId} rejected for certificate ${transfer.certificateId}`,
+    );
 
     return savedTransfer;
   }
 
-  async cancelTransfer(
-    transferId: string,
-    canceller: { id: string; role: string },
-    ipAddress?: string,
-  ): Promise<CertificateTransfer> {
-    const transfer = await this.transferRepository.findOne({
-      where: { id: transferId },
-      relations: ['certificate'],
-    });
-
-    if (!transfer) {
-      throw new NotFoundException(`Transfer with ID ${transferId} not found`);
-    }
-
-    if (transfer.status !== TransferStatus.PENDING) {
-      throw new ConflictException(
-        `Transfer is not pending. Current status: ${transfer.status}`,
-      );
-    }
-
-    // Allow cancellation if user is the initiator, the certificate's issuer, or an admin
-    if (
-      transfer.initiatedBy !== canceller.id &&
-      transfer.certificate.issuerId !== canceller.id &&
-      canceller.role !== UserRole.ADMIN
-    ) {
-      throw new ForbiddenException(
-        'Only the transfer initiator, the certificate issuer, or an admin can cancel this transfer request',
-      );
-    }
-
-    transfer.status = TransferStatus.CANCELLED;
-    transfer.completedAt = new Date();
-    const savedTransfer = await this.transferRepository.save(transfer);
-
-    await this.auditService.log({
-      action: AuditAction.CERTIFICATE_UPDATE,
-      resourceType: AuditResourceType.CERTIFICATE,
-      resourceId: transfer.certificateId,
-      userId: canceller.id,
-      ipAddress: ipAddress || 'unknown',
-      metadata: {
-        transferId: savedTransfer.id,
-        operation: 'transfer_cancelled',
-      },
-      status: 'success',
-    });
-
-    return savedTransfer;
-  }
-
-  async getTransferHistory(
-    certificateId: string,
-  ): Promise<CertificateTransfer[]> {
-    return this.transferRepository.find({
-      where: { certificateId },
-      order: { initiatedAt: 'DESC' },
-    });
-  }
-
-  async getPendingTransfers(userEmail: string): Promise<CertificateTransfer[]> {
-    return this.transferRepository.find({
-      where: [
-        { fromEmail: userEmail, status: TransferStatus.PENDING },
-        { toEmail: userEmail, status: TransferStatus.PENDING },
-      ],
-      relations: ['certificate'],
-      order: { initiatedAt: 'DESC' },
-    });
-  }
-
+  /**
+   * Generates a cryptographically secure 6-digit numeric confirmation code
+   * and retries on collision against the unique DB constraint.
+   */
   private async generateConfirmationCode(): Promise<string> {
     const maxRetries = 10;
     for (let attempt = 0; attempt < maxRetries; attempt++) {
-      const code = CryptoUtils.generateAlphanumericCode(6);
+      const code = CryptoUtils.generateNumericCode(6);
       const exists = await this.transferRepository.findOne({
         where: { confirmationCode: code },
         select: ['id'],
