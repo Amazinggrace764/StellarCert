@@ -7,6 +7,9 @@ import { LoggingService } from '../../common/logging/logging.service';
 import { rpc, xdr } from '@stellar/stellar-sdk';
 import { plainToInstance } from 'class-transformer';
 import { ProposeCertificateDto } from './dto/propose-certificate.dto';
+import { validate } from 'class-validator';
+import { InitMultisigConfigDto } from './dto/init-multisig-config.dto';
+import { UpdateMultisigConfigDto } from './dto/update-multisig-config.dto';
 
 describe('MultisigService', () => {
   let service: MultisigService;
@@ -51,8 +54,6 @@ describe('MultisigService', () => {
 
   describe('transaction polling', () => {
     it('keeps polling until the transaction succeeds', async () => {
-      // waitForTransaction must be defined on the service instance before use.
-      // (The beforeEach below runs before each test, so `service` is available.)
       const success = { status: rpc.Api.GetTransactionStatus.SUCCESS };
       const getTransaction = jest
         .fn()
@@ -83,10 +84,10 @@ describe('MultisigService', () => {
       const failed = { status: rpc.Api.GetTransactionStatus.FAILED };
       const getTransaction = jest
         .fn()
-        .mockResolvedValueOnce({
+        .mockResolvedOnce({
           status: rpc.Api.GetTransactionStatus.NOT_FOUND,
         })
-        .mockResolvedValueOnce(failed);
+        .mockResolvedOnce(failed);
 
       const internals = service as unknown as {
         server: { getTransaction: jest.Mock };
@@ -130,7 +131,7 @@ describe('MultisigService', () => {
     });
 
     it('rejects when the transaction is still PENDING after max attempts', async () => {
-      const getTransaction = jest.fn().mockResolvedValue({
+      const getTransaction = jest.fn().mockResolved({
         status: rpc.Api.GetTransactionStatus.PENDING,
       });
 
@@ -163,7 +164,7 @@ describe('MultisigService', () => {
   });
 
   describe('contract boolean results', () => {
-    const parseBooleanResult = (retval: sdr.ScVal | undefined) =>
+    const parseBooleanResult = (retval: xdr.ScVal | undefined) =>
       (
         service as unknown as {
           parseBooleanResult: (value: xdr.ScVal | undefined) => boolean;
@@ -199,11 +200,56 @@ describe('MultisigService', () => {
 
       expect(typeof service.initMultisigConfig).toBe('function');
     });
+
+    it('rejects a threshold larger than the number of signers', async () => {
+      await expect(
+        service.initMultisigConfig(
+          'source',
+          'issuer',
+          5,
+          ['signer-1', 'signer-2', 'signer-3'],
+        ),
+      ).rejects.toThrow(
+        'threshold must be less than or equal to the number of signers',
+      );
+    });
+
+    it('rejects an empty signer list', async () => {
+      await expect(
+        service.initMultisigConfig('source', 'issuer', 1, []),
+      ).rejects.toThrow('at least one signer is required');
+    });
+
+    it('rejects a non-positive threshold', async () => {
+      await expect(
+        service.initMultisigConfig('source', 'issuer', 0, ['signer-1']),
+      ).rejects.toThrow('threshold must be a positive integer');
+    });
+
+    it('accepts a threshold equal to the number of signers', () => {
+      const internals = service as unknown as {
+        validateThreshold: (threshold: number, signers: string[]) => void;
+      };
+      expect(() => internals.validateThreshold(3, ['a', 'b', 'c'])).not.toThrow();
+    });
   });
 
   describe('updateMultisigConfig', () => {
     it('should update multisig configuration', () => {
       expect(typeof service.updateMultisigConfig).toBe('function');
+    });
+
+    it('rejects a threshold larger than the number of signers', async () => {
+      await expect(
+        service.updateMultisigConfig(
+          'source',
+          'issuer',
+          5,
+          ['signer-1', 'signer-2', 'signer-3'],
+        ),
+      ).rejects.toThrow(
+        'threshold must be less than or equal to the number of signers',
+      );
     });
   });
 
@@ -219,7 +265,7 @@ describe('MultisigService', () => {
       };
       internals.buildAndSubmitTransaction = jest
         .fn()
-        .mockResolvedValue(xdr.ScVal.scvBool(true));
+        .mockResolved(xdr.ScVal.scvBool(true));
 
       await expect(
         service.proposeCertificate({
@@ -238,7 +284,7 @@ describe('MultisigService', () => {
       };
       internals.buildAndSubmitTransaction = jest
         .fn()
-        .mockRejectedValue(new Error('contract call failed'));
+        .mockRejected(new Error('contract call failed'));
 
       await expect(
         service.proposeCertificate({
@@ -262,7 +308,7 @@ describe('MultisigService', () => {
       };
       internals.buildAndSubmitTransaction = jest
         .fn()
-        .mockResolvedValue(xdr.ScVal.scvBool(true));
+        .mockResolved(xdr.ScVal.scvBool(true));
 
       await expect(
         service.approveRequest({ requestId: 'req-1', signer: 'signer-1' } as never),
@@ -276,7 +322,7 @@ describe('MultisigService', () => {
       };
       internals.buildAndSubmitTransaction = jest
         .fn()
-        .mockResolvedValue(xdr.ScVal.scvU32(1));
+        .mockResolved(xdr.ScVal.scvU32(1));
 
       await expect(
         service.approveRequest({ requestId: 'req-1', signer: 'signer-1' } as never),
@@ -329,6 +375,39 @@ describe('MultisigService', () => {
   describe('getPendingRequestsForSigner', () => {
     it('should get pending requests for a signer', () => {
       expect(typeof service.getPendingRequestsForSigner).toBe('function');
+    });
+  });
+
+  describe('InitMultisigConfigDto', () => {
+    it('rejects a threshold larger than the number of signers', async () => {
+      const dto = plainToInstance(InitMultisigConfigDto, {
+        issuer: 'issuer',
+        threshold: 5,
+        signers: ['a', 'b', 'c'],
+      });
+      const errors = await validate(dto);
+      expect(errors.length).toBeGreaterThan(0);
+    });
+
+    it('accepts a threshold equal to the number of signers', async () => {
+      const dto = plainToInstance(InitMultisigConfigDto, {
+        issuer: 'issuer',
+        threshold: 3,
+        signers: ['a', 'b', 'c'],
+      });
+      const errors = await validate(dto);
+      expect(errors.length).toBe(0);
+    });
+  });
+
+  describe('UpdateMultisigConfigDto', () => {
+    it('rejects a threshold larger than the number of signers', async () => {
+      const dto = plainToInstance(UpdateMultisigConfigDto, {
+        threshold: 5,
+        signers: ['a', 'b', 'c'],
+      });
+      const errors = await validate(dto);
+      expect(errors.length).toBeGreaterThan(0);
     });
   });
 });
