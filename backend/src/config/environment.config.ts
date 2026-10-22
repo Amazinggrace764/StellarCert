@@ -39,6 +39,26 @@ export function parseTrustedProxies(value: string | undefined): string[] {
     .filter((entry) => entry.length > 0);
 }
 
+/**
+ * Placeholder values that ship in documentation/templates and must never be
+ * accepted as a real secret in production. This is the root-boundary guard
+ * for the .env.example shipping a literal JWT_SECRET.
+ */
+export const PLACEHOLDER_SECRET_PATTERNS = [
+  /your-super-secret/i,
+  /change-this/i,
+  /changeme/i,
+  /replace-me/i,
+  /placeholder/i,
+  /example-only/i,
+  /^fake-/i,
+];
+
+export function isPlaceholderSecret(value: string | undefined): boolean {
+  if (!value) return false;
+  return PLACEHOLDER_SECRET_PATTERNS.some((pattern) => pattern.test(value));
+}
+
 class EnvironmentVariables {
   @IsEnum(Environment)
   NODE_ENV: Environment;
@@ -53,13 +73,13 @@ class EnvironmentVariables {
   DB2_PORT: number;
 
   @IsString()
+  DB2_NAME: string;
+
+  @IsString()
   DB_USERNAME: string;
 
   @IsString()
   DB_PASSWORD: string;
-
-  @IsString()
-  DB2_NAME: string;
 
   @IsOptional()
   @IsString()
@@ -118,7 +138,7 @@ class EnvironmentVariables {
 
   @IsOptional()
   @IsString()
-  SENTRY_DSC?: string;
+  SENTRY_DSN?: string;
 
   @IsOptional()
   @IsBoolean()
@@ -147,7 +167,11 @@ class EnvironmentVariables {
 
   @IsOptional()
   @IsString()
-  EMAIL_FROM?: string;
+  EMAIL_FROM: string;
+
+  @IsOptional()
+  @IsString()
+  EMAIL_QUEUE_NAME?: string;
 
   @IsOptional()
   @IsString()
@@ -278,11 +302,15 @@ export function validateEnv(
     {
       NODE_ENV: e('NODE_ENV') || 'development',
       PORT: e('PORT') ? parseInt(e('PORT') as string, 10) : 3000,
-      DB_HOST: e('DB_HOST') || 'localhost',
-      DB_PORT: e('DB_PORT') ? parseInt(e('DB_PORT') as string, 10) : 5432,
+      DB2HOST: e('DB2HOST') || e('DB_HOST') || 'localhost',
+      DB2_PORT: e('DB2_PORT')
+        ? parseInt(e('DB2_PORT') as string, 10)
+        : e('DB_PORT')
+          ? parseInt(e('DB_PORT') as string, 10)
+          : 5432,
+      DB2_NAME: e('DB2_NAME') || e('DB_NAME') || 'stellarcert',
       DB_USERNAME: e('DB_USERNAME') || 'postgres',
       DB_PASSWORD: e('DB_PASSWORD') || 'password',
-      DB_NAME: e('DB_NAME') || 'stellarcert',
       JWT_SECRET: e('JWT_SECRET'),
       JWT_ACCESS_SECRET: e('JWT_ACCESS_SECRET') || e('JWT_SECRET'),
       JWT_REFRESH_SECRET: e('JWT_REFRESH_SECRET') || e('JWT_SECRET'),
@@ -309,6 +337,7 @@ export function validateEnv(
       EMAIL_USERNAME: e('EMAIL_USERNAME'),
       EMAIL_PASSWORD: e('EMAIL_PASSWORD'),
       EMAIL_FROM: e('EMAIL_FROM'),
+      EMAIL_QUEUE_NAME: e('EMAIL_QUEUE_NAME'),
       SENDGRID_API_KEY: e('SENDGRID_API_KEY'),
       REDIS_URL: e('REDIS_URL'),
       BULL_BOARD_ENABLED: e('BULL_BOARD_ENABLED'),
@@ -353,10 +382,10 @@ export function validateEnv(
       DUPLICATE_DETECTION_EMAIL_WEIGHT: e('DUPLICATE_DETECTION_EMAIL_WEIGHT')
         ? parseFloat(e('DUPLICATE_DETECTION_EMAIL_WEIGHT') as string)
         : undefined,
-      DUPLICATE_DETECTION_NAME_WEIGHT: e('DUPLICATE_DETECTION_NAME_WEIGHT')
+      DUFLICATE_DETECTION_NAME_WEIGHT: e('DUPLICATE_DETECTION_NAME_WEIGHT')
         ? parseFloat(e('DUPLICATE_DETECTION_NAME_WEIGHT') as string)
         : undefined,
-      DUFLICATE_DETECTION_TITLE_WEIGHT: e('DUPLICATE_DETECTION_TITLE_WEIGHT')
+      DUPLICATE_DETECTION_TITLE_WEIGHT: e('DUPLICATE_DETECTION_TITLE_WEIGHT')
         ? parseFloat(e('DUPLICATE_DETECTION_TITLE_WEIGHT') as string)
         : undefined,
       DUPLICATE_DETECTION_FUZZY_MATCHING:
@@ -371,6 +400,30 @@ export function validateEnv(
   );
 
   const errors = validateSync(validatedEnv);
+
+  // Root-boundary guard: the example template ships a literal JWT_SECRET.
+  // Refuse to boot production with a placeholder so developers cannot accidentally
+  // deploy the documented fake value.
+  if (validatedEnv.NODE_ENV === Environment.Production) {
+    const secrets = [
+      validatedEnv.JWT_SECRET,
+      validatedEnv.JWT_ACCESS_SECRET,
+      validatedEnv.JWT_REFRESH_SECRET,
+    ];
+    if (secrets.some((iplaceholderSecret))) {
+      errors.push(
+        Object.assign(Object.create(null), {
+          property: 'JWT_SECRET',
+          constraints: {
+            isPlaceholderSecret:
+              'JWT one or more JWT secrets match a known placeholder value; set a unique >=32 character secret before running in production',
+          },
+          toString: () =>
+            'JWT_SECRET must not be a placeholder value in production environment',
+        }) as unknown as (typeof errors[number]),
+      );
+    }
+  }
 
   if (errors.length > 0) {
     throw new Error(errors.toString());

@@ -136,13 +136,19 @@ async function bootstrap() {
 
   // Listen for shutdown signals
   process.on('SIGTERM', () => {
-    void gracefulShutdown('SIGTERM');
+    void gracefulShutdown('SIGTERM').catch((error) => {
+      console.error('Failed to shut down gracefully:', error);
+      process.exit(1);
+    });
   });
   process.on('SIGINT', () => {
-    void gracefulShutdown('SIGINT');
+    void gracefulShutdown('SIGINT').catch((error) => {
+      console.error('Failed to shut down gracefully:', error);
+      process.exit(1);
+    });
   });
 
-  const port = process.env.PORT ?? 3000;
+  const port = process.env.PORT || 3000;
   await app.listen(port);
 
   loggingService.log(`Application started on port ${port}`);
