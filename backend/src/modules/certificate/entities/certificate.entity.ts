@@ -177,6 +177,10 @@ export class Certificate {
     return new Date() > this.expiresAt;
   }
 
+  isVerifiable(): boolean {
+    return this.isActive() && !this.isExpired();
+  }
+
   canBeRevoked(): boolean {
     return this.status === CertificateStatus.ACTIVE;
   }
