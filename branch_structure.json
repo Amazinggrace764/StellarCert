@@ -1,0 +1,24 @@
+{
+  "default_branch": "main",
+  "branches": [
+    "fix/issue-104-tsconfig-app-json-omits-nounusedlocals",
+    "fix/issue-127-ssrf-utils-spec-ts-fails-typecheck-npm-run",
+    "main",
+    "origin",
+    "security/issue-126-legacy-forroutes-wildcards-emit-five"
+  ],
+  "parent": {
+    "fix/issue-104-tsconfig-app-json-omits-nounusedlocals": "main",
+    "fix/issue-127-ssrf-utils-spec-ts-fails-typecheck-npm-run": "main",
+    "main": null,
+    "origin": "main",
+    "security/issue-126-legacy-forroutes-wildcards-emit-five": "main"
+  },
+  "order": [
+    "main",
+    "fix/issue-104-tsconfig-app-json-omits-nounusedlocals",
+    "fix/issue-127-ssrf-utils-spec-ts-fails-typecheck-npm-run",
+    "origin",
+    "security/issue-126-legacy-forroutes-wildcards-emit-five"
+  ]
+}
