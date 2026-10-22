@@ -27,8 +27,13 @@ import { SecurityHeadersInterceptor } from './interceptor';
 })
 export class SecurityModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
-    consumer
-      .apply(CorsMiddleware, InputSanitizationMiddleware)
-      .forRoutes({ path: '{*path}', method: RequestMethod.ALL });
+    // Input sanitization is no longer applied globally as a per-command
+    // mutating middleware. Sanitization is scoped to specific fields at the
+    // validation boundary (see InputSanitizationMiddleware), preserving
+    // legitimate \n/\r/\t content in multi-line and tab-delimited data.
+    consumer.apply(CorsMiddleware).forRoutes({
+      path: '{*path}',
+      method: RequestMethod.ALL,
+    });
   }
 }
