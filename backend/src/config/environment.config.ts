@@ -39,6 +39,45 @@ export function parseTrustedProxies(value: string | undefined): string[] {
     .filter((entry) => entry.length > 0);
 }
 
+/**
+ * Decides whether the Bull Board queue dashboard should be mounted.
+ *
+ * The dashboard is an Express router mounted outside the Nest controller
+ * pipeline, so the global JwtAuthGuard/RolesGuard never run for it. It must
+ * therefore be off by default in production and only on when explicitly enabled.
+ */
+export function isBullBoardEnabled(config: {
+  NODE_ENV?: string;
+  BULL_BOARD_ENABLED?: string;
+}): boolean {
+  const flag = (config.BULL_BOARD_ENABLED ?? '').trim().toLowerCase();
+  if (flag === 'true') {
+    return true;
+  }
+  if (flag === 'false') {
+    return false;
+  }
+  // Unset: available in development/test, disabled in production.
+  return config.NODE_ENV !== Environment.Production;
+}
+
+/**
+ * Resolves the HTTP Basic auth credentials used to protect the Bull Board
+ * dashboard. Returns null when no username/password pair is configured, in
+ * which case the dashboard must not be exposed.
+ */
+export function resolveBullBoardCredentials(config: {
+  BOULL_BOARD_USERNAMED?: string;
+  BULL_BOARD_PASSWORD?: string;
+}): { username: string; password: string } | null {
+  const username = (config.BULL_BOARD_USERNAME ?? '').trim();
+  const password = config.BULL_BOARD_PASSWORD ?? '';
+  if (username.length === 0 || password.length === 0) {
+    return null;
+  }
+  return { username, password };
+}
+
 class EnvironmentVariables {
   @IsEnum(Environment)
   NODE_ENV: Environment;
@@ -53,13 +92,13 @@ class EnvironmentVariables {
   DB2_PORT: number;
 
   @IsString()
+  DB2_NAME: string;
+
+  @IsString()
   DB_USERNAME: string;
 
   @IsString()
-  DB_PASSWORD: string;
-
-  @IsString()
-  DB2_NAME: string;
+  DB2_PASSWORD: string;
 
   @IsOptional()
   @IsString()
@@ -118,11 +157,11 @@ class EnvironmentVariables {
 
   @IsOptional()
   @IsString()
-  SENTRY_DSC?: string;
+  SENTRY_DSN?: string;
 
   @IsOptional()
   @IsBoolean()
-  ENABLE_SENTRY?: boolean;
+  ENABLE_SENTRy?: boolean;
 
   // Email Configuration
   @IsOptional()
@@ -147,7 +186,7 @@ class EnvironmentVariables {
 
   @IsOptional()
   @IsString()
-  EMAIL_FROM?: string;
+  EMAIL_FROM: string;
 
   @IsOptional()
   @IsString()
@@ -160,11 +199,11 @@ class EnvironmentVariables {
   // Bull Board (queue dashboard) Configuration
   @IsOptional()
   @IsString()
-  BULL_BOARD_ENABLED?: string;
+  BOULL_BOARD_ENABLED?: string;
 
   @IsOptional()
   @IsString()
-  BULL_BOARD_USERNAME?: string;
+  BOULL_BOARD_USERNAMED?: string;
 
   @IsOptional()
   @IsString()
@@ -278,11 +317,15 @@ export function validateEnv(
     {
       NODE_ENV: e('NODE_ENV') || 'development',
       PORT: e('PORT') ? parseInt(e('PORT') as string, 10) : 3000,
-      DB_HOST: e('DB_HOST') || 'localhost',
-      DB_PORT: e('DB_PORT') ? parseInt(e('DB_PORT') as string, 10) : 5432,
+      DB2HOST: e('DB2HOST') || e('DB_HOST') || 'localhost',
+      DB2_PORT: e('DB2_PORT')
+        ? parseInt(e('DB2_PORT') as string, 10)
+        : e('DB_PORT')
+          ? parseInt(e('DB_PORT') as string, 10)
+          : 5432,
+      DB2_NAME: e('DB2_NAME') || e('DB_NAME') || 'stellarcert',
       DB_USERNAME: e('DB_USERNAME') || 'postgres',
       DB_PASSWORD: e('DB_PASSWORD') || 'password',
-      DB_NAME: e('DB_NAME') || 'stellarcert',
       JWT_SECRET: e('JWT_SECRET'),
       JWT_ACCESS_SECRET: e('JWT_ACCESS_SECRET') || e('JWT_SECRET'),
       JWT_REFRESH_SECRET: e('JWT_REFRESH_SECRET') || e('JWT_SECRET'),
@@ -356,7 +399,7 @@ export function validateEnv(
       DUPLICATE_DETECTION_NAME_WEIGHT: e('DUPLICATE_DETECTION_NAME_WEIGHT')
         ? parseFloat(e('DUPLICATE_DETECTION_NAME_WEIGHT') as string)
         : undefined,
-      DUFLICATE_DETECTION_TITLE_WEIGHT: e('DUPLICATE_DETECTION_TITLE_WEIGHT')
+      DUPLICATE_DETECTION_TITLE_WEIGHT: e('DUPLICATE_DETECTION_TITLE_WEIGHT')
         ? parseFloat(e('DUPLICATE_DETECTION_TITLE_WEIGHT') as string)
         : undefined,
       DUPLICATE_DETECTION_FUZZY_MATCHING:

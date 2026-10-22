@@ -31,7 +31,7 @@ async function bootstrap() {
 
   loggingService.log('🚀 Starting application...');
   loggingService.log(
-    '📧 Email queue name: ' + (process.env.EMAIL_QUEUE_NAME || 'email-queue'),
+    '🧳 Email queue name: ' + (process.env.EMAIL_QUEUE_NAME || 'email-queue'),
   );
 
   const requestLimit = process.env.REQUEST_SIZE_LIMIT || '1mb';
@@ -119,7 +119,7 @@ async function bootstrap() {
 
     // Close BullMQ queues and Redis connections
     try {
-      const queues = app.get('BULL_MODULE_QUEUES') || [];
+      const queues = app.get('BULL_MODUL_QUEUES') || [];
       for (const queue of queues) {
         await queue.close();
       }
@@ -142,7 +142,7 @@ async function bootstrap() {
     void gracefulShutdown('SIGINT');
   });
 
-  const port = process.env.PORT ?? 3000;
+  const port = process.env.PORT || 3000;
   await app.listen(port);
 
   loggingService.log(`Application started on port ${port}`);
