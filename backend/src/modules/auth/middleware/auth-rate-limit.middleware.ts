@@ -3,10 +3,82 @@ import { NextFunction, Request, Response } from 'express';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
 import { ConfigService } from '@nestjs/config';
+import { parseTrustedProxies } from '../../../config/environment.config';
 
 interface RateLimitData {
   count: number;
   expiresAt: number;
+}
+
+/**
+ * Normalize an IP address for comparison. Strips IPv4-mapped IPv6 prefixes
+ * and any zone identifier.
+ */
+function normalizeIp(ip: string | undefined): string {
+  if (!ip) return '';
+  let out = ip.trim();
+  if (out.startsWith('::ffff:')) {
+    out = out.slice('::ffff:'.length);
+  }
+  const zoneIdx = out.indexOf('%');
+  if (zoneIdx >= 0) {
+    out = out.slice(0, zoneIdx);
+  }
+  return out.toLowerCase();
+}
+
+function ipv4ToNumber(ip: string): number | null {
+  const parts = ip.split('.');
+  if (parts.length !== 4) return null;
+  let num = 0;
+  for (const p of parts) {
+    const n = Number(p);
+    if (!Number.isInteger(n) || n < 0 || n > 255) return null;
+    num = num * 256 + n;
+  }
+  return num;
+}
+
+function ipv4InCidr(ip: string, cidr: string, prefixLen: number): boolean {
+  const ipNum = ipv4ToNumber(ip);
+  const netNum = ipv4ToNumber(cidr);
+  if (ipNum === null || netNum === null) return false;
+  if (prefixLen <= 0) return true;
+  if (prefixLen >= 32) return ipNum === netNum;
+  const mask = (0xffffffff << (32 - prefixLen)) >>> 0;
+  return (ipNum & mask) === (netNum & mask);
+}
+
+/**
+ * Checks whether the given peer address matches any entry in the trusted
+ * proxy list. Entries may be exact IPs, IPv4 CIDR ranges, or the wildcard
+ * '*' (trust all).
+ */
+export function isTrustedProxyAddress(
+  peerAddress: string | undefined,
+  trustedProxies: string[],
+): boolean {
+  const peer = normalizeIp(peerAddress);
+  if (!peer) return false;
+  for (const entry of trustedProxies) {
+    const norm = normalizeIp(entry);
+    if (!norm) continue;
+    if (norm === '*') {
+      return true;
+    }
+    if (norm === peer) {
+      return true;
+    }
+    const slashIdx = norm.indexOf('/');
+    if (slashIdx > 0) {
+      const network = norm.slice(0, slashIdx);
+      const prefix = Number(norm.slice(slashIdx + 1));
+      if (Number.isInteger(prefix) && ipv4InCidr(peer, network, prefix)) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 @Injectable()
@@ -14,35 +86,63 @@ export class AuthRateLimitMiddleware implements NestMiddleware {
   private readonly limit = 5;
   private readonly windowSeconds = 60; // 1 minute
   private readonly windowMs = this.windowSeconds * 1000;
+  private readonly trustedProxies: string[];
 
   constructor(
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
     @Optional() private configService?: ConfigService,
-  ) {}
+  ) {
+    const configured = this.configService?.get<string>('TRUSTED_PROXIES');
+    this.trustedProxies = parseTrustedProxies(configured);
+  }
 
+  /**
+   * Derive the client IP from trusted proxy configuration. The X-Forwarded-For
+   * header is only honoured when the immediate peer (socket remote address) is
+   * in the trusted-proxy list. Otherwise the socket address is used, so an
+   * attacker rotating the header cannot bypass the limit.
+   */
   private getClientIp(req: Request): string {
-    const isTrustedProxy = Boolean(
-      this.configService?.get('TRUST_PROXY') ?? req.app?.get?.('trust proxy'),
-    );
-
-    if (isTrustedProxy) {
-      if (req.ip) {
-        return req.ip;
-      }
-      const forwarded = req.headers['x-forwarded-for'];
-      if (typeof forwarded === 'string' && forwarded.trim().length > 0) {
-        return forwarded.split(',')[0].trim();
-      } else if (Array.isArray(forwarded) && forwarded.length > 0) {
-        return forwarded[0].trim();
-      }
-    }
-
-    return (
+    const socketAddress =
       req.socket?.remoteAddress ||
       (req as any).connection?.remoteAddress ||
       req.ip ||
-      'unknown'
+      'unknown';
+
+    const peerAddress =
+      req.socket?.remoteAddress || (req as any).connection?.remoteAddress;
+
+    const peerIsTrusted = isTrustedProxyAddress(
+      peerAddress,
+      this.trustedProxies,
     );
+
+    if (!peerIsTrusted) {
+      return socketAddress;
+    }
+
+    // Peer is a trusted proxy - trust the forwarded headers. When Express has
+    // already resolved req.ip via its trust-proxy setting, prefer that.
+    if (req.ip && req.ip !== socketAddress) {
+      return req.ip;
+    }
+
+    const forwarded = req.headers['x-forwarded-for'];
+    let candidate: string | undefined;
+    if (typeof forwarded === 'string') {
+      candidate = forwarded.split(',')[0];
+    } else if (Array.isArray(forwarded) && forwarded.length > 0) {
+      candidate = forwarded[0];
+    }
+
+    if (candidate) {
+      const sanitized = sanitizeForwardedIp(candidate);
+      if (sanitized) {
+        return sanitized;
+      }
+    }
+
+    return socketAddress;
   }
 
   async use(req: Request, res: Response, next: NextFunction): Promise<void> {
@@ -62,6 +162,7 @@ export class AuthRateLimitMiddleware implements NestMiddleware {
           expiresAt = existing.expiresAt;
         }
       } else if (typeof existing === 'number' && existing > 0) {
+        // Legacy shape: a plain counter. Treat it as the current window.
         count = existing;
       }
 
@@ -79,8 +180,10 @@ export class AuthRateLimitMiddleware implements NestMiddleware {
       }
 
       const nextCount = count + 1;
+      // Preserve the original window - do not reset the TTL on every hit.
       const remainingMs = Math.max(1, expiresAt - now);
 
+      // cache-manager v5 interprets the TTL argument as milliseconds.
       await this.cacheManager.set(
         key,
         { count: nextCount, expiresAt },
@@ -100,4 +203,33 @@ export class AuthRateLimitMiddleware implements NestMiddleware {
       });
     }
   }
+}
+
+/**
+ * Sanitize a single forwarded IP (first hop of X-Forwarded-For). Returns
+ * undefined when the value is not a plausible IPv4/IPv6 address.
+ */
+function sanitizeForwardedIp(raw: string): string | undefined {
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  // Reject anything that is not a plain address (no spaces, brackets, or ports).
+  if (/[\s\[\]]/.test(trimmed)) {
+    // Strip an IPv6 bracket form like [::1]:80.
+    const bracketMatch = /^\[([^\]]+)\](?::\d+)?$/.exec(trimmed);
+    if (bracketMatch) {
+      return normalizeIp(bracketMatch[1]);
+    }
+    return undefined;
+  }
+  // Strip a trailing port for IPv4 (e.g. 1.2.3.4:56).
+  const ipv4WithPort = /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):\d+$/.exec(trimmed);
+  const candidate = ipv4WithPort ? ipv4WithPort[1] : trimmed;
+  const norm = normalizeIp(candidate);
+  if (!norm) return undefined;
+  // Basic shape validation: IPv4 or IPv6.
+  if (ipv4ToNumber(norm) !== null) return norm;
+  if (/^[0-9a-f]:+|^[0-9a-f]*[::][0-9a-f]*$/.test(norm)) {
+    return norm;
+  }
+  return undefined;
 }
