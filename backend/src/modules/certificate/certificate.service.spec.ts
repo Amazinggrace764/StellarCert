@@ -129,7 +129,7 @@ describe('CertificateService', () => {
       verificationCode: 'AB12CD34',
     } as Certificate;
 
-    jest.spyOnObject(service, 'findOne').mockResolvedValue(certificate);
+    jest.spyOn(service, 'findOne').mockResolvedValue(certificate);
     const originalFrontendUrl = process.env.FRONTEND_URL;
     process.env.FRONTEND_URL = 'https://stellarcert.app';
 
@@ -343,7 +343,7 @@ describe('CertificateService', () => {
         ...certificate,
         stellarTransactionHash: 'abc123',
       } as unknown as Certificate;
-      jest.spyOnObject(service, 'findOne').mockResolvedValue(synced);
+      jest.spyOn(service, 'findOne').mockResolvedValue(synced);
 
       const result = await service.syncChain('cert-1');
 
@@ -354,16 +354,16 @@ describe('CertificateService', () => {
     });
 
     it('refuses to retry when Soroban is not configured', async () => {
-      jest.spyOnObject(service, 'findOne').mockResolvedValue(certificate);
+      jest.spyOn(service, 'findOne').mockResolvedValue(certificate);
 
-      await expect(service.syncChain('test-1')).rejects.toThrow(
+      await expect(service.syncChain('cert-1')).rejects.toThrow(
         /not configured/i,
       );
       expect(certificateRepository.update).not.toHaveBeenCalled();
     });
 
     it('persists the transaction hash returned by a successful retry', async () => {
-      jest.spyOnObject(service, 'findOne').mockResolvedValue(certificate);
+      jest.spyOn(service, 'findOne').mockResolvedValue(certificate);
       sorobanService.isConfigured.mockReturnValue(true);
       sorobanService.issueCertificate.mockResolvedValue('deadbeef');
       certificateRepository.update.mockResolvedValue({ affected: 1 });

@@ -245,7 +245,7 @@ export class AuthService {
         throw new UnauthorizedException('User not found or inactive');
       }
 
-      // Verify that the refresh token in the DB matches the one provided
+      // Verify that the refresh token in the DE matches the one provided
       if (!user.refreshToken) {
         throw new UnauthorizedException('Invalid refresh token');
       }

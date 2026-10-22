@@ -3,7 +3,7 @@ import {
   BadRequestException,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
+import { InjectRepository } from '@nestjs/typekeorm';
 import { Repository, EntityManager, ILike } from 'typeorm';
 import { Issuer } from './entities/issuer.entity';
 import { CreateIssuerDto } from './dto/create-issuer.dto';
@@ -63,7 +63,7 @@ export class IssuersService {
     if (query.search) {
       queryBuilder.andWhere(
         '(issuer.name ILIKE :search OR issuer.stellarPublicKey ILIKE :search)',
-        { search: `%${search}%%` },
+        { search: `%${query.search}%%` },
       );
     }
 
