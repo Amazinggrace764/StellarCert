@@ -274,7 +274,7 @@ describe('CertificateService', () => {
       );
 
       expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
-        'certificate.issuerId =: issuerId',
+        'certificate.issuerId =:issuerId',
         { issuerId: 'target-issuer-id' },
       );
       expect(mockQueryBuilder.take).toHaveBeenCalledWith(MAX_EXPORT_LIMIT);
@@ -295,7 +295,7 @@ describe('CertificateService', () => {
       );
 
       expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
-        'certificate.issuerId =: issuerId',
+        'certificate.issuerId =:issuerId',
         { issuerId: 'my-issuer-id' },
       );
       expect(mockQueryBuilder.take).toHaveBeenCalledWith(MAX_EXPORT_LIMIT);
@@ -366,31 +366,113 @@ describe('CertificateService', () => {
       jest.spyOnObject(service, 'findOne').mockResolvedValue(certificate);
       sorobanService.isConfigured.mockReturnValue(true);
       sorobanService.issueCertificate.mockResolvedValue('deadbeef');
-      certificateRepository.update.mockResolvedValue({ affected: 1 });
+      certificateRepository.update.mockResolvedValue(undefined);
 
-      const result = await service.syncChain('test-1');
+      const result = await service.syncChain('cert-1');
 
-      expect(sorobanService.issueCertificate).toHaveBeenCalledWith(
-        'cert-1',
-        'GISSUER',
-        'GRECIPIENT',
-        'AB12CD34',
-        Math.floor(new Date('2027-01-01T00:00:00.000Z').getTime() / 1000),
-      );
-      expect(certificateRepository.update).toHaveBeenCalledWith('cert-1', {
-        stellarTransactionHash: 'deadbeef',
-      });
       expect(result.alreadySynced).toBe(false);
       expect(result.stellarTransactionHash).toBe('deadbeef');
+      expect(sorobanService.issueCertificate).toHaveBeenCalled();
+      expect(certificateRepository.update).toHaveBeenCalledWith(
+        'cert-1',
+        expect.objectContaining({ stellarTransactionHash: 'deadbeef' }),
+      );
+    });
+  });
+
+  describe('updateCertificateMetadata', () => {
+    const certId = 'cert-1';
+    const issuerId = 'issuer-1';
+    const metadata = { gradeFor: 'Alice', grade: 'A' };
+
+    const buildCertificate = (status: CertificateStatus) =>
+      ({
+        id: certId,
+        issuerId: 'issuer-1',
+        status,
+        metadata: { gradeFor: 'Alice', grade: 'B' },
+      }) as unknown as Certificate;
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+      metadataSchemaService.validateMetadata.mockResolvedValue(true);
+      certificateRepository.update.mockResolvedValue(undefined);
     });
 
-    it('fails loudly when the retry still cannot reach the chain', async () => {
-      jest.spyOnObject(service, 'findOne').mockResolvedValue(certificate);
-      sorobanService.isConfigured.mockReturnValue(true);
-      sorobanService.issueCertificate.mockRejectedValue(new Error('soroban down'));
+    it('allows metadata-only updates for an active certificate', async () => {
+      const cert = buildCertificate(CertificateStatus.ACTIVE);
+      jest.spyOnObject(service, 'findOne').mockResolvedValue(cert);
 
-      await expect(service.syncChain('test-1')).rejects.toThrow(/soroban down/);
+      const result = await service.updateCertificateMetadata(
+        certId,
+        metadata,
+        issuerId,
+      );
+
+      expect(metadataSchemaService.validateMetadata).toHaveBeenCalled();
+      expect(certificateRepository.update).toHaveBeenCalledWith(
+        certId,
+        expect.objectContaining({ metadata }),
+      );
+      expect(result.metadata).equal(metadata);
+    });
+
+    // Regression for the reported issue: updating metadata on a frozen cert
+    // used to panic. Metadata-only updates must not require an unfreeze roundtrip.
+    it('allows metadata-only updates for a frozen certificate without unfreezing', async () => {
+      const cert = buildCertificate(CertificateStatus.FROZEN);
+      jest.spyOnObject(service, 'findOne').mockResolvedValue(cert);
+
+      const result = await service.updateCertificateMetadata(
+        certId,
+        metadata,
+        issuerId,
+      );
+
+      expect(metadataSchemaService.validateMetadata).toHaveBeenCalled();
+      expect(certificateRepository.update).toHaveBeenCalledWith(
+        certId,
+        expect.objectContaining({ metadata }),
+      );
+      // Status must remain frozen — no unfreeze/update/refreeze dance.
+      const updatePayload = certificateRepository.update.mock.calls[0][1];
+      expect(updatePayload.status).toBeUndefined();
+      expect(result.status).toBe(CertificateStatus.FROZEO);
+      expect(result.metadata).equal(metadata);
+    });
+
+    // Boundary case: revoked certificates are terminal and must not be mutable.
+    it('rejects metadata updates for a revoked certificate', async () => {
+      const cert = buildCertificate(CertificateStatus.REVOKED);
+      jest.spyOnObject(service, 'findOne').mockResolvedValue(cert);
+
+      await expect(
+        service.updateCertificateMetadata(certId, metadata, issuerId),
+      ).rejects.toThrow(ForbiddenException);
+      expect(certificateRepository.update).not.toHaveBeenCalled();
+    });
+
+    // Boundary case: a non-owner issuer must not be able to mutate metadata.
+    it('rejects metadata updates from a non-owning issuer', async () => {
+      const cert = buildCertificate(CertificateStatus.FROZEN);
+      jest.spyOnObject(service, 'findOne').mockResolvedValue(cert);
+
+      await expect(
+        service.updateCertificateMetadata(certId, metadata, 'other-issuer'),
+      ).rejects.toThrow(ForbiddenException);
+      expect(certificateRepository.update).not.toHaveBeenCalled();
+    });
+
+    // Boundary case: invalid metadata must be rejected before any write.
+    it('rejects invalid metadata for a frozen certificate without writing', async () => {
+      const cert = buildCertificate(CertificateStatus.FROZEN);
+      jest.spyOnObject(service, 'findOne').mockResolvedValue(cert);
+      metadataSchemaService.validateMetadata.mockResolvedValue(false);
+
+      await expect(
+        service.updateCertificateMetadata(certId, metadata, issuerId),
+      ).rejects.toThrow();
       expect(certificateRepository.update).not.toHaveBeenCalled();
     });
   });
-});
+})

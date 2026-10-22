@@ -18,7 +18,7 @@ The Duplicate Certificate Prevention System provides intelligent duplicate detec
 - **Enable/Disable Rules**: Turn specific rules on or off based on requirements
 - **Custom Rules**: Add new rules for specific use cases
 
-### 🚦 **Action Types**
+### 🚠 **Action Types**
 - **Block**: Completely prevents certificate issuance when duplicates are detected
 - **Warn**: Issues a warning but allows issuance with override reason
 - **Allow**: Proceeds without intervention (for logging purposes only)
@@ -29,7 +29,7 @@ The Duplicate Certificate Prevention System provides intelligent duplicate detec
 - **Breakdown by Type**: Analysis by issuer, duplicate type, and frequency
 - **Export Capabilities**: Generate reports for compliance and auditing
 
-### 🔓 **Override Mechanism**
+### 🔔 **Override Mechanism**
 - **Override Requests**: Users can request overrides for flagged duplicates
 - **Admin Approval**: Administrators can review and approve/deny override requests
 - **Audit Trail**: Complete history of override requests and decisions
@@ -62,7 +62,7 @@ class Certificate {
   overrideReason: string;
 
   @Column({ nullable: true })
-  overriddenBy: string;
+  overridenBy: string;
 }
 ```
 
