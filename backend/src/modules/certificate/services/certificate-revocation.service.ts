@@ -6,6 +6,7 @@ import { WebhooksService } from '../../webhooks/webhooks.service';
 import { WebhookEvent } from '../../webhooks/entities/webhook-subscription.entity';
 import { UserRole } from '../../users/entities/user.entity';
 import { CertificateStatus } from '../constants/certificate-status.enum';
+import { CertificateIndexService } from './certificate-index.service';
 
 @Injectable()
 export class CertificateRevocationService {
@@ -15,6 +16,7 @@ export class CertificateRevocationService {
     @InjectRepository(Certificate)
     private readonly certificateRepository: Repository<Certificate>,
     private readonly webhooksService: WebhooksService,
+    private readonly certificateIndexService: CertificateIndexService,
   ) {}
 
   async revoke(id: string, reason?: string): Promise<Certificate> {
@@ -37,6 +39,11 @@ export class CertificateRevocationService {
     }
 
     const savedCertificate = await this.certificateRepository.save(certificate);
+
+    await this.certificateIndexService.removeCertId(
+      savedCertificate.issuerId,
+      savedCertificate.id,
+    );
 
     this.logger.log(`Certificate revoked: ${id} with reason: ${reason}`);
 
