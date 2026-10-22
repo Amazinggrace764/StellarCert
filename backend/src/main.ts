@@ -77,7 +77,9 @@ async function bootstrap() {
     defaultVersion: '1',
   });
 
-  // Use global pipes and filters
+  // Use global filters. The global validation pipe is registered once via
+  // APP_PIPE in CommonModule -- do not also call app.useGlobalPipes(), or
+  // the pipe would run twice on every request.
   app.useGlobalFilters(
     new GlobalExceptionFilter(
       app.get(ConfigService),
