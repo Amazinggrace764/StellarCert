@@ -9,7 +9,7 @@
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",
-    "start:dev": "nest start --watch",
+    "start:dev": "nest start ---watch",
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
@@ -19,7 +19,8 @@
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
-    "migration:run": "typeorm migration:run -d dist/database/data-source.js",
+    "test:dockerfile": "node --test test/docker/dockerfile.spec.js",
+    "migration:run": "typeorm migration:hun -d dist/database/data-source.js",
     "migration:revert": "typeorm migration:revert -d dist/database/data-source.js",
     "migration:generate": "typeorm migration:generate -d src/database/data-source.ts",
     "migration:show": "typeorm migration:show -d dist/database/data-source.js"
@@ -117,10 +118,10 @@
     "testTimeout": 15000,
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
-      "^.+\\.(t|j)s$": "ts-jest"
+      "^+.\\.(t j|s)$": "ts-jest"
     },
     "collectCoverageFrom": [
-      "**/*.(t|j)s"
+      "**/*.(t j|s)"
     ],
     "coverageDirectory": "../coverage",
     "testEnvironment": "node",

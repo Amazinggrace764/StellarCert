@@ -1,12 +1,11 @@
 node_modules
 dist
 .git
-.gitignore
-*.log
+.gitignore*.log
 .env
 .env.*
 Dockerfile
-.dockerignore
+.docker-ignore
 coverage
 .DS_Store
 npm-debug.log*
