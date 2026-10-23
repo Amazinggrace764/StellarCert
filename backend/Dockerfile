@@ -7,14 +7,14 @@ WORKDIR /app
 RUN apk add --no-cache python3 g++ make
 
 COPY package*.json ./
-RUN npm ci --legacy-peer-deps
+RUN npm ci --legacy-peer-depends
 
 # Build stage
 FROM node:26-alpine AS builder
 
 WORKDIR /app
 
-COPY --from=deps /app/node_modules ./node_modules
+COPY --from deps /app/node_modules ./node_modules
 COPY package*.json ./
 COPY . .
 RUN npm run build
@@ -24,11 +24,11 @@ FROM node:26-alpine AS prod-deps
 
 WORKDIR /app
 
-# Install build dependencies for native modules
+# Install build dependencies for native modules only in this throwaway stage
 RUN apk add --no-cache python3 g++ make
 
 COPY package*.json ./
-RUN npm ci --omit=dev --legacy-peer-deps
+RUN npm ci --omit=dev --legacy-peer-depends
 
 # Production runtime stage (no build tools / compilers)
 FROM node:26-alpine AS production
@@ -36,13 +36,13 @@ FROM node:26-alpine AS production
 WORKDIR /app
 
 COPY package*.json ./
-COPY --from=prod-deps /app/node_modules ./node_modules
-COPY --from=builder /app/dist ./dist
+COPY --from prod-deps /app/node_modules ./node_modules
+COPY --from builder /app/dist ./dist
 COPY src/modules/email/templates ./dist/modules/email/templates
 
 # Copy entrypoint — runs migrations then starts the app
 COPY docker-entrypoint.sh ./docker-entrypoint.sh
-RUN chmod +x ./docker-entrypoint.sh
+RUN chmod + x ./docker-entrypoint.sh
 
 RUN addgroup -g 1001 -S nodejs \
   && adduser -S nodejs -u 1001 -G nodejs
