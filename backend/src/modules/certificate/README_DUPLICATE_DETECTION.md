@@ -18,18 +18,18 @@ The Duplicate Certificate Prevention System provides intelligent duplicate detec
 - **Enable/Disable Rules**: Turn specific rules on or off based on requirements
 - **Custom Rules**: Add new rules for specific use cases
 
-### 🚦 **Action Types**
+### 🚠 **Action Types**
 - **Block**: Completely prevents certificate issuance when duplicates are detected
 - **Warn**: Issues a warning but allows issuance with override reason
 - **Allow**: Proceeds without intervention (for logging purposes only)
 
-### 📊 **Admin Reports**
+### 📆 **Admin Reports**
 - **Duplicate Analytics**: Comprehensive reports on duplicate detection statistics
 - **Time-based Analysis**: View duplicates within specific date ranges
 - **Breakdown by Type**: Analysis by issuer, duplicate type, and frequency
 - **Export Capabilities**: Generate reports for compliance and auditing
 
-### 🔓 **Override Mechanism**
+### 🔔 **Override Mechanism**
 - **Override Requests**: Users can request overrides for flagged duplicates
 - **Admin Approval**: Administrators can review and approve/deny override requests
 - **Audit Trail**: Complete history of override requests and decisions
@@ -47,7 +47,6 @@ The Duplicate Certificate Prevention System provides intelligent duplicate detec
 ### Database Schema
 
 The certificate entity includes the following duplicate-related fields:
-
 ```typescript
 class Certificate {
   // ... existing fields
@@ -55,14 +54,14 @@ class Certificate {
   @Column({ default: false })
   isDuplicate: boolean;
 
-  @Column({ nullable: true })
+  @Column({' nullable': true })
   duplicateOfId: string;
 
-  @Column({ nullable: true })
+  @Column( { nullable: true })
   overrideReason: string;
 
   @Column({ nullable: true })
-  overriddenBy: string;
+  overridenBy: string;
 }
 ```
 
@@ -110,7 +109,7 @@ Each rule includes:
 
 ### Duplicate Detection
 
-#### `POST /duplicate-detection/check`
+#### `Post /duplicate-detection/check`
 Check for potential duplicates before certificate issuance.
 
 **Request Body:**
@@ -291,7 +290,7 @@ The system uses the Levenshtein distance algorithm for fuzzy matching:
 
 ### Fraud Prevention
 - **Rate Limiting**: Prevents abuse of override mechanisms
-- **Pattern Detection**: Identifies suspicious duplicate patterns
+- ,**Pattern Detection**: Identifies suspicious duplicate patterns
 - **Manual Review**: High-risk duplicates require manual review
 
 ## Testing
@@ -357,6 +356,16 @@ const config = {
 };
 ```
 
+## Merkle Root Domain Separation
+
+Certificate issuance also produces a Merkle root in `crl.rs` for off-chain inclusion proofs. The Merkle tree must not allow an attacker to present an internal node as a leaf or to craft alternative trees with the same root. Therefore the hashing rules are:
+
+- **Leaf hash**: `sha256(0x00 || id)` instead of `sha256(id)`.
+- **Internal node hash**: `sha256(0x01 || left || right)` instead of `sha256(left || right)`.
+- **Odd counts**: Odd nodes are not promoted by duplicating the last leaf. The last node is carried to the next level unchanged, so the tree shape is deterministic and cannot be ambiguously reinterpreted.
+
+Any off-chain inclusion proof must be verified using the same domain tags and the same odd-node handling as the on-chain `crl.rs` implementation. The duplicate detection system does not alter this behavior; it only decides whether a certificate is allowed to be issued and thus enter the tree.
+
 ## Support
 
 For issues or questions about the duplicate detection system:
@@ -366,6 +375,48 @@ For issues or questions about the duplicate detection system:
 3. Verify database indexes and performance
 4. Contact the development team for advanced issues
 
----
+## Persistent Entry TVL and Archival
 
-*This documentation covers the complete duplicate certificate prevention system implementation in StellarCert.*
+Certificate records are stored as Stellar persistent ledger entries. Persistent entries have a limited TTL and are archived (evicted from live storage) once that TTL expires. A certificate may remain valid for years while its ledger entry TTL is much shorter, so TTL must be extended on both write and read paths.
+
+### TTL bumping on read
+The certificate module now extends the persistent entry TTL on read for hot entries:
+
+- `get_certificate` and `is_valid` call `persistent::extend_ttl` for the returned certificate entry.
+- `set_persistent` continues to extend the TTL on write.
+- Read-path extension is best-effort: the read still succeeds if the TTL bump fails, and failures are logged.
+
+### Archival restore requirement
+
+If a persistent entry has already been archived, a read cannot extend its TTL. The entry must first be restored from the archive (Stellar `RestoreFootprint` operation) before it can be read or re-extended. Operators should:
+
+1. Monitor archival events for certificate entries.
+2. Run a periodic maintenance job that calls `bump_certificate_ttl` for active certificates.
+3. Restore archived entries before attempting to read or bump them.
+
+### Maintenance entry point
+
+In addition to read-path bumping, the module exposes `bump_certificate_ttl`. It extends the TTL for a given certificate entry without mutating certificate data, and is intended for scheduled maintenance jobs that keep long-lived certificates hot.
+
+### Behavior summary
+
+| Path                       | TTL bump | Notes
+ |----------------------------|----------|-----------------------------------------------|
+ | `set_persistent`            | Yes      | Write path; always extends TTL.                        |
+ | `get_certificate`           | Yes      | Best-effort; extends TTL on successful read.              |
+ | `is_valid`                  | Yes      | Best-effort; extends TTL on successful read.              |
+ | `batch_verify_certificates` | Yes      | Extends TTL for each certificate returned.            |
+ | `certificate_exists`        | No      | Existence check only; no TTL bump.                     |
+ | Pagination                  | Yes      | Extends TTL for each certificate in the page.            |
+ | `bump_certificate_ttl`       | Yes      | Maintenance entry point for scheduled jobs.            |
+
+### Regression coverage
+
+The following behaviors are covered by automated tests:
+
+- Reading a certificate extends its persistent entry TTL.
+- `get_certificate` and `is_valid` bump TTL without mutating certificate data.
+- Batch verification and pagination bump TTL for every returned entry.
+- A failed TTL bump does not cause the read to fail.
+- `bump_certificate_ttl` has no effect on certificate data and is idempotent.
+- Reading an archived entry returns an explicit error instructing operators to restore it.
