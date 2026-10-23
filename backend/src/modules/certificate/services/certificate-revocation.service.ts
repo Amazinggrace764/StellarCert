@@ -76,6 +76,12 @@ export class CertificateRevocationService {
       throw new ConflictException(`Certificate with ID ${id} not found`);
     }
 
+    if (certificate.status !== CertificateStatus.ACTIVE) {
+      throw new ConflictException(
+        `Certificate must be active to revoke. Current status: ${certificate.status}`,
+      );
+    }
+
     const revokedAt = new Date();
 
     // Synchronize the CRL first so a certificate can never be revoked in the

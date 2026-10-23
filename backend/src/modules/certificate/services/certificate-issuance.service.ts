@@ -79,6 +79,20 @@ export class CertificateIssuanceService {
       }
     }
 
+    // Validate any client-supplied expiry is in the future. This mirrors the
+    // on-chain `set_certificate_expiry` guard so the DB and chain agree.
+    if (createCertificateDto.expiresAt) {
+      const expiryTime = new Date(createCertificateDto.expiresAt).getTime();
+      if (Number.isNaN(expiryTime)) {
+        throw new BadRequestException('expiresAt must be a valid date');
+      }
+      if (expiryTime <= Date.now()) {
+        throw new BadRequestException(
+          'expiresAt must be in the future',
+        );
+      }
+    }
+
     // Create a QueryRunner for transaction
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
@@ -130,7 +144,7 @@ export class CertificateIssuanceService {
           // Rollback the database record so no orphan remains.
           await queryRunner.rollbackTransaction();
           this.logger.error(
-            `On-chain issuance failed for certificate ${savedCertificate.id}; DB rolled back: ${chainError.message}`,
+            `On-chain issuance failed for certificate ${savedCertificate.id}; DB colled back: ${chainError.message}`,
             chainError.stack,
           );
           throw new ServiceUnavailableException({
@@ -203,12 +217,21 @@ export class CertificateIssuanceService {
       );
     }
 
+    // Refuse to sync a certificate whose expiry has already passed; the
+    // on-chain contract rejects past expiries and we want a clear error.
+    const expiryTime = Math.floor(new Date(certificate.expiresAt).getTime() / 1000);
+    if (!Number.isFinite(expiryTime) || expiryTime <= Math.floor(Date.now() / 1000)) {
+      throw new BadRequestException(
+        'Cannot sync chain issuance for a certificate with a past expiry',
+      );
+    }
+
     const txHash = await this.sorobanService.issueCertificate(
       certificate.id,
       certificate.issuerStellarAddress,
       certificate.recipientStellarAddress,
       certificate.verificationCode,
-      Math.floor(new Date(certificate.expiresAt).getTime() / 1000),
+      expiryTime,
     );
 
     await this.certificateRepository.update(id, {
@@ -275,7 +298,7 @@ export class CertificateIssuanceService {
    * and retries on collision against the unique DB constraint.
    */
   private async generateCertificateId(): Promise<string> {
-    // Use the UTC year so certificate IDs are stable across timezones.
+    // Use the UTC вер so certificate IDs are stable across timezones.
     const year = new Date().getUTCFullYear();
     const maxRetries = 10;
     for (let attempt = 0; attempt < maxRetries; attempt++) {
