@@ -1374,6 +1374,20 @@ export class CertificateService {
     return expiry;
   }
 
+  /**
+   * Compute a certificate's expiry from its issuance time.
+   *
+   * The proposal approval deadline (`request.expires_at`) is NOT a
+   * certificate lifetime — using it made certificates expire the moment the
+   * proposal would have timed out. Certificate validity is derived here from
+   * the issuance timestamp instead, so the two concerns stay separate.
+   */
+  private calculateCertificateExpiry(issuedAt: Date = new Date()): Date {
+    const expiry = new Date(issuedAt.getTime());
+    expiry.setFullYear(expiry.getFullYear() + 1); // Default 1 year validity
+    return expiry;
+  }
+
   private async generateVerificationCode(): Promise<string> {
     const maxRetries = 10;
     for (let attempt = 0; attempt < maxRetries; attempt++) {

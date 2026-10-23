@@ -45,6 +45,7 @@ export interface PendingRequest {
   rejection_reason?: string;
   created_at: number;
   expires_at: number;
+  cert_expires_at?: number;
   status: RequestStatus;
 }
 
@@ -865,6 +866,10 @@ export class MultisigService implements OnModuleInit {
         rejection_reason: native.rejection_reason as string | undefined,
         created_at: Number(native.created_at),
         expires_at: Number(native.expires_at),
+        cert_expires_at:
+          native.cert_expires_at !== undefined
+            ? Number(native.cert_expires_at)
+            : undefined,
         status: Number(native.status) as RequestStatus,
         },
       };
@@ -1047,6 +1052,10 @@ export class MultisigService implements OnModuleInit {
       rejection_reason: item.rejection_reason as string | undefined,
       created_at: Number(item.created_at),
       expires_at: Number(item.expires_at),
+      cert_expires_at:
+        item.cert_expires_at !== undefined
+          ? Number(item.cert_expires_at)
+          : undefined,
       status: Number(item.status) as RequestStatus,
     };
   }

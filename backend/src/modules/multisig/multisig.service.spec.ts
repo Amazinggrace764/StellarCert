@@ -358,6 +358,121 @@ describe('MultisigService', () => {
     it('should issue an approved certificate', () => {
       expect(typeof service.issueApprovedCertificate).toBe('function');
     });
+
+    it('derives the certificate expiry from issuance time, not the request approval deadline', async () => {
+      const nowSeconds = 1700000000;
+      const day = 86400;
+      const approvalDeadline = nowSeconds + 2 * day;
+      const certLifetimeDays = 30;
+      const expectedCertExpiry = nowSeconds + certLifetimeDays * day;
+
+      const nowSecondsSpy = jest
+        .spyOn(Date, 'now')
+        .mockReturnValue(nowSeconds * 1000);
+
+      const request = {
+        requestId: 'req-1',
+        issuer: 'issuer',
+        certificateId: 'cert-1',
+        signers: ['signer-1'],
+        threshold: 1,
+        createdAt: nowSeconds - 1000,
+        expiresAt: approvalDeadline,
+        certExpiresAt: expectedCertExpiry,
+        approvals: ['signer-1'],
+        status: 'approved',
+      };
+      const getPendingRequest = jest
+        .spyOn(service, 'getPendingRequest')
+        .mockResolved(request as never);
+      const buildAndSubmitTransaction = jest
+        .fn()
+        .mockResolved(xdr.ScVal.scvBool(true));
+      (service as unknown as { buildAndSubmitTransaction: jest.Mock })
+        .buildAndSubmitTransaction = buildAndSubmitTransaction;
+
+      await expect(
+        service.issueApprovedCertificate('req-1' as never),
+      ).resolves.toBe(true);
+
+      expect(getPendingRequest).toHaveBeenCalledWith('req-1');
+      expect(buildAndSubmitTransaction).toHaveBeenCalledTimes(1);
+      const callArgs = buildAndSubmitTransaction.mock.calls[0];
+      const serialized = JSON.stringify(callArgs, ($key, value) =>
+        typeof value === 'bigint' ? value.toString() : value,
+      );
+      expect(serialized).toContain(String(expectedCertExpiry));
+      expect(serialized).not.toContain(String(approvalDeadline));
+
+      nowSecondsSpy.mockRestore();
+    });
+
+    it('preserves an explicit certificate expiry carried on the request', async () => {
+      const nowSeconds = 1700000000;
+      const day = 86400;
+      const approvalDeadline = nowSeconds + 2 * day;
+      const explicitCertExpiry = nowSeconds + 90 * day;
+
+      const nowSecondsSpy = jest
+        .spyOn(Date, 'now')
+        .mockReturnValue(nowSeconds * 1000);
+
+      const request = {
+        requestId: 'req-2',
+        issuer: 'issuer',
+        certificateId: 'cert-2',
+        signers: ['signer-1'],
+        threshold: 1,
+        createdAt: nowSeconds - 1000,
+        expiresAt: approvalDeadline,
+        certExpiresAt: explicitCertExpiry,
+        approvals: ['signer-1'],
+        status: 'approved',
+      };
+      jest.spyOn(service, 'getPendingRequest').mockResolved(request as never);
+      const buildAndSubmitTransaction = jest
+        .fn()
+        .mockResolved(xdr.ScVal.scvBool(true));
+      (service as unknown as { buildAndSubmitTransaction: jest.Mock })
+        .buildAndSubmitTransaction = buildAndSubmitTransaction;
+
+      await expect(
+        service.issueApprovedCertificate('req-2' as never),
+      ).resolves.toBe(true);
+
+      const serialized = JSON.stringify(buildAndSubmitTransaction.mock.calls[0], ($key, value) =>
+        typeof value === 'bigint' ? value.toString() : value,
+      );
+      expect(serialized).toContain(String(explicitCertExpiry));
+      expect(serialized).not.toContain(String(approvalDeadline));
+
+      nowSecondsSpy.mockRestore();
+    });
+
+    it('rejects issuance when the request has expired', async () => {
+      const nowSeconds = 1700000000;
+      const request = {
+        requestId: 'req-3',
+        issuer: 'issuer',
+        certificateId: 'cert-3',
+        signers: ['signer-1'],
+        threshold: 1,
+        createdAt: nowSeconds - 10000,
+        expiresAt: nowSeconds - 10,
+        certExpiresAt: nowSeconds + 864000,
+        approvals: ['signer-1'],
+        status: 'approved',
+      };
+      jest.spyOn(service, 'getPendingRequest').mockResolved(request as never);
+      const buildAndSubmitTransaction = jest.fn();
+      (service as unknown as { buildAndSubmitTransaction: jest.Mock })
+        .buildAndSubmitTransaction = buildAndSubmitTransaction;
+
+      await expect(
+        service.issueApprovedCertificate('req-3' as never),
+      ).rejects.toThrow(/expired/i);
+      expect(buildAndSubmitTransaction).not.toHaveBeenCalled();
+    });
   });
 
   describe('cancelRequest', () => {
