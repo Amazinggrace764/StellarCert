@@ -447,6 +447,16 @@ export class MultisigService implements OnModuleInit {
   ): Promise<ProposeCertificateResponseDto> {
     try {
       this.assertInitialized();
+      // Issue: `propose_certificate` performs no caller authorization.
+      // The on-chain contract must call `issuer.require_auth()`, but the
+      // backend must also refuse to build a proposal on behalf of an issuer
+      // the caller does not control. Otherwise any account can pollute an
+      // arbitrary issuer's `IssuerRequestIds` / `SignerRequestIds` indexes.
+      if (requesterPublicKey !== issuer) {
+        throw new ForbiddenException(
+          `Caller ${requesterPublicKey} is not authorized to propose certificates for issuer ${issuer}`,
+        );
+      }
       const requesterKeyPair =
         this.stellarService.getKeypairFromPublicKey(requesterPublicKey);
       const accountResponse = await this.server.getAccount(requesterPublicKey);

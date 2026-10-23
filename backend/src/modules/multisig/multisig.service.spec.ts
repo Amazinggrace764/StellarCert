@@ -313,6 +313,34 @@ describe('MultisigService', () => {
         } as never),
       ).rejects.toThrow('contract call failed');
     });
+
+    it('requires an issuer to be present on the request', async () => {
+      await expect(
+        service.proposeCertificate({
+          certificateId: 'cert-1',
+          signers: ['signer-1'],
+          threshold: 1,
+        } as never),
+      ).rejects.toThrow();
+    });
+
+    it('passes the issuer through to the transaction builder', async () => {
+      const internals = service as unknown as {
+        buildAndSubmitTransaction: jest.Mock;
+      };
+      internals.buildAndSubmitTransaction = jest
+        .fn()
+        .mockResolved(xdr.ScVal.scvBool(true));
+
+      await service.proposeCertificate({
+        issuer: 'issuer',
+        certificateId: 'cert-1',
+        signers: ['signer-1'],
+        threshold: 1,
+      } as never);
+
+      expect(internals.buildAndSubmitTransaction).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('approveRequest', () => {
