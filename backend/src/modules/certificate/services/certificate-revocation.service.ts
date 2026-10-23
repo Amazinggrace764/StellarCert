@@ -37,6 +37,8 @@ export class CertificateRevocationService {
   constructor(
     @InjectRepository(Certificate)
     private readonly certificateRepository: Repository<Certificate>,
+    @InjectRepository(Issuer)
+    private readonly issuerRepository: Repository<Issuer>,
     private readonly webhooksService: WebhooksService,
     @Optional()
     private readonly crlRevocationSync?: CrlRevocationSync,
@@ -152,6 +154,16 @@ export class CertificateRevocationService {
     if (certificate.status !== CertificateStatus.ACTIVE) {
       throw new ConflictException(
         `Certificate must be active to freeze. Current status: ${certificate.status}`,
+      );
+    }
+
+    const issuer = await this.issuerRepository.findOne({
+      where: { id: certificate.issuerId },
+    });
+
+    if (!issuer || !issuer.isAuthorized) {
+      throw new ConflictException(
+        `Issuer ${certificate.issuerId} is not authorized to freeze certificates`,
       );
     }
 
