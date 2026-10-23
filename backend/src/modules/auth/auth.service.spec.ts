@@ -9,10 +9,12 @@ import { UserRepository } from '../users/repositories/user.repository';
 import { RegisterDto } from './dto/register.dto';
 import { AuthResponseDto } from './dto/auth-response.dto';
 import { CreateUserDto } from '../users/dto/create-user.dto';
+import { LoginDto } from './dto/login.dto';
 
 describe('AuthService - Registration', () => {
   let authService: AuthService;
   let usersService: jest.Mocked<UsersService>;
+  let userRepository: jest.Mocked<UserRepository>;
   let jwtService: jest.Mocked<JwtService>;
   let jwtManagementService: jest.Mocked<JwtManagementService>;
   let twoFactorService: jest.Mocked<TwoFactorService>;
@@ -55,6 +57,7 @@ describe('AuthService - Registration', () => {
     const mockUsersService = {
       register: jest.fn(),
       findOneByEmail: jest.fn(),
+      findOneById: jest.fn(),
       create: jest.fn(),
     } as any;
 
@@ -64,16 +67,21 @@ describe('AuthService - Registration', () => {
     } as any;
 
     const mockJwtManagementService = {
-      blacklistToken: jest.fn().mockResolvedValue(undefined),
-      isTokenBlacklisted: jest.fn().mockResolvedValue(false),
+      blacklistToken: jest.fn().mockResolved(undefined),
+      isTokenBlacklisted: jest.fn().mockResolved(false),
       recordFailed2faAttempt: jest
         .fn()
-        .mockResolvedValue({ attempts: 1, invalidated: false }),
-      clear2faAttempts: jest.fn().mockResolvedValue(undefined),
-      generateAccessToken: jest.fn().mockResolvedValue('mock-access-token'),
-      generateRefreshToken: jest.fn().mockResolvedValue('mock-refresh-token'),
+        .mockResolved({ attempts: 1, invalidated: false }),
+      clear2faAttempts: jest.fn().mockResolved(undefined),
+      generateAccessToken: jest.fn().mockResolved('mock-access-token'),
+      generateRefreshToken: jest.fn().mockResolved('mock-refresh-token'),
       verifyRefreshToken: jest.fn(),
       refreshAccessToken: jest.fn(),
+    } as any;
+
+    const mockUserRepository = {
+      findByEmailWithPassword: jest.fn(),
+      update: jest.fn(),
     } as any;
 
     const module: TestingModule = await Test.createTestingModule({
@@ -99,16 +107,14 @@ describe('AuthService - Registration', () => {
         },
         {
           provide: UserRepository,
-          useValue: {
-            findByEmailWithPassword: jest.fn(),
-            update: jest.fn(),
-          },
+          useValue: mockUserRepository,
         },
       ],
     }).compile();
 
     authService = module.get<AuthService>(AuthService);
     usersService = module.get(UsersService);
+    userRepository = module.get(UserRepository);
     jwtService = module.get(JwtService);
     jwtManagementService = module.get(JwtManagementService);
     twoFactorService = module.get(TwoFactorService);
@@ -116,7 +122,7 @@ describe('AuthService - Registration', () => {
 
   describe('register', () => {
     it('should successfully register a user by delegating to UsersService', async () => {
-      usersService.register.mockResolvedValue(mockRegistrationResult as any);
+      usersService.register.mockResolved(mockRegistrationResult as any);
 
       const result = await authService.register(mockRegisterDto);
 
@@ -137,9 +143,21 @@ describe('AuthService - Registration', () => {
       });
     });
 
+    it('should not issue tokens for an unverified account', async () => {
+      usersService.register.mockResolved(mockRegistrationResult as any);
+
+      const result = await authService.register(mockRegisterDto);
+
+      expect(result.accessToken).toBeNull();
+      expect(result.refreshToken).toBeNull();
+      expect(result.requiresEmailVerification).toBeTruthy();
+      expect(jwtManagementService.generateAccessToken).not.toHaveBeenCalled();
+      expect(jwtManagementService.generateRefreshToken).not.toHaveBeenCalled();
+    });
+
     it('should handle UsersService registration errors properly', async () => {
       const conflictError = new ConflictException('Email already registered');
-      usersService.register.mockRejectedValue(conflictError);
+      usersService.register.mockRejected(conflictError);
 
       await expect(authService.register(mockRegisterDto)).rejects.toThrow(
         ConflictException,
@@ -167,7 +185,7 @@ describe('AuthService - Registration', () => {
         },
       };
 
-      usersService.register.mockResolvedValue(registrationResult as any);
+      usersService.register.mockResolved(registrationResult as any);
 
       const result = await authService.register(mockRegisterDto);
 
@@ -195,7 +213,7 @@ describe('AuthService - Registration', () => {
     });
 
     it('should pass all required fields from RegisterDto to CreateUserDto', async () => {
-      usersService.register.mockResolvedValue(mockRegistrationResult as any);
+      usersService.register.mockResolved(mockRegistrationResult as any);
 
       await authService.register(mockRegisterDto);
 
@@ -210,7 +228,7 @@ describe('AuthService - Registration', () => {
     });
 
     it('should not include optional fields in CreateUserDto when not provided', async () => {
-      usersService.register.mockResolvedValue(mockRegistrationResult as any);
+      usersService.register.mockResolved(mockRegistrationResult as any);
 
       await authService.register(mockRegisterDto);
 
@@ -222,12 +240,54 @@ describe('AuthService - Registration', () => {
     });
   });
 
+  describe('login', () => {
+    const mockLoginDto: LoginDto = {
+      email: 'test@example.com',
+      password: 'password123',
+    } as LoginDto;
+
+    const baseUser = {
+      id: 'user-123',
+      email: 'test@example.com',
+      role: 'USER',
+      isActive: true,
+      status: 'ACTIVE',
+      twoFactorEnabled: false,
+    };
+
+    it('should reject login when email is not verified', async () => {
+      userRepository.findByEmailWithPassword.mockResolved({
+        ...baseUser,
+        isEmailVerified: false,
+        password: 'hashed-password',
+      } as any);
+
+      await expect(authService.login(mockLoginDto)).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(jwtManagementService.generateAccessToken).not.toHaveBeenCalled();
+    });
+
+    it('should reject login when status is PENDING_VERIFICATION', async () => {
+      userRepository.findByEmailWithPassword.mockResolved({
+        ...baseUser,
+        status: 'PENDING_VERIFICATION',
+        isEmailVerified: false,
+        password: 'hashed-password',
+      } as any);
+
+      await expect(authService.login(mockLoginDto)).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
+  });
+
   describe('integration with UsersService', () => {
     it('should ensure AuthService does not duplicate user creation logic', async () => {
       // This test verifies that AuthService no longer implements its own
       // user creation logic and properly delegates to UsersService
 
-      usersService.register.mockResolvedValue(mockRegistrationResult as any);
+      usersService.register.mockResolved(mockRegistrationResult as any);
 
       await authService.register(mockRegisterDto);
 
@@ -241,7 +301,7 @@ describe('AuthService - Registration', () => {
       // Ensure backward compatibility - the method signature and return type
       // should remain the same for existing clients
 
-      usersService.register.mockResolvedValue(mockRegistrationResult as any);
+      usersService.register.mockResolved(mockRegistrationResult as any);
 
       const result = await authService.register(mockRegisterDto);
 
@@ -265,17 +325,18 @@ describe('AuthService - Registration', () => {
 
     beforeEach(() => {
       jwtService.verify.mockReturnValue(mockPayload);
-      jwtManagementService.isTokenBlacklisted.mockResolvedValue(false);
-      usersService.findOneById = jest.fn().mockResolvedValue({
+      jwtManagementService.isTokenBlacklisted.mockResolved(false);
+      usersService.findOneById = jest.fn().mockResolved({
         id: 'user-123',
         email: 'test@example.com',
         role: 'USER',
         isActive: true,
+        isEmailVerified: true,
       });
     });
 
     it('rejects if pre-auth token is blacklisted / invalidated', async () => {
-      jwtManagementService.isTokenBlacklisted.mockResolvedValue(true);
+      jwtManagementService.isTokenBlacklisted.mockResolved(true);
 
       await expect(
         authService.verifyTwoFactor(mockPreAuthToken, mockTotp),
@@ -283,10 +344,10 @@ describe('AuthService - Registration', () => {
     });
 
     it('records failed attempts and throws if token invalidated after failures', async () => {
-      twoFactorService.validateLogin.mockRejectedValue(
+      twoFactorService.validateLogin.mockRejected(
         new UnauthorizedException('Invalid 2FA token'),
       );
-      jwtManagementService.recordFailed2faAttempt.mockResolvedValue({
+      jwtManagementService.recordFailed2faAttempt.mockResolved({
         attempts: 3,
         invalidated: true,
       });
@@ -302,7 +363,7 @@ describe('AuthService - Registration', () => {
     });
 
     it('invalidates pre-auth token upon successful login to prevent replay', async () => {
-      twoFactorService.validateLogin.mockResolvedValue(undefined);
+      twoFactorService.validateLogin.mockResolved(undefined);
 
       const result = await authService.verifyTwoFactor(
         mockPreAuthToken,

@@ -6,6 +6,8 @@ on:
       - main
       - develop
       - 'feature/**'
+    tags:
+      - 'v*'
   pull_request:
 
 # Least privilege: every job in this workflow only needs to read the repo.
@@ -16,6 +18,11 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Pinned toolchain versions recorded into every release artifact's provenance.
+  NODE_VERSION: '20'
+  RUST_TOOLCHAIN: '1.81.0'
+
 jobs:
   changes:
     runs-on: ubuntu-latest
@@ -24,6 +31,7 @@ jobs:
       backend: ${{ steps.filter.outputs.backend }}
       contracts: ${{ steps.filter.outputs.contracts }}
       docker: ${{ steps.filter.outputs.docker }}
+      release: ${{ steps.filter.outputs.release }}
     steps:
       - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
@@ -41,6 +49,11 @@ jobs:
               - 'frontend/Dockerfile'
               - 'docker-compose.yml'
               - 'nginx/**'
+            release:
+              - '.github/workflows/ci.yml'
+              - 'backend/Dockerfile'
+              - 'frontend/Dockerfile'
+              - 'stellar-contracts/**'
 
   conflict-markers:
     runs-on: ubuntu-latest
@@ -59,7 +72,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: ${{ env.NODE_VERSION }}
       - name: Security audit
         run: npm run security:audit
 
@@ -85,7 +98,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: package-lock.json
       - name: Install frontend dependencies
@@ -109,7 +122,7 @@ jobs:
       fail-fast: false
       matrix:
         # Node 18 is EOL; supported lines are 20 (LTS) and 22.
-        node-version: [20, 22]
+        node-version: ['20', '22']
     defaults:
       run:
         working-directory: backend
@@ -199,7 +212,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: backend/package-lock.json
       - name: Install backend dependencies
@@ -244,6 +257,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
           components: rustfmt, clippy
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
@@ -252,10 +266,10 @@ jobs:
       - name: Format check
         run: cargo fmt --check
       - name: Clippy
-        # Deny all lints except `deprecated`: the contract still uses the
-        # soroban-sdk event API (env.events().publish), whose migration to the
-        # #[contractevent] macro is tracked separately.
-        run: cargo clippy --all-targets -- -D warnings -A deprecated
+        # Warnings are errors: the deprecated soroban-sdk event API usage has
+        # been migrated, so any new warning (including a re-introduced
+        # deprecation) must fail CI instead of accumulating silently.
+        run: cargo clippy --all-targets -- -D warnings
       - name: Build contracts
         run: cargo build
       # deploy-contracts.sh ships target/wasm32-unknown-unknown/release, which
@@ -266,3 +280,199 @@ jobs:
         run: cargo build --target wasm32-unknown-unknown --release
       - name: Test contracts
         run: cargo test
+
+  # Builds immutable, versioned image and WASM artifacts from the recorded
+  # source revision and pinned toolchain, then emits SBOMs, checksums, and
+  # SLSA-style provenance. Promotion consumes these exact bytes; it never
+  # rebuilds. See docs/releases.md for the rollback/verification procedure.
+  release-artifacts:
+    needs: [changes, frontend, backend, contracts, docker]
+    if: |
+      always() &&
+      needs.changes.outputs.release == 'true' &&
+      (needs.frontend.result == 'success' || needs.frontend.result == 'skipped') &&
+      (needs.backend.result == 'success' || needs.backend.result == 'skipped') &&
+      (needs.contracts.result == 'success' || needs.contracts.result == 'skipped') &&
+      (needs.docker.result == 'success' || needs.docker.result == 'skipped')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      source-revision: ${{ steps.meta.outputs.source-revision }}
+      artifact-digest: ${{ steps.manifest.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Record source revision and version
+        id: meta
+        run: |
+          set -euo pipefail
+          REVISION="$(git rev-parse HEAD)"
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          else
+            VERSION="0.0.0-${GITHUB_SHA::12}"
+          fi
+          echo "source-revision=${REVISION}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "build-date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push backend image
+        id: backend-image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          target: production
+          push: true
+          provenance: true
+          sbom: true
+          build-args: |
+            SOURCE_REVISION=${{ steps.meta.outputs.source-revision }}
+            VERSION=${{ steps.meta.outputs.version }}
+            BUILD_DATE=${{ steps.meta.outputs.build-date }}
+          tags: |
+            ghcr.io/${{ github.repository }}/backend:${{ steps.meta.outputs.version }}
+            ghcr.io/${{ github.repository }}/backend:sha-${{ steps.meta.outputs.source-revision }}
+      - name: Build and push frontend image
+        id: frontend-image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          target: production
+          push: true
+          provenance: true
+          sbom: true
+          build-args: |
+            SOURCE_REVISION=${{ steps.meta.outputs.source-revision }}
+            VERSION=${{ steps.meta.outputs.version }}
+            BUILD_DATE=${{ steps.meta.outputs.build-date }}
+          tags: |
+            ghcr.io/${{ github.repository }}/frontend:${{ steps.meta.outputs.version }}
+            ghcr.io/${{ github.repository }}/frontend:sha-${{ steps.meta.outputs.source-revision }}
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: wasm32-unknown-unknown
+      - name: Build contract WASM reproducibly
+        working-directory: stellar-contracts
+        run: |
+          set -euo pipefail
+          export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
+          export RUSTFLAGS="--remap-path-prefix=$PWD=/build/stellar-contracts"
+          cargo build --locked --target wasm32-unknown-unknown --release
+      - name: Collect WASM artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p dist/wasm
+          find stellar-contracts/target/wasm32-unknown-unknown/release \
+            -maxdepth 1 -name '*.wasm' -exec cp {} dist/wasm/ \;
+          ls -la dist/wasm
+      - name: Generate SBOMs
+        uses: anchore/sbom-action@v0
+        with:
+          path: ./dist
+          format: spdx-json
+          output-file: dist/sbom.spdx.json
+      - name: Generate checksums
+        run: |
+          set -euo pipefail
+          ( cd dist && find . -type f ! -name 'checksums.txt' -print0 \
+              | sort -z | xargs -0 sha256sum ) > dist/checksums.txt
+          cat dist/checksums.txt
+      - name: Write release manifest
+        id: manifest
+        run: |
+          set -euo pipefail
+          cat > dist/release-manifest.json <<EOF
+          {
+            "sourceRevision": "${{ steps.meta.outputs.source-revision }}",
+            "version": "${{ steps.meta.outputs.version }}",
+            "buildDate": "${{ steps.meta.outputs.build-date }}",
+            "toolchain": {
+              "node": "${{ env.NODE_VERSION }}",
+              "rust": "${{ env.RUST_TOOLCHAIN }}"
+            },
+            "images": {
+              "backend": "ghcr.io/${{ github.repository }}/backend@${{ steps.backend-image.outputs.digest }}",
+              "frontend": "ghcr.io/${{ github.repository }}/frontend@${{ steps.frontend-image.outputs.digest }}"
+            }
+          }
+          EOF
+          DIGEST="$(sha256sum dist/release-manifest.json | cut -d' ' -f1)"
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: 'dist/**'
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ steps.meta.outputs.version }}
+          path: dist/
+          retention-days: 90
+
+  # Promotion gate: verifies artifact identity against the recorded manifest
+  # and refuses to proceed if bytes differ. Promotion never rebuilds.
+  verify-promotion:
+    needs: release-artifacts
+    if: needs.release-artifacts.result == 'success'
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v7
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-${{ needs.release-artifacts.outputs.source-revision }}
+          path: dist
+      - name: Verify checksums
+        run: |
+          set -euo pipefail
+          ( cd dist && sha256sum -c checksums.txt )
+      - name: Verify manifest digest
+        run: |
+          set -euo pipefail
+          ACTUAL="$(sha256sum dist/release-manifest.json | cut -d' ' -f1)"
+          EXPECTED="${{ needs.release-artifacts.outputs.artifact-digest }}"
+          if [[ "${ACTUAL}" != "${EXPECTED}" ]]; then
+            echo "Manifest digest mismatch: expected ${EXPECTED}, got ${ACTUAL}" >&2
+            exit 1
+          fi
+      - name: Verify image digests match manifest
+        run: |
+          set -euo pipefail
+          BACKEND_REF="$(jq -r '.images.backend' dist/release-manifest.json)"
+          FRONTEND_REF="$(jq -r '.images.frontend' dist/release-manifest.json)"
+          docker buildx imagetools inspect "${BACKEND_REF}" >/dev/null
+          docker buildx imagetools inspect "${FRONTEND_REF}" >/dev/null
+      - name: Record deployed artifact mapping
+        run: |
+          set -euo pipefail
+          mkdir -p deployment
+          cat > deployment/deployed-artifacts.json <<EOF
+          {
+            "sourceRevision": "${{ needs.release-artifacts.outputs.source-revision }}",
+            "artifactDigest": "${{ needs.release-artifacts.outputs.artifact-digest }}",
+            "environment": "staging",
+            "contracts": $(jq -c '[.wasm // {}] | .[0]' dist/release-manifest.json 2>/dev/null || echo '{}')
+          }
+          EOF
+          cat deployment/deployed-artifacts.json
+      - name: Upload deployment record
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployed-artifacts-staging
+          path: deployment/deployed-artifacts.json
+          retention-days: 90

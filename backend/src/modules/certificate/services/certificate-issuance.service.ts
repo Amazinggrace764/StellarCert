@@ -102,6 +102,10 @@ export class CertificateIssuanceService {
 
     try {
       const certificateId = await this.generateCertificateId();
+      // Reject over-long IDs at the owning boundary so a bad ID—
+      // whether supplied or generated— can never reach the CRL Merkle leaf
+      // construction and cause a revocation DoS.
+      this.assertCertificateIdFitsMerkleLeaf(certificateId);
       const verificationCode =
         createCertificateDto.verificationCode ||
         (await this.generateVerificationCode());
@@ -243,6 +247,25 @@ export class CertificateIssuanceService {
     };
   }
 
+  /**
+   * Ensure a certificate ID fits into the fixed leaf buffer used by the
+   * CRL Merkle root builder. IDs longer than the buffer would panic the
+   * chain side and permanently block revocations for the issuer.
+   */
+  private assertCertificateIdFitsMerkleLeaf(certificateId: string): void {
+    const byteLength = Buffer.byteLength(certificateId, 'utf-8');
+    if (byteLength > MAX_CERTIFICATE_ID_BYTES) {
+      this.logger.warn(
+        `Rejecting certificate ID of ${byteLength} bytes (> ${MAX_CERTIFICATE_ID_BYTES})`,
+      );
+      throw new BadRequestException({
+        message: `Certificate ID exceeds the maximum of ${MAX_CERTIFICATE_ID_BYTES} bytes`,
+        certificateIdByteLength: byteLength,
+        maxCertificateIdBytes: MAX_CERTIFICATE_ID_BYTES,
+      });
+    }
+  }
+
   private calculateDefaultExpiry(): Date {
     // Use UTC to align with the backend's UTC-based validation and avoid
     // timezone-dependent expiry dates.
@@ -251,6 +274,10 @@ export class CertificateIssuanceService {
     return expiry;
   }
 
+  /**
+   * Generates a cryptographically secure 8-character verification code
+   * and retries on collision against the unique DB constraint.
+   */
   private async generateVerificationCode(): Promise<string> {
     const maxRetries = 10;
     for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -266,13 +293,17 @@ export class CertificateIssuanceService {
     );
   }
 
+  /**
+   * Generates a cryptographically secure certificate ID (`CERT-<YEAR>-<8 chars>`)
+   * and retries on collision against the unique DB constraint.
+   */
   private async generateCertificateId(): Promise<string> {
     // Use the UTC вер so certificate IDs are stable across timezones.
     const year = new Date().getUTCFullYear();
     const maxRetries = 10;
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       const suffix = CryptoUtils.generateAlphanumericCode(8);
-      const certificateId = `CERT-4${year}-${suffix}`;
+      const certificateId = `CERT-${year}-${suffix}`;
       const exists = await this.certificateRepository.findOne({
         where: { certificateId },
         select: ['id'],
