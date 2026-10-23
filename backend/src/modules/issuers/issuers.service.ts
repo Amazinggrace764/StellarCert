@@ -2,8 +2,10 @@ import {
   Injectable,
   BadRequestException,
   NotFoundException,
+  ConflictException,
+  Logger,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
+import { InjectRepository } from '@nestjs/typekeorm';
 import { Repository, EntityManager, ILike } from 'typeorm';
 import { Issuer } from './entities/issuer.entity';
 import { CreateIssuerDto } from './dto/create-issuer.dto';
@@ -25,6 +27,8 @@ const ALLOWED_SORT_FIELDS = [
 
 @Injectable()
 export class IssuersService {
+  private readonly logger = new Logger(IssuersService.name);
+
   constructor(
     @InjectRepository(Issuer)
     private readonly issuerRepo: Repository<Issuer>,
@@ -34,6 +38,14 @@ export class IssuersService {
     if (!isValidStellarPublicKey(dto.stellarPublicKey)) {
       throw new BadRequestException('Invalid Stellar public key');
     }
+
+    const existing = await this.issuerRepo.findOne({
+      where: { stellarPublicKey: dto.stellarPublicKey },
+    });
+    if (existing) {
+      throw new ConflictException('Issuer with this Stellar public key already exists');
+    }
+
     const issuer = this.issuerRepo.create(dto);
     return this.issuerRepo.save(issuer);
   }
@@ -42,6 +54,17 @@ export class IssuersService {
     const issuer = await this.issuerRepo.findOne({ where: { id } });
     if (!issuer) throw new NotFoundException('Issuer not found');
     return this.issuerRepo.remove(issuer);
+  }
+
+  async findByStellarPublicKey(stellarPublicKey: string): Promise<Issuer | null> {
+    if (!isValidStellarPublicKey(stellarPublicKey)) {
+      return null;
+    }
+    return this.issuerRepo.findOne({ where: { stellarPublicKey } });
+  }
+
+  async findById(id: string): Promise<Issuer | null> {
+    return this.issuerRepo.findOne({ where: { id } });
   }
 
   async listIssuers(query: IssuerPaginationQueryDto): Promise<IPaginatedResult<Issuer>> {
@@ -62,8 +85,8 @@ export class IssuersService {
 
     if (query.search) {
       queryBuilder.andWhere(
-        '(issuer.name ILIKE :search OR issuer.stellarPublicKey ILIKE :search)',
-        { search: `%${search}%%` },
+        "(issuer.name ILIKE :search OR issuer.stellarPublicKey ILIKE :search)",
+        { search: `%${query.search}%` },
       );
     }
 

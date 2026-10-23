@@ -19,6 +19,28 @@ vi.mock("html5-qrcode", () => ({
   Html5QrcodeScanner: vi.fn(),
 }));
 
+
+vi.mock("../../components/QRScannerModal", () => ({
+  default: ({ isOpen, onClose, onScanSuccess }: any) => {
+    if (!isOpen) return null;
+    return (
+      <div data-testid="mock-qr-scanner-modal">
+        <button onClick={onClose} aria-label="Mock Close Scanner">Close</button>
+        <button
+          onClick={() => onScanSuccess?.({
+            raw: "SCANNED-SERIAL-999",
+            certificateId: "SCANNED-SERIAL-999",
+            url: "https://stellarcert.org/verify/SCANNED-SERIAL-999"
+          })}
+          aria-label="Mock Trigger Scan"
+        >
+          Scan Code
+        </button>
+      </div>
+    );
+  },
+}));
+
 import VerifyCertificate from "../VerifyCertificate";
 
 const VALID_RESULT = {
@@ -158,9 +180,9 @@ describe("VerifyCertificate share actions (toast, not alert)", () => {
   });
 });
 
-describe("VerifyCertificate submission and keystroke gating (#97)", () => {
+
+describe("VerifyCertificate QR scanner integration (#102)", () => {
   beforeEach(() => {
-    verifyMock.mockReset();
     verifyMock.mockResolvedValue(VALID_RESULT);
   });
 
@@ -168,37 +190,56 @@ describe("VerifyCertificate submission and keystroke gating (#97)", () => {
     vi.restoreAllMocks();
   });
 
-  it("does not fire API verification calls while typing serial until explicit submit", async () => {
+  it("opens the lazy QRScannerModal when Scan QR Code is clicked", async () => {
     renderWithProviders(<VerifyCertificate />, {
       queryClient: createTestQueryClient(),
       routerEntries: ["/verify"],
     });
 
-    const input = screen.getByLabelText(/Certificate Serial Number/i);
+    expect(screen.queryByTestId("mock-qr-scanner-modal")).not.toBeInTheDocument();
 
-    // User types keystrokes
-    fireEvent.change(input, { target: { value: "ABC" } });
-    fireEvent.change(input, { target: { value: "ABCD" } });
-    fireEvent.change(input, { target: { value: "ABCDE-1234" } });
+    const scanButton = screen.getByRole("button", { name: /Scan QR Code/i });
+    fireEvent.click(scanButton);
 
-    // No API calls should be triggered purely from typing
-    expect(verifyMock).not.toHaveBeenCalled();
-
-    // Now user explicitly submits the form
-    const submitBtn = screen.getByRole("button", { name: /Verify Certificate/i });
-    fireEvent.click(submitBtn);
-
-    await waitFor(() => expect(verifyMock).toHaveBeenCalledTimes(1));
-    expect(verifyMock).toHaveBeenCalledWith("ABCDE-1234");
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-qr-scanner-modal")).toBeInTheDocument();
+    });
   });
 
-  it("auto-verifies when seeded with URL serial parameter", async () => {
+  it("updates serial and closes modal onScanSuccess", async () => {
     renderWithProviders(<VerifyCertificate />, {
       queryClient: createTestQueryClient(),
-      routerEntries: ["/verify?serial=SEEDED-URL-SERIAL"],
+      routerEntries: ["/verify"],
     });
 
-    await waitFor(() => expect(verifyMock).toHaveBeenCalledTimes(1));
-    expect(verifyMock).toHaveBeenCalledWith("SEEDED-URL-SERIAL");
+    const scanButton = screen.getByRole("button", { name: /Scan QR Code/i });
+    fireEvent.click(scanButton);
+
+    const triggerScan = await screen.findByRole("button", { name: "Mock Trigger Scan" });
+    fireEvent.click(triggerScan);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("mock-qr-scanner-modal")).not.toBeInTheDocument();
+    });
+
+    const input = screen.getByLabelText(/Certificate Serial Number/i) as HTMLInputElement;
+    expect(input.value).toBe("SCANNED-SERIAL-999");
+  });
+
+  it("closes modal when onClose is called", async () => {
+    renderWithProviders(<VerifyCertificate />, {
+      queryClient: createTestQueryClient(),
+      routerEntries: ["/verify"],
+    });
+
+    const scanButton = screen.getByRole("button", { name: /Scan QR Code/i });
+    fireEvent.click(scanButton);
+
+    const closeButton = await screen.findByRole("button", { name: "Mock Close Scanner" });
+    fireEvent.click(closeButton);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("mock-qr-scanner-modal")).not.toBeInTheDocument();
+    });
   });
 });

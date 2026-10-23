@@ -1,4 +1,9 @@
-import { Injectable, ConflictException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  ConflictException,
+  Logger,
+  Optional,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Certificate } from '../entities/certificate.entity';
@@ -6,6 +11,24 @@ import { WebhooksService } from '../../webhooks/webhooks.service';
 import { WebhookEvent } from '../../webhooks/entities/webhook-subscription.entity';
 import { UserRole } from '../../users/entities/user.entity';
 import { CertificateStatus } from '../constants/certificate-status.enum';
+import { CertificateIndexService } from './certificate-index.service';
+
+/**
+ * Boundary contract for synchronizing revocations with the CRL.
+ *
+ * The CRL is the authoritative source for revocation checks, so the main
+ * contract status must only be flipped once the CRL entry has been written.
+ * Implementations are expected to be idempotent: revoking an already-revoked
+ * certificate must succeed without creating duplicate CRL entries.
+ */
+export interface CrlRevocationSync {
+  revokeCertificate(
+    certificateId: string,
+    issuerId: string,
+    reason?: string,
+    revokedAt?: Date,
+  ): Promise<void>;
+}
 
 @Injectable()
 export class CertificateRevocationService {
@@ -15,9 +38,34 @@ export class CertificateRevocationService {
     @InjectRepository(Certificate)
     private readonly certificateRepository: Repository<Certificate>,
     private readonly webhooksService: WebhooksService,
+    @Optional()
+    private readonly crlRevocationSync?: CrlRevocationSync,
   ) {}
 
+  /**
+   * Maximum byte length of a certificate ID that can be safely included in a
+   * CRL Merkle tree leaf. The on-chain `build_merkle_root` uses a fixed
+   * 256-byte stack buffer, so over-long IDs would panic and permanently block
+   * all further revocations for the issuer. Reject them at this boundary.
+   */
+  static readonly MAX_CERTIFICATE_ID_BYTES = 256;
+
+  private assertRevocableId(id: string): void {
+    if (typeof id !== 'string' || id.length === 0) {
+      throw new BadRequestException('Certificate ID must be a non-empty string');
+    }
+
+    const byteLength = Buffer.byteLength(id, 'utf8');
+    if (byteLength > CertificateRevocationService.MAX_CERTIFICATE_ID_BYTES) {
+      throw new BadRequestException(
+        `Certificate ID exceeds maximum length of ${CertificateRevocationService.MAX_CERTIFICATE_ID_BYTES} bytes (got ${byteLength})`,
+      );
+    }
+  }
+
   async revoke(id: string, reason?: string): Promise<Certificate> {
+    this.assertRevocableId(id);
+
     const certificate = await this.certificateRepository.findOne({
       where: { id },
     });
@@ -27,16 +75,36 @@ export class CertificateRevocationService {
     }
 
     const revokedAt = new Date();
-    certificate.status = CertificateStatus.REVOKED;
-    if (reason) {
-      certificate.metadata = {
-        ...certificate.metadata,
-        revocationReason: reason,
+
+    // Synchronize the CRL first so a certificate can never be revoked in the
+    // main contract while still passing CRL checks. The CRL write is
+    // idempotent, so re-revoking an already-revoked certificate is safe.
+    if (this.crlRevocationSync) {
+      await this.crlRevocationSync.revokeCertificate(
+        certificate.id,
+        certificate.issuerId,
+        reason,
         revokedAt,
-      };
+      );
+    } else {
+      this.logger.warn(
+        `CRL revocation sync is not configured; certificate ${id} was revoked in the main contract only`,
+      );
     }
 
+    certificate.status = CertificateStatus.REVOKED;
+    certificate.metadata = {
+      ...certificate.metadata,
+      ...(reason ? { revocationReason: reason } : {}),
+      revokedAt,
+    };
+
     const savedCertificate = await this.certificateRepository.save(certificate);
+
+    await this.certificateIndexService.removeCertId(
+      savedCertificate.issuerId,
+      savedCertificate.id,
+    );
 
     this.logger.log(`Certificate revoked: ${id} with reason: ${reason}`);
 
@@ -189,6 +257,8 @@ export class CertificateRevocationService {
 
     for (const id of certificateIds) {
       try {
+        this.assertRevocableId(id);
+
         const certificate = await this.certificateRepository.findOne({
           where: { id },
         });

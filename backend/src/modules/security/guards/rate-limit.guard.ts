@@ -22,11 +22,6 @@ interface RequestWithContext extends Request {
   issuer?: { id: string; tier: string };
 }
 
-interface LocalBucket {
-  windowStart: number;
-  count: number;
-}
-
 interface GuardRateResult {
   allowed: boolean;
   limit: number;
@@ -35,19 +30,36 @@ interface GuardRateResult {
   reason?: string;
 }
 
+/**
+ * Redis-backed rate limiter interface. The guard delegates all counter state
+ * to this shared, persistent store so counts survive restarts and are enforced
+ * across all replicas. Implementations must atomically increment and expire
+ * keys within the supplied window.
+ */
+export interface RateLimitStore {
+  consume(
+    key: string,
+    limit: number,
+    windowMs: number,
+  ): Promise<GuardRateResult>;
+}
+
+export const RATE_LIMIT_STORE = Symbol('RATE_LIMIT_STORE');
+
 @Injectable()
 export class RateLimitGuard implements CanActivate {
-  private readonly usage = new Map<string, LocalBucket>();
   private readonly defaultWindowMs: number;
   private readonly defaultMaxRequests: number;
   private readonly bruteForceWindowMs: number;
   private readonly bruteForceMaxAttempts: number;
+  private readonly trustedProxyHops: number;
 
   constructor(
     private readonly reflector: Reflector,
     private readonly configService: ConfigService,
     private readonly loggingService: LoggingService,
     private readonly apiKeyRateLimitService: RateLimitService,
+    private readonly store: RateLimitStore,
   ) {
     const isProd = this.configService.get<string>('NODE_ENV') === 'production';
 
@@ -63,6 +75,16 @@ export class RateLimitGuard implements CanActivate {
 
     this.bruteForceMaxAttempts =
       Number(this.configService.get('AUTH_BRUTE_FORCE_MAX_ATTEMPTS')) || 5;
+
+    // Only trust the last `TRUSTED_PROXY_HOPS` entries of `X-Forwarded-For`.
+    // 0 means the header is ignored and the socket address is used.
+    const configuredHops = Number(
+      this.configService.get('TRUSTED_PROXY_HOPS'),
+    );
+    this.trustedProxyHops =
+      Number.isFinite(configuredHops) && configuredHops > 0
+        ? Math.floor(configuredHops)
+        : 0;
   }
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -72,7 +94,7 @@ export class RateLimitGuard implements CanActivate {
     const routeKey = this.routeKey(request);
 
     await this.enforceApiKeyRateLimit(request, response, routeKey);
-    this.enforceRequestRateLimit(context, request, response, routeKey);
+    await this.enforceRequestRateLimit(context, request, response, routeKey);
 
     return true;
   }
@@ -93,7 +115,7 @@ export class RateLimitGuard implements CanActivate {
       this.loggingService.warn('Blocked request with invalid API key', {
         path: request.originalUrl,
         method: request.method,
-        ip: request.ip,
+        ip: this.clientIp(request),
       });
       throw new UnauthorizedException('Invalid API key');
     }
@@ -122,12 +144,12 @@ export class RateLimitGuard implements CanActivate {
     }
   }
 
-  private enforceRequestRateLimit(
+  private async enforceRequestRateLimit(
     context: ExecutionContext,
     request: RequestWithContext,
     response: Response,
     routeKey: string,
-  ): void {
+  ): Promise<void> {
     const options = this.reflector.getAllAndOverride<RateLimitOptions>(
       RATE_LIMIT_OPTIONS_KEY,
       [context.getHandler(), context.getClass()],
@@ -147,7 +169,7 @@ export class RateLimitGuard implements CanActivate {
       options,
       isBruteForceRoute,
     );
-    const result = this.consume(bucketKey, limit, windowMs, isBruteForceRoute);
+    const result = await this.store.consume(bucketKey, limit, windowMs);
 
     response.setHeader('X-RateLimit-Limit', result.limit.toString());
     response.setHeader('X-RateLimit-Remaining', result.remaining.toString());
@@ -160,51 +182,13 @@ export class RateLimitGuard implements CanActivate {
       this.logBlockedRequest(
         request,
         routeKey,
-        result.reason || 'rate-limited',
+        result.reason ||
+          (isBruteForceRoute
+            ? 'brute-force-protection-triggered'
+            : 'global-rate-limit-exceeded'),
       );
-      this.throwRateLimitError(response, result.resetAt);
+      throw this.throwRateLimitError(response, result.resetAt);
     }
-  }
-
-  private consume(
-    key: string,
-    limit: number,
-    windowMs: number,
-    isBruteForceRoute: boolean,
-  ): GuardRateResult {
-    const now = Date.now();
-    const bucket = this.usage.get(key);
-
-    if (!bucket || now - bucket.windowStart >= windowMs) {
-      this.usage.set(key, { windowStart: now, count: 1 });
-      return {
-        allowed: true,
-        limit,
-        remaining: Math.max(limit - 1, 0),
-        resetAt: now + windowMs,
-      };
-    }
-
-    if (bucket.count >= limit) {
-      return {
-        allowed: false,
-        limit,
-        remaining: 0,
-        resetAt: bucket.windowStart + windowMs,
-        reason: isBruteForceRoute
-          ? 'brute-force-protection-triggered'
-          : 'global-rate-limit-exceeded',
-      };
-    }
-
-    bucket.count += 1;
-
-    return {
-      allowed: true,
-      limit,
-      remaining: Math.max(limit - bucket.count, 0),
-      resetAt: bucket.windowStart + windowMs,
-    };
   }
 
   private buildBucketKey(
@@ -237,16 +221,42 @@ export class RateLimitGuard implements CanActivate {
     return `ip:${this.clientIp(request)}:${routeKey}`;
   }
 
+  /**
+   * Derive the client IP from trusted-proxy configuration. The leftmost
+   * `X-Forwarded-For` entry is client-controlled and must not be trusted. When
+   * `TrustedProxyHops` is configured, the client address is taken from the
+   * rightmost untrusted hop of the forwarded chain. Otherwise the socket
+   * address is used and the header is ignored.
+   */
   private clientIp(request: Request): string {
-    const forwardedFor = request.headers['x-forwarded-for'];
-    if (typeof forwardedFor === 'string') {
-      const firstIp = forwardedFor.split(',')[0]?.trim();
-      if (firstIp) {
-        return firstIp;
-      }
+    const socketIp = request.ip || request.socket.remoteAddress || 'unknown';
+
+    if (this.trustedProxyHops <= 0) {
+      return socketIp;
     }
 
-    return request.ip || request.socket.remoteAddress || 'unknown';
+    const forwardedFor = request.headers['x-forwarded-for'];
+    const rawChain = Array.isArray(forwardedFor)
+      ? forwardedFor.join(',')
+      : forwardedFor;
+
+    if (typeof rawChain !== 'string') {
+      return socketIp;
+    }
+
+    const hops = rawChain
+      .split(',')
+      .map((hop) => hop.trim())
+      .filter((hop) => hop.length > 0);
+
+    if (hops.length === 0) {
+      return socketIp;
+    }
+
+    // Walk right-to-left past the trusted proxy hops and pick the first
+    // address that was not added by a trusted proxy.
+    const index = Math.max(hops.length - this.trustedProxyHops, 0);
+    return hops[index] || socketIp;
   }
 
   private routeKey(request: Request): string {
