@@ -42,7 +42,30 @@ export class CertificateRevocationService {
     private readonly crlRevocationSync?: CrlRevocationSync,
   ) {}
 
+  /**
+   * Maximum byte length of a certificate ID that can be safely included in a
+   * CRL Merkle tree leaf. The on-chain `build_merkle_root` uses a fixed
+   * 256-byte stack buffer, so over-long IDs would panic and permanently block
+   * all further revocations for the issuer. Reject them at this boundary.
+   */
+  static readonly MAX_CERTIFICATE_ID_BYTES = 256;
+
+  private assertRevocableId(id: string): void {
+    if (typeof id !== 'string' || id.length === 0) {
+      throw new BadRequestException('Certificate ID must be a non-empty string');
+    }
+
+    const byteLength = Buffer.byteLength(id, 'utf8');
+    if (byteLength > CertificateRevocationService.MAX_CERTIFICATE_ID_BYTES) {
+      throw new BadRequestException(
+        `Certificate ID exceeds maximum length of ${CertificateRevocationService.MAX_CERTIFICATE_ID_BYTES} bytes (got ${byteLength})`,
+      );
+    }
+  }
+
   async revoke(id: string, reason?: string): Promise<Certificate> {
+    this.assertRevocableId(id);
+
     const certificate = await this.certificateRepository.findOne({
       where: { id },
     });
@@ -234,6 +257,8 @@ export class CertificateRevocationService {
 
     for (const id of certificateIds) {
       try {
+        this.assertRevocableId(id);
+
         const certificate = await this.certificateRepository.findOne({
           where: { id },
         });

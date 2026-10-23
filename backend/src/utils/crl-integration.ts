@@ -71,8 +71,18 @@ export class CertificateRevocationList {
    *
    * Emits a `CRLRevocationAddedEvent` after the revocation is stored so that
    * off-chain indexers and the backend webhook system are notified.
+   *
+   * Throws when the certificate ID exceeds `MAX_CERT_ID_LENGTH` UTF-8 bytes,
+   * since such an ID cannot be represented in a Merkle leaf and would block all
+   * further revocations for the issuer.
    */
   revoke(certId: string, reason: string): void {
+    const byteLength = certIdByteLength(certId);
+    if (byteLength > MAX_CERT_ID_LENGTH) {
+      throw new Error(
+        `Certificate ID is ${byteLength} bytes, which exceeds the maximum of ${MAX_CERT_ID_LENGTH} bytes.`,
+      );
+    }
     if (this.revoked.has(certId)) {
       throw new Error(`Certificate ${certId} is already revoked.`);
     }
