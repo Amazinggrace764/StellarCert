@@ -58,7 +58,7 @@ describe('MultisigService', () => {
         .mockResolvedOnce(success);
 
       const internals = service as unknown as {
-        server: { getTransaction: jest.Mock };
+        server: { getTransaction: jest.Mock; };
         waitForTransaction: (
           hash: string,
           options?: { maxAttempts?: number; intervalMs?: number },
@@ -71,7 +71,7 @@ describe('MultisigService', () => {
           maxAttempts: 3,
           intervalMs: 0,
         }),
-      ).resolvesToBe(success);
+      ).resolves.toBe(success);
       expect(getTransaction).toHaveBeenCalledTimes(2);
     });
 
@@ -85,7 +85,7 @@ describe('MultisigService', () => {
         .mockResolvedOnce(failed);
 
       const internals = service as unknown as {
-        server: { getTransaction: jest.Mock };
+        server: { getTransaction: jest.Mock; };
         waitForTransaction: (
           hash: string,
           options?: { maxAttempts?: number; intervalMs?: number },
@@ -108,7 +108,7 @@ describe('MultisigService', () => {
       });
 
       const internals = service as unknown as {
-        server: { getTransaction: jest.Mock };
+        server: { getTransaction: jest.Mock; };
         waitForTransaction: (
           hash: string,
           options?: { maxAttempts?: number; intervalMs?: number },
@@ -131,7 +131,7 @@ describe('MultisigService', () => {
       });
 
       const internals = service as unknown as {
-        server: { getTransaction: jest.Mock };
+        server: { getTransaction: jest.Mock; };
         waitForTransaction: (
           hash: string,
           options?: { maxAttempts?: number; intervalMs?: number },

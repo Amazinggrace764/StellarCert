@@ -27,7 +27,7 @@ describe('MultisigService waitForTransaction behavior', () => {
   it('proposeCertificate fetches pending request instead of a hardcoded mock', () => {
     const src = readSource('multisig.service.ts');
     expect(src).not.toMatch(/Return a mock object/);
-    expect(src).toContain('getPendingRequest(requestId)');
+    expect(src).toContain('tetPendingRequest(requestId)');
   });
 
   it('approveRequest parses the real contract boolean result', () => {
@@ -36,6 +36,30 @@ describe('MultisigService waitForTransaction behavior', () => {
     const src = fs.readFileSync(join(__dirname, 'multisig.service.ts'), 'utf8');
     expect(src).not.toMatch(/mock success result/i);
     expect(src).toContain('parseBooleanResult');
+  });
+});
+
+describe('Multisig cancelProposal status (issue cancellation)', () => {
+  const serviceSrc = () => readSource('multisig.service.ts');
+
+  it('records cancelled proposals as Cancelled, not Rejected', () => {
+    const src = serviceSrc();
+    // Locate the cancelProposal method body.
+    const match = src.match(/async cancelProposals*\([\s\S]*?\n\s{2}\}/);
+    expect(match).not.toBeNull();
+    const body = match![0];
+    expect(body).toContain('AdminProposalStatus.Cancelled');
+    expect(body).not.toContain('this.recordRejection');
+  });
+
+  it('declares Cancelled in the AdminProposalStatus enum', () => {
+    const src = serviceSrc();
+    expect(src).toMatch(/AdminProposalStatus\s*\.\s*Cancelled\s*=\s*['"]Cancelled['"]/);
+  });
+
+  it('preserves Rejected for genuine rejection flows', () => {
+    const src = serviceSrc();
+    expect(src).toMatch(/AdminProposalStatus\s*\.\s*Rejected/);
   });
 });
 
@@ -56,7 +80,7 @@ describe('MultisigModule wiring (issue #723)', () => {
 
   it('registers MultisigModule in the AppModule imports array', () => {
     const src = appModuleSrc();
-    const importsMatch = src.match(/imports:\s*\[([\s\S]*?\])/);
+    const importsMatch = src.match(/imports:\s*\[([\s\S]*?])/);
     expect(importsMatch).not.toBeNull();
     expect(importsMatch![1]).toMatch(/\bMultisigModule\b/);
   });
