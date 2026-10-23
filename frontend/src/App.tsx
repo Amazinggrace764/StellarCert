@@ -1,4 +1,4 @@
-import { Routes, Route, useLocation } from "react-router-dom";
+import { Routes, Route, useLocation, useLocation as useRouteLocation } from "react-router-dom";
 import { Suspense, lazy } from "react";
 import { Shield, Award, Search, ShieldAlert } from "lucide-react";
 import Navbar from "./components/Header";
@@ -42,6 +42,33 @@ const PageLoader = () => (
   </div>
 );
 
+// Reset the boundary whenever the route changes so a failed chunk on one
+// page does not permanently block navigation to a healthy page.
+const RouteErrorBoundary = ({ children }: { children: React.ReactNode }) => {
+  const location = useRouteLocation();
+  return (
+    <ErrorBoundary
+      key={location.pathname}
+      fallback={
+        <div className="flex flex-col items-center justify-center min-h-[200px] gap-4 text-center">
+          <p className="text-gray-700 dark:text-slate-300">
+            Something went wrong loading this page.
+          </p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700"
+          >
+            Reload
+          </button>
+        </div>
+      }
+    >
+      {children}
+    </ErrorBoundary>
+  );
+};
+
 function App() {
   const location = useLocation();
   const showFeatureOverview =
@@ -60,13 +87,13 @@ function App() {
             {/*
               Route-level error boundary. Every page below is a `React.lazy`
               chunk, so a chunk that fails to load (unresolvable module — the
-              casing defect in #744 — a stale hashed asset after a deploy, or
-              an offline client) rejects the import promise. React re-throws
+              casing defect in #744 — a stale hashed asset after a deploy, or an
+              offline client) rejects the import promise. React re-throws
               that rejection during render; with no boundary above it, the
               whole tree unmounts and the user gets a blank screen instead of
               the 404 page the catch-all route below should have rendered.
             */}
-            <ErrorBoundary>
+            <RouteErrorBoundary>
               <Suspense fallback={<PageLoader />}>
                 <Routes>
                   <Route path="/" element={<Dashboard />} />
@@ -134,7 +161,7 @@ function App() {
                   <Route path="*" element={<NotFound />} />
                 </Routes>
               </Suspense>
-            </ErrorBoundary>
+            </RouteErrorBoundary>
           </div>
 
           {/* Feature Overview Section */}
