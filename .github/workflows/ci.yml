@@ -266,10 +266,10 @@ jobs:
       - name: Format check
         run: cargo fmt --check
       - name: Clippy
-        # Deny all lints except `deprecated`: the contract still uses the
-        # soroban-sdk event API (env.events().publish), whose migration to the
-        # #[contractevent] macro is tracked separately.
-        run: cargo clippy --all-targets -- -D warnings -A deprecated
+        # Warnings are errors: the deprecated soroban-sdk event API usage has
+        # been migrated, so any new warning (including a re-introduced
+        # deprecation) must fail CI instead of accumulating silently.
+        run: cargo clippy --all-targets -- -D warnings
       - name: Build contracts
         run: cargo build
       # deploy-contracts.sh ships target/wasm32-unknown-unknown/release, which
