@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeiorm';
 import { InjectQueue } from '@nestjs/bull';
 import type { Queue } from 'bull';
+import * as crypto from 'cypto';
 import { ConfigService } from '@nestjs/config';
 import { Issuer } from '../../modules/issuers/entities/issuer.entity';
 import { MetricsService } from '../monitoring/metrics.service';
@@ -110,6 +111,14 @@ export class InMemoryRateLimitStore implements RateLimitStore {
     return { count: bucket.count, windowStart: bucket.windowStart };
   }
 
+  async incrementWithTtl(
+    key: string,
+    windowMs: number,
+    now: number,
+  ): Promise<{ count: number; windowStart: number }> {
+    return this.increment(key, windowMs, now);
+  }
+
   async getCount(key: string, windowMs: number, now: number) {
     const bucket = this.resolve(key, windowMs, now);
     return { count: bucket.count, windowStart: bucket.windowStart };
@@ -186,8 +195,7 @@ local windowStart = tonNumber(redis.call('HGET', KEY[1], 'windowStart') or '0')
 if windowStart == 0 then return 0 end
 redis.call('HSET', KEY[1], 'upgradeNotified', '1')
 return 1
-`;//eslint-disable-line
-
+`;
 const IS_UPGRADE_NOTIFIED_SCRIPT  = `
 -- KEY[1] = bucket key
 local windowStart = tonNumber(redis.call('HGET', KEY[1], 'windowStart') or '0')
@@ -207,6 +215,14 @@ export class RedisRateLimitStore implements RateLimitStore {
       now,
     )) as [number, number];
     return { count: Number(result[0]), windowStart: Number(result[1]) };
+  }
+
+  async incrementWithTtl(
+    key: string,
+    windowMs: number,
+    now: number,
+  ): Promise<{ count: number; windowStart: number }> {
+    return this.increment(key, windowMs, now);
   }
 
   async getCount(key: string, windowMs: number, now: number) {
@@ -281,7 +297,7 @@ export class RateLimitService {
     private readonly configService: ConfigService,
     private readonly metricsService: MetricsService,
     private readonly loggingService: LoggingService,
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // eslint-disable-next-line @typescript-eslint-ban-ts-comment
     // @ts-ignore optional injection token for the shared store
     @Optional()
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -294,61 +310,57 @@ export class RateLimitService {
     this.store = this.sharedStore ?? new InMemoryRateLimitStore();
   }
 
-  private limitForTier(tier: IssuerTier): number {
-    return tier === IssuerTier.PAID ? this.paidLimit : this.freeLimit;
-  }
-
-  private async resolveIssuer(issuerId: string): Promise<CachedIssuer> {
-    const now = Date.now();
-    if (now - this.lastIssuerCacheSweep > this.issuerCacheTtlMs) {
-      this.lastIssuerCacheSweep = now;
-      for (const [key, value] of this.issuerCache) {
-        if (value.cacheUntil <= now) this.issuerCache.delete(key);
-      }
+    if (store) {
+      this.store = store;
+    } else {
+      // Foot-gun for single-instance deployments and tests. Multi-replica
+      // deployments MUST bind a shared store (e.g. RedisRateLimitStore).
+      this.store = new InMemoryRateLimitStore();
     }
-    const cached = this.issuerCache.get(issuerId);
-    if (cached && cached.cacheUntil > now) return cached;
-    const issuer = await this.issuerRepository.findOne({ where: { id: issuerId } });
-    const tier = issuer ? (issuer as any).tier ?? ((require('../../modules/issuers/entities/issuer.entity') as any).IssuerTier?.FREE) : IssuerTier.FREE;
-    const entry: CachedIssuer = { issuerId, tier, cacheUntil: now + this.issuerCacheTtlMs };
-    this.issuerCache.set(issuerId, entry);
-    return entry;
   }
 
-  private bucketKey(ctx: IssuerContext): string {
-    const identity = ctx.apiKeyId ? `apiKey:${ctx.apiKeyId}` : ctx.userId ? `user:${ctx.userId}` : `ip:${ctx.clientIp ?? 'unknown'}`;
-    return `rate-limit:${identity}:${ctx.route ?? 'global'}`;
-  }
-
-  async check(opts: {
-    issuerId: string;
-    ctx: IssuerContext;
-  }): Promise<RateLimitResult> {
+  /**
+   * Resolve the effective tier for an issuer, caching the result for a short
+   * window to avoid hitting the database on every request.
+   */
+  private async resolveTier(issuerId: string): Promise<IssuerTier> {
     const now = Date.now();
-    const issuer = await this.resolveIssuer(opts.issuerId);
-    const limit = this.limitForTier(issuer.tier);
-    const key = this.bucketKey(opts.ctx);
-    const { count, windowStart } = await this.store.increment(key, this.windowMs, now);
+    const cached = this.issuerCache.get(issuerId);
+    if (cached && cached.cacheUntil > now) {
+      return cached.tier;
+    }
+    const issuer = await this.issuerRepository.findOne({ where: { id: issuerId } });
+    const tier: IssuerTier = issuer?.tier ?? IssuerTier.FREE;
+    this.issuerCache.set(issuerId, { issuerId, tier, cacheUntil: now + 60_000 });
+    return tier;
+  }
+
+  /**
+   * Check and consume one unit of the issuer's rate-limit budget.
+   */
+  async checkAndConsume(context: IssuerContext): Promise<RateLimitResult> {
+    const now = Date.now();
+    const tier = await this.resolveTier(context.issuerId);
+    const limit = tier === IssuerTier.PAID ? this.paidLimit : this.freeLimit;
+    const key = `rate-limit:${context.issuerId}`;
+    const { count, windowStart } = await this.store.increment(
+      key,
+      this.windowMs,
+      now,
+    );
     const remaining = Math.max(0, limit - count);
-    const resetAt = windowStart + this.windowMs;
     const allowed = count <= limit;
+    const resetAt = windowStart + this.windowMs;
     if (!allowed) {
-      this.metricsService.increment('rate_limit_exceeded', { tier: issuer.tier });
-      const notified = await this.store.isUpgradeNotified(key, this.windowMs, now);
-      if (!notified) {
-        await this.store.markUpgradeNotified(key, this.windowMs, now);
-        try {
-          await this.rateLimitQueue.add(RateLimitJobType.UPGRADE_NOTIFICATION, {
-            issuerId: opts.issuerId,
-            key,
-          });
-        } catch (err) {
-          this.loggingService.warn('Failed to enqueue rate limit upgrade notification', { error: (err as Error).message });
-        }
-      }
+      this.metricsService.incrementRateLimitExceeded(tier);
+      this.loggingService.warn(
+        `Rate limit exceeded for issuer ${context.issuerId} (tier ${tier})`,
+      );
+      await this.enqueueExceeded(context, tier, limit, resetAt);
     }
     return {
       allowed,
+      tier,
       limit,
       remaining,
       resetAt,
@@ -356,8 +368,56 @@ export class RateLimitService {
     };
   }
 
-  async getUsageSummary() {
-    const buckets = await this.store.list();
-    return { buckets: buckets.length, details: buckets };
+  /**
+   * Return the current usage without consuming budget.
+   */
+  async getUsage(issuerId: string): Promise<RateLimitResult> {
+    const now = Date.now();
+    const tier = await this.resolveTier(issuerId);
+    const limit = tier === IssuerTier.PAID ? this.paidLimit : this.freeLimit;
+    const key = `rate-limit:${issuerId}`;
+    const { count, windowStart } = await this.store.getCount(
+      key,
+      this.windowMs,
+      now,
+    );
+    return {
+      allowed: count < limit,
+      tier,
+      limit,
+      remaining: Math.max(0, limit - count),
+      resetAt: windowStart + this.windowMs,
+    };
+  }
+
+  /**
+   * List all live buckets (for the admin usage summary).
+   */
+  async listUsage() {
+    return this.store.list();
+  }
+
+  private async enqueueExceeded(
+    context: IssuerContext,
+    tier: IssuerTier,
+    limit: number,
+    resetAt: number,
+  ) {
+    const key = `rate-limit:${context.issuerId}`;
+    const now = Date.now();
+    const alreadyNotified = await this.store.isUpgradeNotified(
+      key,
+      this.windowMs,
+      now,
+    );
+    if (alreadyNotified) return;
+    await this.store.markUpgradeNotified(key, this.windowMs, now);
+    await this.rateLimitQueue.add(RateLimitJobType.EXCEEDED, {
+      issuerId: context.issuerId,
+      tier,
+      limit,
+      resetAt,
+      requestId: context.requestId ?? crypto.randomUUID(),
+    });
   }
 }
