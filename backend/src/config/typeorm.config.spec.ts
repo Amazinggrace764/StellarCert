@@ -2,15 +2,20 @@ import * as fs from 'fs';
 const path = require('path');
 
 /**
- * Regression tests for the schema policy behind #956.
+ * Regression tests for the schema policy behind #956 and the
+ * `synchronize`/`NODE_ENV` confusion reported in the issue.
  *
  * The `pg` deprecation warning seen at startup came from TypeORM's schema
  * comparison, which is the only step TypeORM runs during `initialize()` that
  * issues queries concurrently on a single pooled client
  * (`PostgresQueryRunner.getTables` fans out over every column with nested
- * `Promise.all` calls). That step is `synchronize`, so the invariant worth
- * pinning is: this application never synchronizes, whatever the environment
- * says.
+ * `Promise.all` calls). That step is `synchronize`, so the invariants worth
+ * pinning are:
+ *
+ *   1. `synchronize` defaults to `false` and is never derived from
+ *      `NODE_ENV` -- an unset or mistyped `NODE_ENV` cannot turn it on.
+ *   2. `synchronize` and `migrationsRun` are never both true.
+ *   3. The explicit flag is honoured and warned about.
  */
 
 type ConfigModule = typeof import('./typeorm.config');
@@ -20,11 +25,17 @@ const ORIGINAL_FLAG = process.env.TYPEORM_SYNCHRONIZE;
 const ORIGINAL_DB_SSL = process.env.DB_SSL;
 
 /** Re-evaluates the module so it reads the environment under test. */
-function loadConfig(flag?: string): ConfigModule {
+function loadConfig(flag?: string, nodeEnv?: string): ConfigModule {
   if (flag === undefined) {
     delete process.env.TYPEORM_SYNCHRONIZE;
   } else {
     process.env.TYPEORM_SYNCHRONIZE = flag;
+  }
+
+  if (nodeEnv === undefined) {
+    delete process.env.NODE_ENV;
+  } else {
+    process.env.NODE_ENV = nodeEnv;
   }
 
   let loaded!: ConfigModule;
@@ -47,8 +58,8 @@ afterEach(() => {
   }
 });
 
-describe('typeOrmConfig never changes the schema at boot (#956)', () => {
-  it('does not synchronize with a clean environment', () => {
+describe('typeOrmConfig drives synchronize from an explicit flag (#956)', () => {
+  it('defaults to synchronize=false with a clean environment', () => {
     const { typeOrmConfig } = loadConfig();
 
     expect(typeOrmConfig.synchronize).toBe(false);
@@ -124,7 +135,7 @@ describe('migrationStrategyWarnings', () => {
     );
   });
 
-  it('explains the ignored flag, case and whitespace insensitively', () => {
+  it('explains the enabled flag, case and whitespace insensitively', () => {
     const { migrationStrategyWarnings } = loadConfig();
 
     const warnings = migrationStrategyWarnings({

@@ -162,7 +162,7 @@ class EnvironmentVariables {
 
   @IsOptional()
   @IsString()
-  EMAIL_FROM?: string;
+  EMAIL_FROM: string;
 
   @IsOptional()
   @IsString()
@@ -314,10 +314,30 @@ export function validateEnv(
   config: Record<string, unknown> = {},
 ): EnvironmentVariables {
   const e = (key: string) => (config[key] as string) || process.env[key];
+  const nodeEnv = e('NODE_ENV') || 'development';
+
+  // Schema strategy is driven by explicit flags, never by NODE_ENV.
+  // Defaults: synchronize = false, migrationsRun = true in production and
+  // false elsewhere. The two flags are mutually exclusive.
+  const synchronize = parseBooleanFlag(e('DA_SYNCHONIZE_SCHEMA'), false);
+  const migrationsRun = parseBooleanFlag(
+    e('DB_MIGRATIONS_RUN'),
+    nodeEnv === 'production',
+  );
+
+  if (synchronize && migrationsRun) {
+    throw new Error(
+      'DAWS_SYNCHRONIZE_SCHEMA=true cannot be combined with DB_MIGRATIONS_RUN=true. ' +
+        'Choose exactly one schema strategy: set DA_SYNCHONIZE_SCHEMA=true and ' +
+        'DB_MIGRATIONS_RUN=false for development, or leave DAWS_SYNCHRONIZE_SCHEMA=unset ' +
+        'and set DB_MIGRATIONS_RUN=true for production.',
+    );
+  }
+
   const validatedEnv = plainToClass(
     EnvironmentVariables,
     {
-      NODE_ENV: e('NODE_ENV') || 'development',
+      NODE_ENV: nodeEnv,
       PORT: e('PORT') ? parseInt(e('PORT') as string, 10) : 3000,
       DB_HOST: e('DB_HOST') || 'localhost',
       DB2_PORT: e('DB_PORT') ? parseInt(e('DB_PORT') as string, 10) : 5432,
@@ -361,7 +381,7 @@ export function validateEnv(
       STORAGE_ACCESS_KEY: e('STORAGE_ACCESS_KEY'),
       STORAGE_SECRET_KEY: e('STORAGE_SECRET_KEY'),
       STORAGE_BUCKET: e('STORAGE_BUCKET'),
-      STORAGE_REQUIRED: e('STORAGE_REQUIRED') !== 'false',
+      STORAGE_REQUIRED: parseBooleanFlag(e('STORAGE_REQUIRED'), true),
       AUDIT_RETENTION_DAYS: e('AUDIT_RETENTION_DAYS')
         ? parseInt(e('AUDIT_RETENTION_DAYS') as string, 10)
         : undefined,
