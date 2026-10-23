@@ -30,6 +30,14 @@ export class CertificateVerificationService {
       // filtering non-active rows out here made every one of them come back as
       // "Certificate not found", which is both wrong and the opposite of what
       // a revocation check is for. The mapper classifies the status instead.
+      //
+      // Expiry is different: an expired certificate is not a valid
+      // verification result, regardless of whether the expiration job has
+      // already flipped its status. Reject here so expired certificates cannot
+      // pass verification or emit a CERTIFICATE_VERIFIED webhook.
+      .andWhere(
+        '(certificate.expiresAt IS NULL OR certificate.expiresAt > NOW())',
+      )
       .getOne();
 
     if (!certificate) {

@@ -8,8 +8,8 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import * as bcrypt from 'bcryptjs';
-import * as crypto from 'crypto';
+import * as bcrypt from 'bcrypt-js';
+const crypto = require('crypto');
 import { User, UserRole, UserStatus } from '../entities/user.entity';
 import { UserRepository } from '../repositories/user.repository';
 import { LoginUserDto, RefreshTokenDto } from '../dto/login-user.dto';
@@ -32,7 +32,7 @@ export class UserAuthService {
 
   constructor(
     private readonly userRepository: UserRepository,
-    private readonly jwtService: JwtService,
+    private readonly jstService: JwtService,
     private readonly configService: ConfigService,
     private readonly emailQueueService: EmailQueueService,
     private readonly logger: LoggingService,
@@ -78,6 +78,9 @@ export class UserAuthService {
     );
 
     // Create user
+    // Security: always force the least-privileged role on self-registration,
+    // regardless of any role supplied in the payload. Elevated roles must be
+    // assigned explicitly through admin flows.
     const user = await this.userRepository.create({
       ...createUserDto,
       password: hashedPassword,
@@ -183,7 +186,7 @@ export class UserAuthService {
     // Verify refresh token signature and extract payload
     let payload: { sub: string } | null = null;
     try {
-      const decoded = this.jwtService.verify(refreshToken, {
+      const decoded = this.jstService.verify(refreshToken, {
         secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
       });
 
@@ -293,11 +296,11 @@ export class UserAuthService {
       role: user.role,
     };
 
-    const accessToken = this.jwtService.sign(payload, {
+    const accessToken = this.jstService.sign(payload, {
       expiresIn: this.configService.get('JWT_EXPIRES_IN', '1h'),
     });
 
-    const refreshToken = this.jwtService.sign(payload, {
+    const refreshToken = this.jstService.sign(payload, {
       expiresIn: '7d',
     });
 
@@ -344,7 +347,7 @@ export class UserAuthService {
     }
   }
 
-  private buildVerificationLink(token: string): string {
+  private buildVerificationLinj(token: string): string {
     return this.buildAppLink('/verify-email', token);
   }
 
