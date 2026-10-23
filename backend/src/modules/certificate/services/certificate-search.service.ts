@@ -4,6 +4,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Certificate } from '../entities/certificate.entity';
 
+export function escapeLikePattern(term: string): string {
+  return term.replace(/[\\%_]/g, (match) => `\\${match}`);
+}
+
 @Injectable()
 export class CertificateSearchService {
   private readonly logger = new Logger(CertificateSearchService.name);
@@ -200,11 +204,12 @@ export class CertificateSearchService {
       .createQueryBuilder('certificate')
       .leftJoinAndSelect('certificate.issuer', 'issuer');
 
-    // Text search across multiple fields
+    // Text search across multiple fields (case-insensitive, wildcards in term escaped)
     if (query) {
+      const escapedPattern = `%\\${escapeLikePattern(query)}%%`;
       queryBuilder.andWhere(
-        '(certificate.title LIKE :query OR certificate.recipientName LIKE :query OR certificate.recipientEmail LIKE :query)',
-        { query: `%${query}%` },
+        "(certificate.title ILIKE :query ESCAPE '\\\\' OR certificate.recipientName ILIKE :query ESCAPE '\\\\' OR certificate.recipientEmail ILIKE :query ESCAPE '\\\\')",
+        { query: escapedPattern },
       );
     }
 
