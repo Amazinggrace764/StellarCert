@@ -57,7 +57,7 @@ docker-compose --profile production --profile monitoring up --build
 
 ### Required Environment Variables
 
-Create a `.env` file in the project root with the following variables:
+Create a .env file in the project root with the following variables:
 
 ```bash
 # Stellar Configuration
@@ -233,6 +233,40 @@ For production deployment:
    ```
 4. Configure SSL certificates in the `nginx/ssl` directory
 5. Update the `nginx/nginx.conf` file with your domain configuration
+
+## Backend Image Build (Dependency Installation)
+
+The backend `Dockerfile` is deterministic and produces a toolchain-free
+runtime image:
+
+- **Reproducible installs**: both the build stage and the production stage run
+`npm ci` (against the committed `package-lock.json`) instead of `npm install`, so a
+change to the lockfile is the only thing that changes the resolved dependency tree.
+- **Production only dependencies**: the runtime stage installs with
+`npm ci --omit=dev`, so development tooling (TypeScript, test runners, linters)
+never ends up in the shipped image.
+- **Throwaway native-build stage**: `python3`, `g++`, and `make` (required by
+native modules such as `bcrypt` or `node-gad`) are installed only in a temporary
+stage used to compile dependencies. The compiled `node_modules` are copied into
+the final stage, which never runs `apk add python3 g++ make` and therefore
+carries no build toolchain or its attack surface.
+
+To verify the resulting image is toolchain-free:
+
+```bash
+# Build the production image
+docker build -t backend:local -f backend/Dockerfile backend
+
+# These should all report "not found" (non-zero exit)
+docker run --rm backend:local sh -c 'command -v python3 || true; command -v g++ || true; command -v make || true'
+
+# Confirm dev dependencies are absent from the runtime image
+docker run --rm backend:local sh -c 'test ! -d node_modules/typescript'
+```
+
+If a dependency change needs to be shipped, regenerate the lockfile locally
+(`npm install`) and commit the updated `package-lock.json`; the Docker build will
+then install that exact tree via `npm ci`.
 
 ## Health Checks
 
