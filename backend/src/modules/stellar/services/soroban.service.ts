@@ -42,77 +42,27 @@ export interface MultisigRequest {
   status: string;
 }
 
-export interface SorobanEvent {
-  ledger: number;
-  txHash: string;
-  contractId: string;
-  topic: string[];
-  value: unknown;
-  closedAt: string;
-}
-
-export interface EventCheckpoint {
-  lastLedger: number;
-  lastEventId?: string;
-  updatedAt: string;
-}
-
-export interface EventHandlerResult {
-  applied: boolean;
-  reason?: string;
-}
-
-export type SorobanEventHandler = (
-  event: SorobanEvent,
-) => Promise<EventHandlerResult>;
-
-export interface ReconciliationReport {
-  checked: number;
-  missing: number;
-  inconsistent: number;
-  failures: number;
-  details: Array<{
-    id: string;
-    txHash?: string;
-    issue: 'missing' | 'inconsistent' | 'rpc_error';
-    message?: string;
-  }>;
-}
-
-export interface IndexerMetrics {
-  lastSuccessfulLedger: number;
-  lag: number;
-  retries: number;
-  deadLettered: number;
-  reconciliationFailures: number;
-  processedEvents: number;
-  duplicateEvents: number;
-}
-
-export interface IndexerOptions {
-  startLedger?: number;
-  maxLedgersPerBatch?: number;
-  maxRetries?: number;
-  retryBaseDelayMs?: number;
-  pollIntervalMs?: number;
-  finalityLedgers?: number;
-}
-
-interface DeadLetterEntry {
-  event: SorobanEvent;
-  attempts: number;
-  error: string;
-  failedAt: string;
+/**
+ * Resolves the signing keypair for a given issuer address.
+ *
+ * Per-issuer keys are provided through configuration as a
+ * comma-separated list of `<public key>:<secret key>` entries under
+ * `ISSUER_KEYSPAM_MAP or through a single `ISSUER_<public key>_SECRET` env
+ * variable. The admin keypair is never used as a fallback for issuers.
+ */
+export interface IssuerKeypairProvider {
+  getKeypair(issuerAddress: string): Keypair | null;
 }
 
 @Injectable()
-export class SorobanService implements OnModuleInit, OnModuleDestroy {
+export class SorobanService implements OnModuleInit, IssuerKeypairProvider {
   private server: any;
   private networkPassphrase: string;
   private adminKeypair: Keypair;
   private certificateContractId: string;
   private multisigContractId: string;
   private crlContractId: string;
+  private issuerKeypairs: Map<string, Keypair> = new Map();
 
   // Durable event indexer state. The checkpoint is persisted atomically with
   // each processed event so restarts/replays never lose or duplicate events.
@@ -164,6 +114,8 @@ export class SorobanService implements OnModuleInit, OnModuleDestroy {
     this.crlContractId =
       this.configService.get<string>('CRL_CONTRACT_ID') || '';
 
+    this.loadIssuerKeypairs();
+
     if (!rpcUrl || !network || !adminSecret) {
       this.logger.warn(
         'Soroban configuration missing. SorobanService may not function correctly.',
@@ -187,9 +139,84 @@ export class SorobanService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Register a handler invoked for every ingested contract event. Handlers
-   * MUST be idempotent: the indexer guarantees at-least-once delivery across
-   * restarts and bounded replays.
+   * Load per-issuer keypairs from configuration. Supports both a
+   * comma-separated map and individual env variables.
+   */
+  private loadIssuerKeypairs(): void {
+    const mapped = this.configService.get<string>('ISSUER_KEYSPAM_MAP');
+    if (mapped) {
+      for (const entry of mapped.split(',')) {
+        const trimmed = entry.trim();
+        if (!trimmed) continue;
+        const separator = trimmed.indexOf(':');
+        if (separator <= 0) continue;
+        const publicKey = trimmed.slice(0, separator).trim();
+        const secret = trimmed.slice(separator + 1).trim();
+        this.registerIssuerKeypair(publicKey, secret);
+      }
+    }
+
+    // Support `ISSUER_<Public key>_SECRET` env variables.
+    const envClone = {
+      ...(process.env as Record<string, string | undefined>),
+    };
+    for (const [key, value] of Object.entries(envClone)) {
+      if (!key.startsWith('ISSUER_') || !key.endsWith('_SECRET')) continue;
+      if (key === 'ISSUER_KEYSPAM_MAP') continue;
+      const publicKey = key.slice('ISSUER_'.length, key.length - '_SECRET'.length);
+      if (!value) continue;
+      this.registerIssuerKeypair(publicKey, value);
+    }
+  }
+
+  private registerIssuerKeypair(publicKey: string, secret: string): void {
+    try {
+      const keypair = Keypair.fromSecret(secret);
+      if (keypair.publicKey() !== publicKey) {
+        this.logger.warn(`Issuer keypair registration mismatch for ${publicKey}.`);
+        return;
+      }
+      this.issuerKeypairs.set(publicKey, keypair);
+    } catch {
+      this.logger.warn(`Invalid issuer secret key configured for ${publicKey}.`);
+    }
+  }
+
+  /**
+   * Resolve the keypair for an issuer address. Returns null when no
+   * key is configured for the issuer. Never falls back to the admin key.
+   */
+  getKeypair(issuerAddress: string): Keypair | null {
+    if (!issuerAddress) {
+      return null;
+    }
+    const keypair = this.issuerKeypairs.get(issuerAddress);
+    if (!keypair) {
+      this.logger.warn(
+        `No signing key configured for issuer ${issuerAddress}.`,
+      );
+      return null;
+    }
+    return keypair;
+  }
+
+  /**
+   * Register an issuer keypair at runtime. Useful for tests and for
+   * dynamic provisioning flows.
+   */
+  registerIssuerSecret(publicKey: string, secret: string): boolean {
+    try {
+      const keypair = Keypair.fromSecret(secret);
+      if (keypair.publicKey() !== publicKey) return false;
+      this.issuerKeypairs.set(publicKey, keypair);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Deploy a new contract instance
    */
   registerEventHandler(handler: SorobanEventHandler): void {
     this.eventHandlers.push(handler);
@@ -290,92 +317,139 @@ export class SorobanService implements OnModuleInit, OnModuleDestroy {
     await this.ingestRange(from, to);
   }
 
-  private async ingestRange(fromLedger: number, toLedger?: number): Promise<void> {
-    if (!this.server) {
-      throw new Error('Soroban server not initialized');
-    }
-    let cursor = fromLedger;
-    while (true) {
-      const events = await this.fetchEventsWithRetry(cursor, toLedger);
-      if (events.length === 0) {
-        break;
+  /**
+   * Issue a certificate on-chain.
+   *
+   * The transaction is signed by the issuer's configured keypair. If no
+   * keypair is configured for the issuer, issuance fails rather than
+   * falling back to the admin key.
+   *
+   * @returns the Soroban transaction hash once the ledger confirms the
+   *   transaction with `SUCCESS`, or `null` when issuance failed. Callers
+   *   must treat `null` as a failure and must not record a transaction hash.
+   */
+  async issueCertificate(
+    id: string,
+    issuerAddress: string,
+    ownerAddress: string,
+    metadataUri: string,
+    expiresAt?: number,
+    ttlLedgers: number = DEFAULT_TTL_LEDGERS,
+  ): Promise<string | null> {
+    try {
+      if (!this.certificateContractId) {
+        throw new Error('Certificate contract ID not configured.');
       }
-      for (const event of events) {
-        await this.processEvent(event);
+
+      if (!Number.isFinite(ttlLedgers) || ttlLedgers <= 0) {
+        throw new Error(`Invalid TTL ledgers: ${ttlLedgers}`);
       }
-      const lastLedger = events[events.length - 1].ledger;
-      cursor = lastLedger + 1;
-      if (toLedger !== undefined && cursor > toLedger) {
-        break;
+
+      const contract = new Contract(this.certificateContractId);
+      const issuer = Address.fromString(issuerAddress);
+      const owner = Address.fromString(ownerAddress);
+
+      const issuerKeypair = this.getKeypair(issuerAddress);
+      if (!issuerKeypair) {
+        this.logger.error(
+          `Cannot issue certificate ${id}: no signing key configured for issuer ${issuerAddress}.`,
+        );
+        return null;
       }
+
+      const sourceAccount = await this.server.getAccount(
+        issuerKeypair.publicKey(),
+      );
+
+      const args = [
+        nativeToScVal(id),
+        nativeToScVal(issuer),
+        nativeToScVal(owner),
+        nativeToScVal(metadataUri),
+        expiresAt ? nativeToScVal(expiresAt) : nativeToScVal(null),
+        nativeToScVal(ttlLedgers),
+      ];
+
+      const transaction = new TransactionBuilder(sourceAccount, {
+        fee: '100',
+        networkPassphrase: this.networkPassphrase,
+      })
+        .addOperation(contract.call('issue_certificate', ...args))
+        .setTimeout(30)
+        .build();
+
+      transaction.sign(issuerKeypair);
+
+      const result = await this.server.sendTransaction(transaction);
+
+      if (result.status !== 'PENDING') {
+        throw new Error(`Transaction failed: ${result.status}`);
+      }
+
+      const txResponse = await this.pollTransaction(result.hash);
+
+      if (txResponse.status !== 'SUCCESS') {
+        throw new Error(`Transaction failed: ${txResponse.status}`);
+      }
+
+      return result.hash;
+    } catch (error: any) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Issue certificate ${id} failed: ${message}`);
+      return null;
     }
     const latest = await this.getLatestLedger();
     this.metrics.lag = Math.max(0, latest - (this.checkpoint?.lastLedger ?? 0));
   }
 
-  private async fetchEventsWithRetry(
-    fromLedger: number,
-    toLedger?: number,
-  ): Promise<SorobanEvent[]> {
-    let attempt = 0;
-    while (true) {
-      try {
-        const filters = [
-          this.certificateContractId
-            ? { type: 'contract', contractIds: [this.certificateContractId] }
-            : null,
-          this.multisigContractId
-            ? { type: 'contract', contractIds: [this.multisigContractId] }
-            : null,
-          this.crlContractId
-            ? { type: 'contract', contractIds: [this.crlContractId] }
-            : null,
-        ].filter(Boolean);
-        const response = await this.server.getEvents({
-          startLedger: fromLedger,
-          endLedger: toLedger,
-          filters: filters.length > 0 ? filters : undefined,
-          limit: 200,
-        });
-        const rawEvents: any[] = response?.events ?? [];
-        return rawEvents.map((e) => ({
-          ledger: Number(e.ledger),
-          txHash: String(e.txHash ?? ''),
-          contractId: String(e.contractId ?? ''),
-          topic: (e.topic ?? []).map((t: any) => String(t)),
-          value: e.value,
-          closedAt: String(e.closedAt ?? new Date().toISOString()),
-        }));
-      } catch (error: any) {
-        attempt += 1;
-        this.metrics.retries += 1;
-        if (attempt > this.indexerOptions.maxRetries) {
-          const message =
-            error instanceof Error ? error.message : String(error);
-          this.logger.error(
-            `Soroban event fetch failed after ${attempt} attempts: ${message}`,
-          );
-          throw error;
-        }
-        const delay =
-          this.indexerOptions.retryBaseDelayMs * Math.pow(2, attempt - 1);
-        this.logger.warn(
-          `Soroban event fetch retry ${attempt} in ${delay}ms: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-        await new Promise((resolve) => setTimeout(resolve, delay));
+  /**
+   * Revoke a certificate on-chain.
+   *
+   * The transaction is signed by the issuer's configured keypair. If no
+   * keypair is configured for the issuer, revocation fails rather than
+   * falling back to the admin key.
+   *
+   * @returns the Soroban transaction hash once the ledger confirms the
+   *   transaction with `SUCCESS`, or `null` when revocation failed.
+   */
+  async revokeCertificate(
+    id: string,
+    issuerAddress: string,
+    reason?: string,
+  ): Promise<string | null> {
+    try {
+      if (!this.certificateContractId) {
+        throw new Error('Certificate contract ID not configured.');
       }
     }
   }
 
-  private async getLatestLedger(): Promise<number> {
-    if (!this.server) {
-      throw new Error('Soroban server not initialized');
-    }
-    const response = await this.server.getLatestLedger();
-    return Number(response?.sequence ?? response?.latestLedger ?? 0);
-  }
+      const contract = new Contract(this.certificateContractId);
+
+      const issuerKeypair = this.getKeypair(issuerAddress);
+      if (!issuerKeypair) {
+        this.logger.error(
+          `Cannot revoke certificate ${id}: no signing key configured for issuer ${issuerAddress}.`,
+        );
+        return null;
+      }
+
+      const sourceAccount = await this.server.getAccount(
+        issuerKeypair.publicKey(),
+      );
+
+      const args = [
+        nativeToScVal(id),
+        reason ? nativeToScVal(reason) : nativeToScVal(null),
+      ];
+
+      const transaction = new TransactionBuilder(sourceAccount, {
+        fee: '100',
+        networkPassphrase: this.networkPassphrase,
+      })
+        .addOperation(contract.call('revoke_certificate', ...args))
+        .setTimeout(30)
+        .build();
 
   private eventId(event: SorobanEvent): string {
     return `${event.ledger}:${event.txHash}:${event.contractId}:${event.topic.join(',')}`;
@@ -446,202 +520,38 @@ export class SorobanService implements OnModuleInit, OnModuleDestroy {
         );
         await new Promise((resolve) => setTimeout(resolve, delay));
       }
+
+      const txResponse = await this.pollTransaction(result.hash);
+
+      if (txResponse.status !== 'SUCCESS') {
+        throw new Error(`Transaction failed: ${txResponse.status}`);
+      }
+
+      return result.hash;
+    } catch (error: any) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Revoke certificate ${id} failed: ${message}`);
+      return null;
     }
   }
 
   /**
-   * Reconciliation path for database records whose on-chain outcome is missing
-   * or inconsistent. The caller provides the records to check and a verifier
-   * that resolves the on-chain state for each record.
+   * Poll for transaction confirmation
    */
-  async reconcileRecords(
-    records: Array<{ id: string; txHash?: string; expected?: unknown }>,
-    verify: (record: { id: string; txHash?: string; expected?: unknown }) => Promise<{
-      found: boolean;
-      consistent: boolean;
-      message?: string;
-    }>,
-  ): Promise<ReconciliationReport> {
-    const report: ReconciliationReport = {
-      checked: 0,
-      missing: 0,
-      inconsistent: 0,
-      failures: 0,
-      details: [],
-    };
-    for (const record of records) {
-      report.checked += 1;
-      try {
-        const result = await verify(record);
-        if (!result.found) {
-          report.missing += 1;
-          report.details.push({
-            id: record.id,
-            txHash: record.txHash,
-            issue: 'missing',
-            message: result.message,
-          });
-        } else if (!result.consistent) {
-          report.inconsistent += 1;
-          report.details.push({
-            id: record.id,
-            txHash: record.txHash,
-            issue: 'inconsistent',
-            message: result.message,
-          });
-        }
-      } catch (error: any) {
-        report.failures += 1;
-        this.metrics.reconciliationFailures += 1;
-        report.details.push({
-          id: record.id,
-          txHash: record.txHash,
-          issue: 'rpc_error',
-          message: error instanceof Error ? error.message : String(error),
-        });
+  private async pollTransaction(transactionHash: string): Promise<any> {
+    const maxAttempts = 30;
+    const delayMs = 1000;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const response = await this.server.getTransaction(transactionHash);
+
+      if (response.status === 'SUCCESS' || response.status === 'FAILED') {
+        return response;
       }
-    }
-    return report;
-  }
 
-  async deployContract(
-    wasmHash: string,
-    adminAddress?: string,
-  ): Promise<ContractDeploymentResult> {
-    if (!this.server || !this.adminKeypair) {
-      throw new Error('Soroban service not initialized');
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
-    const sourceAccount = await this.server.getAccount(this.adminKeypair.publicKey());
-    const contract = new Contract(wasmHash);
-    const operation = contract.call(
-      'deploy',
-      nativeToScVal(adminAddress ? Address.fromString(adminAddress) : this.adminKeypair.publicKey()),
-    );
-    const tx = new TransactionBuilder(
-      sourceAccount,
-      {
-        fee: '1000000',
-        networkPassphrase: this.networkPassphrase,
-      },
-    )
-      .addOperation(operation)
-      .setTimeout(30)
-      .build();
-    tx.Sign(this.adminKeypair);
-    const result = await this.server.sendTransaction(tx);
-    return {
-      contractId: wasmHash,
-      transactionHash: result?.hash ?? '',
-      successful: result?.status === 'SUCCESS',
-    };
-  }
 
-  async getCertificate(id: string): Promise<CertificateContractData | null> {
-    if (!this.server || !this.certificateContractId) {
-      return null;
-    }
-    const contract = new Contract(this.certificateContractId);
-    const source = await this.server.getAccount(this.adminKeypair.publicKey());
-    const tx = new TransactionBuilder(
-      source,
-      {
-        fee: '1000000',
-        networkPassphrase: this.networkPassphrase,
-      },
-    )
-      .addOperation(contract.call('get_certificate', nativeToScVal(id)))
-      .setTimeout(30)
-      .build();
-    const sim = await this.server.simulateTransaction(tx);
-    const ret = sim?.result?.returnValue;
-    if (!ret) {
-      return null;
-    }
-    const native = scValToNative(ret) as any;
-    if (!native) {
-      return null;
-    }
-    return {
-      id: String(native.id ?? id),
-      issuer: String(native.issuer ?? ''),
-      owner: String(native.owner ?? ''),
-      status: String(native.status ?? ''),
-      metadataUri: String(native.metadata_uri ?? native.metadataUri ?? ''),
-      issuedAt: Number(native.issued_at ?? native.issuedAt ?? 0),
-      expiresAt:
-        native.expires_at !== undefined
-          ? Number(native.expires_at)
-          : native.expiresAt !== undefined
-            ? Number(native.expiresAt)
-            : undefined,
-    };
-  }
-
-  async getMultisigRequest(id: string): Promise<MultisigRequest | null> {
-    if (!this.server || !this.multisigContractId) {
-      return null;
-    }
-    const contract = new Contract(this.multisigContractId);
-    const source = await this.server.getAccount(this.adminKeypair.publicKey());
-    const tx = new TransactionBuilder(
-      source,
-      {
-        fee: '1000000',
-        networkPassphrase: this.networkPassphrase,
-      },
-    )
-      .addOperation(contract.call('get_request', nativeToScVal(id)))
-      .setTimeout(30)
-      .build();
-    const sim = await this.server.simulateTransaction(tx);
-    const ret = sim?.result?.returnValue;
-    if (!ret) {
-      return null;
-    }
-    const native = scValToNative(ret) as any;
-    if (!native) {
-      return null;
-    }
-    return {
-      id: String(native.id ?? id),
-      issuer: String(native.issuer ?? ''),
-      recipient: String(native.recipient ?? ''),
-      metadata: String(native.metadata ?? ''),
-      proposer: String(native.proposer ?? ''),
-      approvals: (native.approvals ?? []).map((a: any) => String(a)),
-      rejections: (native.rejections ?? []).map((a: any) => String(a)),
-      createdAt: Number(native.created_at ?? native.createdAt ?? 0),
-      expiresAt: Number(native.expires_at ?? native.expiresAt ?? 0),
-      status: String(native.status ?? ''),
-    };
-  }
-
-  async isContractId(value: string): boolean {
-    try {
-      return StrKey.isValidContract(value);
-    } catch {
-      return false;
-    }
-  }
-
-  async getContractValue(contractId: string, method: string, args: xdr.ScVal[] = []): Promise<unknown> {
-    if (!this.server) {
-      throw new Error('Soroban server not initialized');
-    }
-    const contract = new Contract(contractId);
-    const source = await this.server.getAccount(this.adminKeypair.publicKey());
-    const tx = new TransactionBuilder(
-      source,
-      {
-        fee: '1000000',
-        networkPassphrase: this.networkPassphrase,
-      },
-    )
-      .addOperation(contract.call(method, ...args))
-      .setTimeout(30)
-      .build();
-    const sim = await this.server.simulateTransaction(tx);
-    const ret = sim?.result?.returnValue;
-    return ret ? scValToNative(ret) : null;
+    throw new Error(`Transaction ${transactionHash} timed out waiting for confirmation`);
   }
 }
