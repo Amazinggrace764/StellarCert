@@ -1,24 +1,21 @@
 {
   "default_branch": "main",
   "branches": [
-    "fix/issue-104-tsconfig-app-json-omits-nounusedlocals",
-    "fix/issue-127-ssrf-utils-spec-ts-fails-typecheck-npm-run",
+    "fix/issue-54-issuecertificate-tsx-component-has-a-broken",
+    "fix/issue-56-socket-token-rotation-relies-on-a-same-tab",
     "main",
-    "origin",
-    "security/issue-126-legacy-forroutes-wildcards-emit-five"
+    "origin"
   ],
   "parent": {
-    "fix/issue-104-tsconfig-app-json-omits-nounusedlocals": "main",
-    "fix/issue-127-ssrf-utils-spec-ts-fails-typecheck-npm-run": "main",
+    "fix/issue-54-issuecertificate-tsx-component-has-a-broken": "main",
+    "fix/issue-56-socket-token-rotation-relies-on-a-same-tab": "main",
     "main": null,
-    "origin": "main",
-    "security/issue-126-legacy-forroutes-wildcards-emit-five": "main"
+    "origin": "main"
   },
   "order": [
     "main",
-    "fix/issue-104-tsconfig-app-json-omits-nounusedlocals",
-    "fix/issue-127-ssrf-utils-spec-ts-fails-typecheck-npm-run",
-    "origin",
-    "security/issue-126-legacy-forroutes-wildcards-emit-five"
+    "fix/issue-54-issuecertificate-tsx-component-has-a-broken",
+    "fix/issue-56-socket-token-rotation-relies-on-a-same-tab",
+    "origin"
   ]
 }
