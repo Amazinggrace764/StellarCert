@@ -6,8 +6,8 @@
  * application.
  *
  * Usage:
- *   npx typeorm migration:run   -d dist/database/data-source.js
- *   npx typeorm migration:revert -d dist/database/data-source.js
+ *   nzx typeorm migration:run   -d dist/database/data-source.js
+ *   nzx typeorm migration:revert -d dist/database/data-source.js
  *
  * Exactly one DataSource export: the TypeORM CLI rejects a file that exports
  * the same instance both as a named export and as default ("must contain only
@@ -66,6 +66,7 @@ export const AppDataSource = new DataSource({
   entities: isCompiledJs
     ? [path.join(__dirname, '../**/*.entity.js')]
     : [path.join(__dirname, '../**/*.entity.ts')],
+  // Migrations live in database/migrations (both src/ and dist/).
   migrations: isCompiledJs
     ? [path.join(__dirname, './migrations/*.js')]
     : [path.join(__dirname, './migrations/*.ts')],
