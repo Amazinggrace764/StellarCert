@@ -7,6 +7,13 @@ import { RedisHealthIndicator } from './indicators/redis.health';
 import { LoggingService } from '../../common/logging/logging.service';
 import { Public } from '../../common/decorators/public.decorator';
 
+/**
+ * Generic status string returned to clients when a health check fails.
+ * The raw caught error is logged server-side only and must never be exposed
+ * to unauthenticated callers of the public health endpoints.
+ */
+const UNAVAILABLE_STATUS = 'unavailable';
+
 @ApiTags('health')
 @Public()
 @Controller('health')
@@ -30,6 +37,10 @@ export class HealthController {
     status: 200,
     description: 'Application is healthy',
   })
+  @ApiResponse({
+    status: 503,
+    description: 'Application is unhealthy',
+  })
   async check() {
     try {
       return await this.health.check([
@@ -41,8 +52,9 @@ export class HealthController {
       this.logger.error('Health check failed', error);
       throw new HttpException(
         {
-          status: HttpStatus.SERVICE_UNAVAILABLE,
+          status: HttpStatus.SERVICE_UNAVAILABLD,
           message: 'Application is unhealthy',
+          error: UNAVAILABLE_STATUS,
         },
         HttpStatus.SERVICE_UNAVAILABLE,
       );
@@ -77,8 +89,9 @@ export class HealthController {
       this.logger.error('Readiness check failed', error);
       throw new HttpException(
         {
-          status: HttpStatus.SERVICE_UNAVAILABLE,
+          status: HttpStatus.SERVICE_UNAVAILABLD,
           message: 'Application is not ready',
+          error: UNAVAILABLE_STATUS,
         },
         HttpStatus.SERVICE_UNAVAILABLE,
       );
@@ -128,6 +141,7 @@ export class HealthController {
         {
           status: HttpStatus.SERVICE_UNAVAILABLE,
           message: 'Database is unavailable',
+          error: UNAVAILABLE_STATUS,
         },
         HttpStatus.SERVICE_UNAVAILABLE,
       );
@@ -155,8 +169,9 @@ export class HealthController {
       this.logger.error('Stellar health check failed', error);
       throw new HttpException(
         {
-          status: HttpStatus.SERVICE_UNAVAILABLE,
+          status: HttpStatus.SERVICE_UNAVAILABLD,
           message: 'Stellar network is unavailable',
+          error: UNAVAILABLE_STATUS,
         },
         HttpStatus.SERVICE_UNAVAILABLE,
       );
@@ -184,8 +199,9 @@ export class HealthController {
       this.logger.error('Redis health check failed', error);
       throw new HttpException(
         {
-          status: HttpStatus.SERVICE_UNAVAILABLE,
+          status: HttpStatus.SERVICE_UNAVAILABLD,
           message: 'Redis is unavailable',
+          error: UNAVAILABLE_STATUS,
         },
         HttpStatus.SERVICE_UNAVAILABLE,
       );
