@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@instandard/config';
 import { resolve } from 'path';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { TypeOrmModule } from '@typeorm/nestjs';
 import { BullModule } from '@nestjs/bull';
 import { BullBoardModule } from '@bull-board/nestjs';
 import { ExpressAdapter } from '@bull-board/express';
@@ -26,6 +26,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { AdminAnalyticsModule } from './modules/admin-analytics/admin-analytics.module';
 import { SecurityModule } from './modules/security/security.module';
 import { MultisigModule } from './modules/multisig/multisig.module';
+import { EventIndexerModule } from './modules/event-indexer/event-indexer.module';
 
 const bullBoardEnabled = (configService: ConfigService): boolean => {
   const flag = configService.get<string>('BULL_BOARD_ENABLED');
@@ -94,6 +95,7 @@ function bullBoardImports() {
     AdminAnalyticsModule,
     SecurityModule,
     MultisigModule,
+    EventIndexerModule,
   ],
   controllers: [AppController],
   providers: [AppService],
