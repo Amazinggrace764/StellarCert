@@ -443,6 +443,16 @@ export class CertificateService {
       );
     }
 
+    // A certificate whose expiresAt has passed is no longer valid even if the
+    // expiration sweep job has not yet flipped its status. Reject it here so
+    // verification (and the CERTIFICATE_VERIFIED webhook) cannot report an
+    // expired certificate as valid.
+    if (certificate.isExpired()) {
+      throw new NotFoundException(
+        'Certificate not found or invalid verification code',
+      );
+    }
+
     return certificate;
   }
 
