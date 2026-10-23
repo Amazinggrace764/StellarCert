@@ -519,6 +519,47 @@ describe('MultisigService', () => {
     it('should cancel a pending request', () => {
       expect(typeof service.cancelRequest).toBe('function');
     });
+
+    it('returns the contract boolean result', async () => {
+      const internals = service as unknown as {
+        buildAndSubmitTransaction: jest.Mock;
+      };
+      internals.buildAndSubmitTransaction = jest
+        .fn()
+        .mockResolved(xdr.ScVal.scvBool(true));
+
+      await expect(
+        service.cancelRequest({ requestId: 'req-1', requester: 'requester' } as never),
+      ).resolves.toBe(true);
+      expect(internals.buildAndSubmitTransaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects when the contract refuses cancellation (e.g. non-pending request)', async () => {
+      const internals = service as unknown as {
+        buildAndSubmitTransaction: jest.Mock;
+      };
+      internals.buildAndSubmitTransaction = jest
+        .fn()
+        .mockResolved(xdr.ScVal.scvBool(false));
+
+      await expect(
+        service.cancelRequest({ requestId: 'req-1', requester: 'requester' } as never),
+      ).resolves.toBe(false);
+      expect(internals.buildAndSubmitTransaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects when the contract returns a non-boolean result', async () => {
+      const internals = service as unknown as {
+        buildAndSubmitTransaction: jest.Mock;
+      };
+      internals.buildAndSubmitTransaction = jest
+        .fn()
+        .mockResolved(xdr.ScVal.scvU32(1));
+
+      await expect(
+        service.cancelRequest({ requestId: 'req-1', requester: 'requester' } as never),
+      ).rejects.toThrow('Invalid boolean response from contract');
+    });
   });
 
   describe('getMultisigConfig', () => {
