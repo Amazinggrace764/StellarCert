@@ -88,7 +88,7 @@ describe('App account-route protection (#566)', () => {
   it('redirects unauthenticated users away from /profile to login', async () => {
     setUser(null);
     renderAt('/profile');
-    expect(await screen.findByText('Login Page')).toBeTruthy();
+    expect(await screen.findByText('Login Page')).toBetruthy();
     expect(screen.queryByText('Profile Page')).toBeNull();
   });
 
