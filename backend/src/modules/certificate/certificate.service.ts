@@ -579,6 +579,72 @@ export class CertificateService {
     return savedCertificate;
   }
 
+  /**
+   * Reissue a certificate: create a replacement certificate and mark the
+   * original as revoked/superseded.
+   *
+   * The replacement is created through the normal `create` flow so it is
+   * indexed by `issuerId`/`recipientId` and therefore visible to
+   * `getCertificatesByIssuer` / `getCertificatesByRecipient`. The original
+   * is transitioned to `REVOKED` so it is no longer considered active,
+   * preserving "reissue/supersede" semantics (parent and child are never
+   * simultaneously valid).
+   *
+   * @throws NotFoundException when the original certificate does not exist
+   * @throws ConflictException when the original is already revoked
+   */
+  async reissue(
+    oldId: string,
+    dto: CreateCertificateDto,
+    userId: string,
+    ipAddress = 'unknown',
+    userAgent = 'unknown',
+    userRole?: string,
+  ): Promise<{ oldCertificate: Certificate; newCertificate: Certificate }> {
+    const oldCertificate = await this.findOne(oldId);
+    this.assertCertificateOwnership(oldCertificate, userId, userRole);
+
+    if (oldCertificate.status === CertificateStatus.REVOKED) {
+      throw new ConflictException(
+        `Certificate ${oldId} is already revoked and cannot be reissued`,
+      );
+    }
+
+    // Create the replacement through the standard flow so it is indexed by
+    // issuerId/recipientId and receives a fresh certificateId/verificationCode.
+    const newCertificate = await this.create(
+      dto,
+      undefined,
+      undefined,
+      ipAddress,
+      userAgent,
+    );
+
+    // Supersede the original: mark it revoked and record the successor.
+    oldCertificate.status = CertificateStatus.REVOKED;
+    oldCertificate.metadata = {
+      ...oldCertificate.metadata,
+      revocationReason: 'superseded',
+      supersededBy: newCertificate.id,
+      supersededAt: new Date(),
+    };
+    const savedOld = await this.certificateRepository.save(oldCertificate);
+
+    await this.webhooksService.triggerEvent(
+      WebhookEvent.CERTIFICATE_REVOKED,
+      savedOld.issuerId,
+      {
+        id: savedOld.id,
+        status: savedOld.status,
+        revocationReason: 'superseded',
+        supersededBy: newCertificate.id,
+        revokedAt: new Date(),
+      },
+    );
+
+    return { oldCertificate: savedOld, newCertificate };
+  }
+
   async freeze(
     id: string,
     reason?: string,

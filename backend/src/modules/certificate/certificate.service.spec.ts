@@ -368,21 +368,25 @@ describe('CertificateService', () => {
       } as unknown as Certificate;
       jest.spyOnObject(service, 'findOne').mockResolved(synced);
 
-      const result = await service.syncChain('cert-1');
+    it('does not increment the count when saving the certificate fails', async () => {
+      certificateRepository.save.mockRejectedValue(new Error('db'));
 
-      expect(result.alreadySynced).toBe(true);
-      expect(result.stellarTransactionHash).toBe('abc123');
-      expect(sorobanService.issueCertificate).not.toHaveBeenCalled();
-      expect(certificateRepository.update).not.toHaveBeenCalled();
+      await expect(service.issue(dto)).rejects.toThrow('db');
+      expect(issuersService.incrementCertificateCount).not.toHaveBeenCalled();
     });
+  });
 
     it('refuses to retry when Soroban is not configured', async () => {
       jest.spyOnObject(service, 'findOne').mockResolved(certificate);
 
-      await expect(service.syncChain('test-1')).rejects.toThrow(
-        /not configured/i,
+    beforeEach(() => {
+      jest.clearAllMocks();
+      sorobanService.isConfigured.mockReturnValue(false);
+      certificateRepository.create.mockImplementation((e: any) => e);
+      certificateRepository.save.mockImplementation((e: any) =>
+        Promise.resolve({ ...e, id: 'cert-new' }),
       );
-      expect(certificateRepository.update).not.toHaveBeenCalled();
+      certificateRepository.update.mockResolvedValue({ affected: 1 });
     });
 
     it('persists the transaction hash returned by a successful retry', async () => {

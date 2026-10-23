@@ -4,6 +4,7 @@ export enum CertificateStatus {
   EXPIRED = 'expired',
   PENDING = 'pending',
   FROZEN = 'frozen',
+  SUPERSEDED = 'superseded',
 }
 
 /**

@@ -11,6 +11,7 @@ import { WebhooksService } from '../../webhooks/webhooks.service';
 import { WebhookEvent } from '../../webhooks/entities/webhook-subscription.entity';
 import { UserRole } from '../../users/entities/user.entity';
 import { CertificateStatus } from '../constants/certificate-status.enum';
+import { CertificateIndexService } from './certificate-index.service';
 
 /**
  * Boundary contract for synchronizing revocations with the CRL.
@@ -76,6 +77,11 @@ export class CertificateRevocationService {
     };
 
     const savedCertificate = await this.certificateRepository.save(certificate);
+
+    await this.certificateIndexService.removeCertId(
+      savedCertificate.issuerId,
+      savedCertificate.id,
+    );
 
     this.logger.log(`Certificate revoked: ${id} with reason: ${reason}`);
 
