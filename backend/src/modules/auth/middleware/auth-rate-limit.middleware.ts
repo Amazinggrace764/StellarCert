@@ -20,27 +20,20 @@ export class AuthRateLimitMiddleware implements NestMiddleware {
     @Optional() private configService?: ConfigService,
   ) {}
 
+  /**
+   * Resolve the client IP for rate limiting.
+   *
+   * Express is configured with a bounded `trust proxy` setting (see
+   * `main.ts`), so `req.ip` is already the correct client address for trusted
+   * peers and the socket address for untrusted ones. We must NOT honor
+   * `x-forwarded-for` here - that is client-supplied and would let any client
+   * forge the rate-limit bucket.
+   */
   private getClientIp(req: Request): string {
-    const isTrustedProxy = Boolean(
-      this.configService?.get('TRUST_PROXY') ?? req.app?.get?.('trust proxy'),
-    );
-
-    if (isTrustedProxy) {
-      if (req.ip) {
-        return req.ip;
-      }
-      const forwarded = req.headers['x-forwarded-for'];
-      if (typeof forwarded === 'string' && forwarded.trim().length > 0) {
-        return forwarded.split(',')[0].trim();
-      } else if (Array.isArray(forwarded) && forwarded.length > 0) {
-        return forwarded[0].trim();
-      }
-    }
-
     return (
+      req.ip ||
       req.socket?.remoteAddress ||
       (req as any).connection?.remoteAddress ||
-      req.ip ||
       'unknown'
     );
   }
