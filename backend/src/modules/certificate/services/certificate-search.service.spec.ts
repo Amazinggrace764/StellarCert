@@ -47,9 +47,23 @@ describe('CertificateSearchService', () => {
     expect(service).toBeDefined();
   });
 
+  describe('escapeLikePattern', () => {
+    it('leaves plain terms unchanged', () => {
+      expect(escapeLikePattern('John')).toBe('John');
+    });
+
+    it('escapes percent, underscore and backslash', () => {
+      expect(escapeLikePattern('100%_off\\test')).toBe('100\\%\\_off\\\\test');
+    });
+
+    it('escapes a lone wildcard term', () => {
+      expect(escapeLikePattern('%')).toBe('\\%');
+    });
+  });
+
   describe('search', () => {
-    it('uses parameter binding for search query and filters', async () => {
-      const query = "test'; DROP TABLE certificates; --";
+    it('uses case-insensitive ILIKE with escaped wildcards and parameter binding', () => {
+      const query = "John'; DROP TABLE certificates; --";
       const filters = {
         issuerId: 'issuer-uuid-123',
         status: 'active',
@@ -67,8 +81,8 @@ describe('CertificateSearchService', () => {
       );
 
       expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
-        '(certificate.title LIKE :query OR certificate.recipientName LIKE :query OR certificate.recipientEmail LIKE :query)',
-        { query: `%${query}%` },
+        "(certificate.title ILIKE :query ESCAPE '\\\\' OR certificate.recipientName ILIKE :query ESCAPE '\\\\' OR certificate.recipientEmail ILIKE :query ESCAPE '\\\\')",
+        { query: `%\\${query}%` },
       );
 
       expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
