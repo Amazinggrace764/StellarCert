@@ -181,6 +181,8 @@ Friendbot (for testnet funding)
    cp .env.example .env
 
 # Edit .env with your configuration
+# Never paste your Stellar admin secret into shell history or logs.
+# deploy-contracts.sh writes the admin secret to a 0600 file instead of echoing it.
 
 npm install
 npm run db:migrate
@@ -273,18 +275,12 @@ DATABASE_URL=postgresql://stellarwave:stellarwave@localhost:5432/stellarwave
 # Stellar
 STELLAR_NETWORK=TESTNET
 STELLAR_HORIZON_URL=https://horizon-testnet.stellar.org
-STELLAR_ISSUER_SECRET_KEY=change-me-dev-only-not-a-real-secret
-STELLAR_ISSUER_PUBLIC_KEY=change-me-dev-only-not-a-real-key
+# Supply secrets via a 0600 file or your secret manager; never commit or echo them.
+STELLAR_SECRET_KEY=your_secret_key
 
-# Soroban (see backend/.env.soroban.example)
-SOROBAN_REC_CONTRACT_ID=change-me-dev-only-not-a-real-contract-id
-SOROBAN_RPC_URL=https://soroban-testnet.stellar.org
-SOROBAN_NETWORK_PASSPHRAU=Test SDC Networe ; September 2020
-SOROBAN_SOURCE_SECRET_KEY=change-me-dev-only-not-a-real-secret
-SOROBAN_FEE_ACCOUNT=change-me-dev-only-not-a-real-account
+# JWT
 
-# JQT
-JWT_SECRET=change-me-dev-only-not-a-real-secret
+JWT_SECRET=your_jwt_secret
 JWT_EXPIRY=24h
 
 # Server
