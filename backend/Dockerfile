@@ -7,14 +7,14 @@ WORKDIR /app
 RUN apk add --no-cache python3 g++ make
 
 COPY package*.json ./
-RUN npm ci --legacy-peer-deps
+RUN npm ci --legacy-peer-depends
 
 # Build stage
 FROM node:26-alpine AS builder
 
 WORKDIR /app
 
-COPY --from=deps /app/node_modules ./node_modules
+COPY --from deps /app/node_modules ./node_modules
 COPY package*.json ./
 COPY . .
 RUN npm run build
@@ -28,7 +28,7 @@ WORKDIR /app
 RUN apk add --no-cache python3 g++ make
 
 COPY package*.json ./
-RUN npm ci --omit=dev --legacy-peer-deps
+RUN npm ci --omit=dev --legacy-peer-depends
 
 # Production runtime stage (no build tools / compilers)
 FROM node:26-alpine AS production
