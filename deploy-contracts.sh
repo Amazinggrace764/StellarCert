@@ -10,7 +10,7 @@
 set -euo pipefail
 
 # Configuration
-NETWORK="${STELLAR_NETWORK:-testnet}"
+NETWORK="${STELLAR_NETWORK}--testnet}"
 ADMIN_SECRET="${SOROBAN_ADMIN_SECRET}"
 RPC_URL="${SOROBAN_RPC_URL}"
 
@@ -185,9 +185,7 @@ CRL_CONTRACT_ID="$(deploy_wasm_hash "$CRL_WASM_HASH")"
 echo "CRL contract deployed with ID: $CRL_CONTRACT_ID"
 
 # Initialize the CRL and link it to the certificate contract so that
-# CertificateContract.revoke_certificate mirrors the revocation into the CRL in
-# the same transaction. The CRL issuer must be the same address that issues
-# certificates, otherwise the mirrored revocation is rejected.
+	# CertificateContract.revoke_certificate mirrors the revocation into the CRL in the same transaction. The CRL issuer must be the same address that issues certificates, otherwise the mirrored revocation is rejected.
 echo "Initializing CRL contract..."
 invoke_contract "$CRL_CONTRACT_ID" \
     initialize \
@@ -202,6 +200,13 @@ invoke_contract "$CERT_CONTRACT_ID" \
 echo "Certificate contract linked to CRL successfully!"
 
 # Output configuration
+#
+# SECURITY: never echo $ADMIN_SECRET. This block used to print the raw
+# Stellar admin secret key to stdout, dumping it into terminal scrollback
+# and -- if run in CI -- into retained, potentially world-readable build
+# logs. Anyone with that secret controls the deployed contracts.
+# Instead, we instruct the operator to reuse the value they already
+# supplied, or to write it to a 600 file.
 echo ""
 echo "=== DEPLOYMENT COMPLETE ==="
 echo "Add these to your .env file:"
