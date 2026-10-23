@@ -97,52 +97,21 @@ export class AuthRateLimitMiddleware implements NestMiddleware {
   }
 
   /**
-   * Derive the client IP from trusted proxy configuration. The X-Forwarded-For
-   * header is only honoured when the immediate peer (socket remote address) is
-   * in the trusted-proxy list. Otherwise the socket address is used, so an
-   * attacker rotating the header cannot bypass the limit.
+   * Resolve the client IP for rate limiting.
+   *
+   * Express is configured with a bounded `trust proxy` setting (see
+   * `main.ts`), so `req.ip` is already the correct client address for trusted
+   * peers and the socket address for untrusted ones. We must NOT honor
+   * `x-forwarded-for` here - that is client-supplied and would let any client
+   * forge the rate-limit bucket.
    */
   private getClientIp(req: Request): string {
-    const socketAddress =
+    return (
+      req.ip ||
       req.socket?.remoteAddress ||
       (req as any).connection?.remoteAddress ||
-      req.ip ||
-      'unknown';
-
-    const peerAddress =
-      req.socket?.remoteAddress || (req as any).connection?.remoteAddress;
-
-    const peerIsTrusted = isTrustedProxyAddress(
-      peerAddress,
-      this.trustedProxies,
+      'unknown'
     );
-
-    if (!peerIsTrusted) {
-      return socketAddress;
-    }
-
-    // Peer is a trusted proxy - trust the forwarded headers. When Express has
-    // already resolved req.ip via its trust-proxy setting, prefer that.
-    if (req.ip && req.ip !== socketAddress) {
-      return req.ip;
-    }
-
-    const forwarded = req.headers['x-forwarded-for'];
-    let candidate: string | undefined;
-    if (typeof forwarded === 'string') {
-      candidate = forwarded.split(',')[0];
-    } else if (Array.isArray(forwarded) && forwarded.length > 0) {
-      candidate = forwarded[0];
-    }
-
-    if (candidate) {
-      const sanitized = sanitizeForwardedIp(candidate);
-      if (sanitized) {
-        return sanitized;
-      }
-    }
-
-    return socketAddress;
   }
 
   async use(req: Request, res: Response, next: NextFunction): Promise<void> {
