@@ -64,6 +64,17 @@ export class AuthService {
       throw new ForbiddenException('Account is deactivated');
     }
 
+    // Block full authentication until the email address has been verified.
+    // Without this check a user could signup with someone else's address and
+    // operate the entire authenticated API without ever proving ownership.
+    const isEmailVerified =
+      user.isEmailVerified ?? user.emailVerified ?? false;
+    if (!isEmailVerified) {
+      throw new ForbiddenException(
+        'Email verification required. Please verify your email before logging in.',
+      );
+    }
+
     // If 2FA is enabled, issue a short-lived pre-auth token instead of a full access token
     if (user.twoFactorEnabled) {
       const preAuthToken = this.jwtService.sign(
@@ -95,7 +106,7 @@ export class AuthService {
         firstName: user.firstName,
         lastName: user.lastName,
         role: user.role,
-        isEmailVerified: user.isEmailVerified ?? user.emailVerified ?? false,
+        isEmailVerified: isEmailVerified,
       },
     };
   }
@@ -154,6 +165,15 @@ export class AuthService {
       throw new UnauthorizedException('User not found or inactive');
     }
 
+    // Keep the 2FA completion path consistent with login: no full tokens
+    // for accounts that have not verified their email.
+    const isEmailVerified = user.isEmailVerified ?? false;
+    if (!isEmailVerified) {
+      throw new ForbiddenException(
+        'Email verification required. Please verify your email before logging in.',
+      );
+    }
+
     const payloadForToken = {
       email: user.email,
       sub: user.id,
@@ -180,7 +200,7 @@ export class AuthService {
         firstName: user.firstName,
         lastName: user.lastName,
         role: user.role,
-        isEmailVerified: user.isEmailVerified ?? false,
+        isEmailVerified,
       },
     };
   }
@@ -194,21 +214,29 @@ export class AuthService {
       lastName: registerDto.lastName,
     });
 
-    const { user, tokens } = registrationResult;
+    const { user } = registrationResult;
 
-    // Return in the format expected by AuthResponseDto
+    // Do not issue access/refresh tokens at registration time. The account is
+    // PENDING_VERIFICATION and the email ownership has not been proven yet.
+    // Tokens are only minted by login / 2FA completion once the email is
+    // verified. The response shape is preserved for API compatibility, but the
+    // token fields are empty strings and the client is told to verify first.
+    // Any tokens that UsersService.register may have generated are discarded
+    // and never returned to the caller.
+    const isEmailVerified = user.isEmailVerified ?? false;
+
     return {
-      accessToken: tokens.accessToken,
-      refreshToken: tokens.refreshToken,
-      expiresIn: tokens.expiresIn,
-      requiresEmailVerification: !user.isEmailVerified,
+      accessToken: '',
+      refreshToken: '',
+      expiresIn: 0,
+      requiresEmailVerification: !isEmailVerified,
       user: {
         id: user.id,
         email: user.email,
         firstName: user.firstName,
         lastName: user.lastName,
         role: user.role,
-        isEmailVerified: user.isEmailVerified ?? false,
+        isEmailVerified,
       },
     };
   }
@@ -275,7 +303,7 @@ export class AuthService {
           firstName: user.firstName,
           lastName: user.lastName,
           role: user.role,
-          isEmailVerified: user.isEmailVerified ?? false,
+          isEmailVerified,
         },
       };
     } catch (error) {
@@ -284,6 +312,9 @@ export class AuthService {
       // blacklist check - into an indistinguishable 401, which made a broken
       // refresh path impossible to diagnose from the outside.
       if (error instanceof UnauthorizedException) {
+        throw error;
+      }
+      if (error instanceof ForbiddenException) {
         throw error;
       }
       this.logger.warn(
