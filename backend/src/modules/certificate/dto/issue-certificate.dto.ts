@@ -9,6 +9,7 @@ import {
   MaxLength,
   IsArray,
   IsNumber,
+  IsBoolean,
   Min,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -114,6 +115,7 @@ export class IssueCertificateDto {
     description: 'Skip Stellar transaction recording (default: false)',
   })
   @IsOptional()
+  @IsBoolean()
   skipStellar?: boolean;
 
   @ApiPropertyOptional({

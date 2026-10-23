@@ -7,12 +7,30 @@ import type { User } from './types';
  */
 type TokenRefreshCallback = (accessToken: string, user?: User | null) => void;
 
-let _onTokenRefreshed: TokenRefreshCallback | null = null;
-export const setTokenRefreshCallback = (cb: TokenRefreshCallback) => {
-  _onTokenRefreshed = cb;
+const _registeredCallbacks = new Set<TokenRefreshCallback>();
+
+/**
+ * Register a callback that runs whenever the access token is rotated by `apiClient`.
+ * Multiple consumers (AuthContext, NotificationContext) can subscribe; the
+ * previous single-callback API is preserved for compatibility. Returns an
+ * unsubscribe function.
+ */
+export const setTokenRefreshCallback = (cb: TokenRefreshCallback): (() => void) => {
+  _registeredCallbacks.add(cb);
+  return () => {
+    _registeredCallbacks.delete(cb);
+  };
 };
+
 export const notifyTokenRefreshed = (accessToken: string, user?: User | null) => {
-  _onTokenRefreshed?.(accessToken, user);
+  for (const cb of Array.from(_registeredCallbacks)) {
+    try {
+      cb(accessToken, user);
+    } catch (err) {
+      // A faulty consumer must not block others or the refresh flow.
+      console.error('Token refresh callback failed:', err);
+    }
+  }
 };
 
 let _inMemoryAccessToken: string | null = null;
