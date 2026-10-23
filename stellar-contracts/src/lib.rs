@@ -1,5 +1,5 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, IntoVal, String, Symbol, Val, Vec};
+use soroban_sdk::{contract, contractevent, contractimpl, Address, BytesN, Env, IntoVal, String, Symbol, Val, Vec};
 
 mod types;
 // Explicit re-exports replace `pub use types::*` to avoid ambiguous_glob_reexports
@@ -65,6 +65,97 @@ mod status_test;
 mod test;
 #[cfg(test)]
 mod transfer_security_test;
+
+// --- Contract events ---
+//
+// Declared with `#[contractevent]` so topics and payloads are typed and
+// checked at compile time (the tuple-topic `env.events().publish` form is
+// deprecated in soroban-sdk 27). The `#[topic]` fields become the event's
+// topics; the remaining fields are the data payload. The event name is the
+// struct name, which keeps the on-chain schema introspectable for indexers.
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CertificateIssuedEvent {
+    #[topic]
+    pub topic_id: String,
+    pub id: String,
+    pub issuer: Address,
+    pub owner: Address,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CertificateRevokedEvent {
+    #[topic]
+    pub topic_id: String,
+    pub id: String,
+    pub reason: String,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CertificateSuspendedEvent {
+    #[topic]
+    pub topic_id: String,
+    pub id: String,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CertificateReinstatedEvent {
+    #[topic]
+    pub topic_id: String,
+    pub id: String,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CertificateFrozenEvent {
+    #[topic]
+    pub topic_id: String,
+    pub id: String,
+    pub reason: String,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CertificateUnfrozenEvent {
+    #[topic]
+    pub topic_id: String,
+    pub id: String,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CertificateReissuedEvent {
+    #[topic]
+    pub topic_id: String,
+    pub id: String,
+    pub old_id: String,
+    pub issuer: Address,
+    pub owner: Address,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TransferAcceptedEvent {
+    #[topic]
+    pub topic_transfer_id: String,
+    pub transfer_id: String,
+    pub to_owner: Address,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TransferCompletedEvent {
+    #[topic]
+    pub topic_transfer_id: String,
+    pub transfer_id: String,
+    pub certificate_id: String,
+    pub from_owner: Address,
+    pub to_owner: Address,
+}
 
 #[contract]
 pub struct CertificateContract;

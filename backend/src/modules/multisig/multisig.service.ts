@@ -252,7 +252,7 @@ export class MultisigService implements OnModuleInit {
     if (!retval || retval.switch() !== xdr.ScValType.scvBool()) {
       throw new Error('Invalid boolean response from contract');
     }
-    return retval.bool().switch();
+    return retval.bool();
   }
 
   async initMultisigConfig(
@@ -593,6 +593,7 @@ export class MultisigService implements OnModuleInit {
           return {
             success: true,
             message: 'Request approved successfully',
+            final_status,
           };
         }
       }
@@ -665,6 +666,7 @@ export class MultisigService implements OnModuleInit {
           return {
             success: true,
             message: 'Request rejected successfully',
+            final_status,
           };
         }
       }
@@ -718,9 +720,9 @@ export class MultisigService implements OnModuleInit {
   ): Promise<IssueCertificateResponseDto> {
     try {
       this.assertInitialized();
-      const requesterKeyPair =
-        this.stellarService.getKeypairFromPublicKey(requesterPublicKey);
-      const accountResponse = await this.server.getAccount(requesterPublicKey);
+      const issuerKeyPair =
+        this.stellarService.getKeypairFromPublicKey(issuerPublicKey);
+      const accountResponse = await this.server.getAccount(issuerPublicKey);
       const sourceAccount = new Account(
         issuerPublicKey,
         accountResponse.sequenceNumber(),
@@ -767,9 +769,9 @@ export class MultisigService implements OnModuleInit {
   ): Promise<CancelRequestResponseDto> {
     try {
       this.assertInitialized();
-      const requesterKeyPair =
-        this.stellarService.getKeypairFromPublicKey(requesterPublicKey);
-      const accountResponse = await this.server.getAccount(requesterPublicKey);
+      const proposerKeyPair =
+        this.stellarService.getKeypairFromPublicKey(proposerPublicKey);
+      const accountResponse = await this.server.getAccount(proposerPublicKey);
       const sourceAccount = new Account(
         proposerPublicKey,
         accountResponse.sequenceNumber(),
@@ -933,7 +935,8 @@ export class MultisigService implements OnModuleInit {
           .build(),
       );
 
-      return this.parseBooleanResult(result.result?.retval);
+      const expired = this.parseBooleanResult(result.result?.retval);
+      return { expired };
     } catch (error) {
       this.logger.error(
         `Failed to check if request ${requestId} is expired`,
