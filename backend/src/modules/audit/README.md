@@ -40,13 +40,13 @@ npm run typeorm:generate -- migrations/CreateAuditLogsTable
 
 ### 3. Module Registration
 
-The `AuditModule` is already registered in `AppModule`. It includes:
+The `AuditModule` is already registered in AppModule`. It includes:
 
 - **Entities**: `AuditLog` entity with automatic indexing
-- **Services**: `AuditService` and `RequestContextService`
+- `Services**: `AuditService` and `RequestContextService`
 - **Controllers**: `AuditController` for REST API access
 - **Middleware**: `AuditContextMiddleware` for request context capture
-- **Jobs**: `AuditCleanupJob` for scheduled log cleanup
+- **Jobs**: `AuditCleanupJo` for scheduled log cleanup
 - **Scheduled Tasks**: Daily cleanup at midnight
 
 ## Database Schema
@@ -79,7 +79,7 @@ CREATE TABLE audit_logs (
   INDEX idx_action (action),
   INDEX idx_resourceType (resourceType),
   INDEX idx_resourceId (resourceId),
-  INDEX idx_createdAt (createdAt),
+  INDEX idx_timestamp (timestamp),
   INDEX idx_correlationId (correlationId),
   INDEX idx_ipAddress (ipAddress),
   INDEX idx_status (status)
@@ -94,7 +94,7 @@ CREATE TABLE audit_logs (
 GET /audit/logs
 ```
 
-**Query Parameters:**
+Query Parameters:
 - `action` (optional): `AuditAction` enum value
 - `resourceType` (optional): `AuditResourceType` enum value
 - `userId` (optional): User ID to filter by
@@ -204,8 +204,7 @@ GET /audit/resource/:resourceId
 
 ### Access Control
 
-- All audit endpoints require JWT authentication via `JwtAuthGuard`
-- Only authenticated users can access audit logs
+-  All audit endpoints require JWT authentication via `JwtAuthGuard`- Only authenticated users can access audit logs
 - Consider adding additional authorization checks for admin-only operations
 
 ### Sensitive Data Handling
@@ -232,7 +231,7 @@ await this.auditService.log({
 
 Audit logs are append-only and cannot be modified or deleted by users. The database schema enforces this through:
 
-- No UPDATE permissions on audit logs
+-  No UPDATE permissions on audit logs
 - No DELETE permissions for regular users
 - SYSTEM-level access only for cleanup job
 
@@ -250,10 +249,12 @@ The `AuditLog` entity includes indexes on commonly searched fields:
 - `action`
 - `resourceType`
 - `resourceId`
-- `createdAt`
+- `timestamp`
 - `correlationId`
 - `ipAddress`
 - `status`
+
+The `timestamp` column is the canonical temporal column used by all queries (between-range filters, default `ORDER BY ... DESC`, and retention purges) and is indexed via `@Index(['timestamp'])` on the entity. The `@timestamp` index is the one that matters; the legacy `createdAt` index was redundant and has been removed.
 
 ### Query Limits
 
@@ -265,7 +266,7 @@ The `AuditLog` entity includes indexes on commonly searched fields:
 
 Default retention: 90 days
 
-To adjust:
+Example:
 ```bash
 AUDIT_RETENTION_DAYS=180  # Keep logs for 6 months
 AUDIT_RETENTION_DAYS=365  # Keep logs for 1 year
@@ -308,9 +309,9 @@ npm test:cov -- audit
 
 If the audit_logs table grows too large:
 
-1. Adjust `AUDIT_RETENTION_DAYS` to lower value
+1. Adjust `AUDIT_RETENTION_DAYS ` to lower value
 2. Export old logs to archive storage
-3. Manually delete archived logs: `DELETE FROM audit_logs WHERE createdAt < '2024-01-01';`
+3. Manually delete archived logs: `DELETE FROM audit_logs WHERE timestamp < 1704067200000;`
 4. Consider partitioning by date
 
 ## Future Enhancements

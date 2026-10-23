@@ -20,6 +20,7 @@ export enum TransferStatus {
 
 @Entity('certificate_transfers')
 @Index(['certificateId'])
+@Index(['certificateId', 'status'])
 @Index(['fromEmail'])
 @Index(['toEmail'])
 @Index(['status'])

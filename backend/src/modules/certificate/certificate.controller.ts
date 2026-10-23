@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import {
   Controller,
   Get,
@@ -124,6 +125,8 @@ export class CertificateController {
   @ApiOperation({
     summary: 'Advanced certificate search with filters and pagination',
   })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
   async search(@Query() dto: SearchCertificatesDto) {
     return this.certificateService.search(dto);
   }
@@ -208,15 +211,19 @@ export class CertificateController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN, UserRole.ISSUER)
   @ApiOperation({ summary: 'List all certificates for a recipient email' })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
   async getByRecipient(
     @Param('email') email: string,
     @Query('page') page = 1,
     @Query('limit') limit = 10,
   ) {
+    const pageNum = Math.max(1, +page || 1);
+    const limitNum = Math.min(Math.max(1, +limit || 10), MAX_PAGE_LIMIT);
     return this.certificateService.getCertificatesByRecipient(
       email,
-      +page,
-      +limit,
+      pageNum,
+      limitNum,
     );
   }
 
@@ -224,15 +231,19 @@ export class CertificateController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN, UserRole.ISSUER)
   @ApiOperation({ summary: 'List all certificates issued by an issuer' })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
   async getByIssuer(
     @Param('issuerId', ParseUUIDPipe) issuerId: string,
     @Query('page') page = 1,
     @Query('limit') limit = 10,
   ) {
+    const pageNum = Math.max(1, +page || 1);
+    const limitNum = Math.min(Math.max(1, +limit || 10), MAX_PAGE_LIMIT);
     return this.certificateService.getCertificatesByIssuer(
       issuerId,
-      +page,
-      +limit,
+      pageNum,
+      limitNum,
     );
   }
 
@@ -248,7 +259,13 @@ export class CertificateController {
     @Query('page') page = 1,
     @Query('limit') limit = 10,
   ) {
-    return this.certificateService.getUserCertificates(userId, +page, +limit);
+    const pageNum = Math.max(1, +page || 1);
+    const limitNum = Math.min(Math.max(1, +limit || 10), MAX_PAGE_LIMIT);
+    return this.certificateService.getUserCertificates(
+      userId,
+      pageNum,
+      limitNum,
+    );
   }
 
   @Get('export')
@@ -265,6 +282,9 @@ export class CertificateController {
     @CurrentUser('id') currentUserId?: string,
     @CurrentUser('role') userRole?: string,
   ) {
+    if (limit !== undefined && limit !== null && Number.isNaN(+limit)) {
+      throw new BadRequestException('limit must be a number');
+    }
     const effectiveIssuerId =
       userRole === UserRole.ADMIN ? issuerId : (currentUserId ?? issuerId);
     const limitNum = limit
@@ -501,6 +521,13 @@ export class CertificateController {
     @CurrentUser('id') currentUserId?: string,
     @CurrentUser('role') userRole?: string,
   ) {
+    const requestedLimit = bulkExportDto.filters?.limit;
+    const requestedLimitNum = requestedLimit !== undefined ? +requestedLimit : undefined;
+    if (requestedLimitNum !== undefined && requestedLimitNum > MAX_EXPORT_LIMIT) {
+      throw new BadRequestException(
+        `limit exceeds maximum of ${MAX_EXPORT_LIMIT}`,
+      );
+    }
     const effectiveIssuerId =
       userRole === UserRole.ADMIN
         ? bulkExportDto.filters?.issuerId
@@ -531,6 +558,11 @@ export class CertificateController {
     @CurrentUser('id') currentUserId?: string,
     @CurrentUser('role') userRole?: string,
   ) {
+    if (filters?.limit !== undefined && filters.limit > MAX_EXPORT_LIMIT) {
+      throw new BadRequestException(
+        `limit exceeds maximum of ${MAX_EXPORT_LIMIT}`,
+      );
+    }
     const effectiveIssuerId =
       userRole === UserRole.ADMIN
         ? filters?.issuerId

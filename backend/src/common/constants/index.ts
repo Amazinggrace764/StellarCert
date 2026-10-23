@@ -1,7 +1,7 @@
 export * from './roles';
 export * from './error-codes';
 
-export const STELLAR_ADDRESS_REGEX = /^G[A-Z0-9]{55}$/;
+export const STELLAR_ADDRESS_REGEX= /^G[A-Z0-9]{55}$/;
 export const STELLAR_TRANSACTION_HASH_REGEX = /^[a-f0-9]{64}$/;
 
 export const API_PREFIX = 'api';
@@ -32,3 +32,11 @@ export const allowedImageMimeTypes = [
   'image/gif',
   'image/webp',
 ];
+
+// Audit log constants
+// The audit log table is queried, sorted and purged by the `bigint timestamp`
+// column (e.g. `timestamp BETWEEN ...`, `ORDER BY ... timestamp DESC`,
+// `timestamp <= cutoff`). The index must live on that column so those
+// hot-path queries do not fall back to sequential scans/sorts.
+// See `AuditLogEntity` for the corresponding `@Index(['timestamp'])` declaration.
+export const AUDIT_LOG_TIMESTAMP_COLUMN = 'timestamp';

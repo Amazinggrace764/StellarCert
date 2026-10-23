@@ -272,6 +272,21 @@ describe('AuditService', () => {
       expect(repository.delete).toHaveBeenCalled();
       expect(result).toBe(10);
     });
+
+    it('should delete by timestamp column using LessThanOrEqual', async () => {
+      const now = Date.now();
+      const days = 90;
+      const cutoff = now - days * 24 * 60 * 60 * 1000;
+
+      await service.cleanupOldLogs(days);
+
+      const deleteCall = (repository.delete as jest.Mock).mock.calls[0][0];
+      expect(deleteCall).toHaveProperty('timestamp');
+      expect(deleteCall).not.toHaveProperty('createdAt');
+      const operator = deleteCall.timestamp as any;
+      expect(operator.type).toBe('lessThanOrEqual');
+      expect(Number(operator.value)).toBeCloseTo(cutoff, 5000);
+    });
   });
 
   describe('search', () => {
@@ -295,6 +310,32 @@ describe('AuditService', () => {
         'DESC',
       );
       expect(result).toEqual({ data: [mockAuditLog], total: 1 });
+    });
+
+    it('should filter on timestamp column for date range', async () => {
+      const mockQueryBuilder = {
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
+      };
+
+      jest
+        .spyOn(repository, 'createQueryBuilder')
+        .mockReturnValue(mockQueryBuilder as any);
+
+      const from = new Date('2024-01-01T00:00:00Z');
+      const to = new Date('2024-01-31T23:59:59Z');
+      await service.search({ from, to });
+
+      const conditions = mockQueryBuilder.andWhere.mock.calls.map(
+        (call) => call[0] as string,
+      );
+      expect(conditions.some((c) => c.includes('audit.timestamp'))).toBe(
+        true,
+      );
+      expect(conditions.some((c) => c.includes('audit.createdAt'))).toBe(false);
     });
   });
 

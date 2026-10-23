@@ -14,14 +14,13 @@
       // Apply the persisted/system theme before the first paint to avoid a
       // flash of the wrong theme (FOUC). Mirrors ThemeContext's STORAGE_KEY
       // ('stellar-cert-theme') and prefers-color-scheme fallback.
-      (() => {
+      (function () {
         try {
-          const stored = localStorage.getItem("stellar-cert-theme");
-          const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-          const dark =
-            stored === "dark" || (stored !== "light" && systemDark);
-          if (dark) document.documentElement.classList.add("dark");
-        } catch (_) {
+          var stored = localStorage.getItem("stellar-cert-theme");
+          var systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+          var dark = stored === "dark" || (stored !== "light" && systemDark);
+          document.documentElement.classList.toggle("dark", dark);
+        } catch (e) {
           /* ignore storage/matchMedia access errors */
         }
       })();
