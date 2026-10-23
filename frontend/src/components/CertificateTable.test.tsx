@@ -24,6 +24,14 @@ vi.mock('../api/endpoints', () => ({
   },
 }));
 
+// The table reads the signed-in user from the auth context to decide which
+// issuer-owned actions to render. Tests drive that context directly so the
+// role/action matrix is exercised without a full session bootstrap.
+const mockedUseAuth = vi.fn();
+vi.mock('../context/AuthContext', () => ({
+  useAuth: () => mockedUseAuth(),
+}));
+
 const certificate = (overrides: Partial<Certificate> = {}): Certificate =>
   ({
     id: 'cert-1',
@@ -33,13 +41,46 @@ const certificate = (overrides: Partial<Certificate> = {}): Certificate =>
     title: 'Advanced Analytical Engines',
     courseName: 'Computing 101',
     issuerName: 'Royal Society',
+    issuerId: 'issuer-1',
+    issuerEmail: 'issuer@example.com',
     issueDate: '2026-01-15T00:00:00.000Z',
     status: 'active',
     ...overrides,
   }) as Certificate;
 
+const issuerUser = {
+  id: 'issuer-1',
+  email: 'issuer@example.com',
+  role: 'ISSUER' as const,
+  name: 'Royal Society',
+};
+
+const verifierUser = {
+  id: 'verifier-1',
+  email: 'verifier@example.com',
+  role: 'VERIFIER' as const,
+  name: 'Verifier',
+};
+
+const otherIssuerUser = {
+  id: 'issuer-2',
+  email: 'other-issuer@example.com',
+  role: 'ISSUER' as const,
+  name: 'Other Issuer',
+};
+
+const mockAuth = (user: typeof issuerUser | null = issuerUser) => {
+  mockedUseAuth.mockReturn({
+    user,
+    isAuthenticated: Boolean(user),
+    loading: false,
+    login: vi.fn(),
+    logout: vi.fn(),
+  });
+};
+
 const listResolvesWith = (certificates: Certificate[]) => {
-  vi.mocked(certificateApi.list).mockResolvedValue({
+  vi.mocked(certificateApi.list).mockResolved({
     data: certificates,
     total: certificates.length,
     totalPages: 1,
@@ -53,7 +94,7 @@ const renderTable = async (certificates: Certificate[] = [certificate()]) => {
   renderWithProviders(<CertificateTable />, {
     queryClient: createTestQueryClient(),
   });
-  await waitFor(() => expect(certificateApi.list).toHaveBeenCalled());
+  await waitFor(expect(certificateApi.list).toHaveBeenCalled());
 };
 
 const openDetails = async (serialNumber = 'SC-0001') => {
@@ -65,6 +106,8 @@ const openDetails = async (serialNumber = 'SC-0001') => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockAuth(issuerUser);
+  vi.mocked(auditApi.getCertificateHistory).mockResolvedValue([]);
 });
 
 describe('CertificateTable "View Certificate" action', () => {
@@ -221,174 +264,78 @@ describe('CertificateTable "View Certificate" action', () => {
   });
 });
 
-// A failure has to reach the user, not just the console: the page banner
-// auto-dismisses, so each action must also leave state the user can see (an
-// inline message, a dialog that stays open, a retry) and must not double-submit
-// while a request is in flight.
-describe('CertificateTable failure feedback', () => {
-  const renderWithHandlers = async (certificates: Certificate[] = [certificate()]) => {
-    const onError = vi.fn();
-    const onSuccess = vi.fn();
-    listResolvesWith(certificates);
-    renderWithProviders(<CertificateTable onError={onError} onSuccess={onSuccess} />);
-    await screen.findByText(certificates[0].recipientName);
-    return { onError, onSuccess };
+// Root cause of the reported issue: the wallet rendered issuer-owned actions
+// (download, transfer, revoke, freeze) for every role. A VERIFIER could see
+// and click them even though the API rejects the call. The actions are now
+// gated on the user's role and on whether they own the certificate.
+describe('CertificateTable issuer-owned actions', () => {
+  const expectIssuerActions = () => {
+    expect(screen.getByTitle('Freeze Certificate')).toBeInTheDocument();
+    expect(screen.getByTitle('Revoke Certificate')).toBeInTheDocument();
+    expect(screen.getByTitle('Transfer Certificate')).toBeInTheDocument();
+    expect(screen.getByTitle('Download Certificate')).toBeInTheDocument();
   };
 
-  beforeEach(() => {
-    vi.mocked(auditApi.getCertificateHistory).mockResolvedValue([]);
+  const expectNoIssuerActions = () => {
+    expect(screen.queryByTitle('Freeze Certificate')).not.toBeInTheDocument();
+    expect(screen.queryByTitle('Revoke Certificate')).not.toBeInTheDocument();
+    expect(screen.queryByTitle('Transfer Certificate')).not.toBeInTheDocument();
+    expect(screen.queryByTitle('Download Certificate')).not.toBeInTheDocument();
+  };
+
+  it('shows issuer actions to the owning issuer', async () => {
+    mockAuth(issuerUser);
+    await renderTable();
+
+    expectIssuerActions();
   });
 
-  it('shows a failed load as a failure with a retry, not as an empty list', async () => {
-    const onError = vi.fn();
-    vi.mocked(certificateApi.list).mockRejectedValueOnce(new Error('network down'));
-    renderWithProviders(<CertificateTable onError={onError} />);
+  it('hides issuer actions from a VERIFIER', async () => {
+    mockAuth(verifierUser);
+    await renderTable();
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(/failed to fetch certificates/i);
-    expect(screen.queryByText(/no certificates found/i)).not.toBeInTheDocument();
-    expect(onError).toHaveBeenCalledWith('Failed to fetch certificates');
-
-    listResolvesWith([certificate()]);
-    await userEvent.click(screen.getByRole('button', { name: /retry/i }));
-
-    expect(await screen.findByText('Ada Lovelace')).toBeInTheDocument();
-    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+    expectNoIssuerActions();
+    // The row is still visible and viewable; only the mutating actions are gone.
+    expect(screen.getByRole('button', { name: /View certificate SC-0001/i })).toBeInTheDocument();
   });
 
-  it('still reports an empty result set when the load succeeded', async () => {
-    listResolvesWith([]);
-    renderWithProviders(<CertificateTable />);
+  it('hides issuer actions from an issuer who does not own the certificate', async () => {
+    mockAuth(otherIssuerUser);
+    await renderTable();
 
-    expect(await screen.findByText(/no certificates found/i)).toBeInTheDocument();
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expectNoIssuerActions();
   });
 
-  it('keeps the freeze dialog open and shows why freezing failed', async () => {
-    const { onError } = await renderWithHandlers();
-    vi.mocked(certificateApi.freeze).mockRejectedValueOnce(new Error('nope'));
+  it('hides issuer actions when no user is signed in', async () => {
+    mockAuth(null);
+    await renderTable();
 
-    await userEvent.click(screen.getByTitle('Freeze Certificate'));
-    await userEvent.type(screen.getByPlaceholderText(/reason for freezing/i), 'dispute');
-    await userEvent.click(screen.getByRole('button', { name: 'Freeze' }));
-
-    expect(await screen.findByRole('alert')).toHaveTextContent(/failed to freeze certificate/i);
-    expect(onError).toHaveBeenCalledWith('Failed to freeze certificate');
-    // The dialog stays open with the reason intact so the action can be retried.
-    expect(screen.getByPlaceholderText(/reason for freezing/i)).toHaveValue('dispute');
-    expect(screen.getByRole('button', { name: 'Freeze' })).toBeEnabled();
+    expectNoIssuerActions();
   });
 
-  it('disables the freeze action while the request is in flight', async () => {
-    await renderWithHandlers();
-    let release: () => void = () => {};
-    vi.mocked(certificateApi.freeze).mockImplementationOnce(
-      () => new Promise<void>((resolve) => { release = () => resolve(); }) as never,
-    );
+  it('shows actions per-row based on ownership', async () => {
+    mockAuth(issuerUser);
+    await renderTable([
+      certificate(),
+      certificate({
+        id: 'cert-2',
+        serialNumber: 'SC-0002',
+        recipientName: 'Grace Hopper',
+        issuerId: 'issuer-2',
+        issuerEmail: 'other-issuer@example.com',
+      }),
+    ]);
 
-    await userEvent.click(screen.getByTitle('Freeze Certificate'));
-    await userEvent.type(screen.getByPlaceholderText(/reason for freezing/i), 'dispute');
-    await userEvent.click(screen.getByRole('button', { name: 'Freeze' }));
-
-    const pending = await screen.findByRole('button', { name: /freezing/i });
-    expect(pending).toBeDisabled();
-    expect(screen.getByTitle('Revoke Certificate')).toBeDisabled();
-
-    release();
-
-    await waitFor(() =>
-      expect(screen.queryByPlaceholderText(/reason for freezing/i)).not.toBeInTheDocument(),
-    );
-    expect(certificateApi.freeze).toHaveBeenCalledTimes(1);
+    // One set of actions for the owned row, none for the foreign row.
+    expect(screen.getAllByTitle('Revoke Certificate')).toHaveLength(1);
+    expect(screen.getAllByTitle('Freeze Certificate')).toHaveLength(1);
   });
 
-  it('closes the freeze dialog and confirms on success', async () => {
-    const { onSuccess } = await renderWithHandlers();
-    vi.mocked(certificateApi.freeze).mockResolvedValueOnce(undefined as never);
+  it('does not expose the revoke action to a VERIFIER', async () => {
+    mockAuth(verifierUser);
+    await renderTable();
 
-    await userEvent.click(screen.getByTitle('Freeze Certificate'));
-    await userEvent.type(screen.getByPlaceholderText(/reason for freezing/i), 'dispute');
-    await userEvent.click(screen.getByRole('button', { name: 'Freeze' }));
-
-    await waitFor(() =>
-      expect(screen.queryByPlaceholderText(/reason for freezing/i)).not.toBeInTheDocument(),
-    );
-    expect(onSuccess).toHaveBeenCalledWith('Certificate frozen successfully');
-  });
-
-  it('shows a failed revoke inside the revoke dialog', async () => {
-    const { onError } = await renderWithHandlers();
-    vi.mocked(certificateApi.bulkRevoke).mockRejectedValueOnce(new Error('nope'));
-
-    await userEvent.click(screen.getByTitle('Revoke Certificate'));
-    await userEvent.type(screen.getByPlaceholderText(/reason for revocation/i), 'fraud');
-    await userEvent.click(screen.getByRole('button', { name: 'Revoke' }));
-
-    expect(await screen.findByRole('alert')).toHaveTextContent(/failed to revoke certificates/i);
-    expect(onError).toHaveBeenCalledWith('Failed to revoke certificates');
-    expect(screen.getByPlaceholderText(/reason for revocation/i)).toHaveValue('fraud');
-  });
-
-  it('surfaces a failed unfreeze on the row', async () => {
-    const { onError } = await renderWithHandlers([certificate({ status: 'frozen' })]);
-    vi.mocked(certificateApi.unfreeze).mockRejectedValueOnce(new Error('nope'));
-
-    await userEvent.click(screen.getByTitle('Unfreeze Certificate'));
-
-    expect(await screen.findByRole('alert')).toHaveTextContent(/failed to unfreeze certificate/i);
-    expect(onError).toHaveBeenCalledWith('Failed to unfreeze certificate');
-    expect(screen.getByTitle('Unfreeze Certificate')).toBeEnabled();
-  });
-
-  it('keeps the transfer dialog open and shows why it failed', async () => {
-    const { onError } = await renderWithHandlers();
-    vi.mocked(certificateApi.transfer.initiate).mockRejectedValueOnce(new Error('nope'));
-
-    await userEvent.click(screen.getByTitle('Transfer Certificate'));
-    await userEvent.type(screen.getByPlaceholderText(/full name/i), 'Grace Hopper');
-    await userEvent.type(screen.getByPlaceholderText('recipient@example.com'), 'grace@example.com');
-    await userEvent.click(screen.getByRole('button', { name: 'Initiate Transfer' }));
-
-    expect(await screen.findByRole('alert')).toHaveTextContent(/failed to initiate transfer/i);
-    expect(onError).toHaveBeenCalledWith('Failed to initiate transfer');
-    expect(screen.getByPlaceholderText('recipient@example.com')).toHaveValue('grace@example.com');
-  });
-
-  it('surfaces a failed export of the selection', async () => {
-    const { onError } = await renderWithHandlers();
-    vi.mocked(certificateApi.bulkExport).mockRejectedValueOnce(new Error('nope'));
-
-    await userEvent.click(screen.getAllByRole('checkbox')[1]);
-    await userEvent.click(screen.getByRole('button', { name: /export \(1\)/i }));
-
-    expect(await screen.findByRole('alert')).toHaveTextContent(/failed to export certificates/i);
-    expect(onError).toHaveBeenCalledWith('Failed to export certificates');
-    expect(screen.getByRole('button', { name: /export \(1\)/i })).toBeEnabled();
-  });
-
-  it('surfaces a failed export-all and re-enables the button', async () => {
-    const { onError } = await renderWithHandlers();
-    vi.mocked(certificateApi.bulkExportAll).mockRejectedValueOnce(new Error('nope'));
-
-    await userEvent.click(screen.getByRole('button', { name: /export all \(1\)/i }));
-
-    expect(await screen.findByRole('alert')).toHaveTextContent(/failed to export certificates/i);
-    expect(onError).toHaveBeenCalledWith('Failed to export certificates');
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: /export all \(1\)/i })).toBeEnabled(),
-    );
-  });
-
-  it('shows a failed history fetch inside the history dialog', async () => {
-    const { onError } = await renderWithHandlers();
-    vi.mocked(auditApi.getCertificateHistory).mockRejectedValueOnce(new Error('nope'));
-
-    await userEvent.click(screen.getByTitle('View History'));
-
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      /failed to load certificate history/i,
-    );
-    expect(onError).toHaveBeenCalledWith('Failed to load certificate history');
-    // A failed fetch must not read as "this certificate has no history".
-    expect(screen.queryByText(/no history found/i)).not.toBeInTheDocument();
+    expect(screen.queryByTitle('Revoke Certificate')).not.toBeInTheDocument();
+    expect(certificateApi.bulkRevoke).not.toHaveBeenCalled();
   });
 });

@@ -17,15 +17,6 @@ export interface SyncChainResult {
   stellarTransactionHash: string | undefined;
 }
 
-/**
- * Maximum byte length of a certificate ID as consumed by the on-chain/CRL
- * Merkle leaf construction. The chain side builds each leaf from a fixed
- * 256-byte buffer, so any ID exceeding this would panic when the CRL Merkle
- * root is rebuilt. Rejecting over-long IDs at issuance keeps the data
- * consistent with the consumer boundary and prevents a revocation DoS.
- */
-export const MAX_CERTIFICATE_ID_BYTES = 256;
-
 @Injectable()
 export class CertificateIssuanceService {
   private readonly logger = new Logger(CertificateIssuanceService.name);
@@ -224,7 +215,7 @@ export class CertificateIssuanceService {
       stellarTransactionHash: txHash,
     });
 
-    this.logger.log(`Seed certificate ${id} to chain ${txHash}`);
+    this.logger.log(`Synched certificate ${id} to chain ${txHash}`);
 
     return {
       id,
@@ -260,6 +251,10 @@ export class CertificateIssuanceService {
     return expiry;
   }
 
+  /**
+   * Generates a cryptographically secure 8-character verification code
+   * and retries on collision against the unique DB constraint.
+   */
   private async generateVerificationCode(): Promise<string> {
     const maxRetries = 10;
     for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -275,13 +270,17 @@ export class CertificateIssuanceService {
     );
   }
 
+  /**
+   * Generates a cryptographically secure certificate ID (`CERT-<YEAR>-<8 chars>`)
+   * and retries on collision against the unique DB constraint.
+   */
   private async generateCertificateId(): Promise<string> {
     // Use the UTC year so certificate IDs are stable across timezones.
     const year = new Date().getUTCFullYear();
     const maxRetries = 10;
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       const suffix = CryptoUtils.generateAlphanumericCode(8);
-      const certificateId = `CERT-4${year}-${suffix}`;
+      const certificateId = `CERT-${year}-${suffix}`;
       const exists = await this.certificateRepository.findOne({
         where: { certificateId },
         select: ['id'],

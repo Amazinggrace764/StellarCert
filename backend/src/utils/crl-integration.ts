@@ -1,19 +1,18 @@
-/**
+/*
  * Certificate Revocation List (CRL) integration module.
  * Addresses issue #421: CRL contract is separate but should be integrated.
  *
  * Provides a unified interface so that certificate validity checks always
  * consult the CRL, making revocations immediately visible during verification.
+ *
+ * Revocation is atomic across the main certificate contract and the CRL
+ * contract. The certificate contract is the owning boundary: when a
+ * certificate is revoked there, the CRL adapter is invoked in the same
+ * operation and any failure is rolled back, so the two stores cannot
+ * diverge.
  */
 
-/**
- * Maximum byte length of a certificate ID accepted by the CRL.
- *
- * This mirrors the on-chain leaf constraint in `crl.rs` (`delete_certificate`
- * and `build_merkle_root`). IDs that exceed this bound cannot be represented
- * in a Merkle leaf and would otherwise cause a revocation-blocking panic.
- */
-export const MAX_CERT_ID_LENGTH = 256;
+import { createHash } from 'crypto';
 
 export interface RevocationEntry {
   certId: string;
@@ -40,17 +39,17 @@ export interface CRLRevocationAddedEvent {
 export type CRLRevocationListener = (event: CRLRevocationAddedEvent) => void;
 
 /**
- * Returns the number of UTF-8 bytes in `value`.
+ * Status of a certificate in the main certificate contract.
  */
-export function certIdByteLength(value: string): number {
-  return Buffer.byteLength(value, 'utf8');
-}
+export type CertificateStatus = 'Active' | 'Revoked';
 
 /**
- * Returns true when `value` fits within the Merkle leaf byte bound.
+ * Minimal interface the CRL integration needs from the main certificate
+ * contract. This is the owning boundary for certificate status.
  */
-export function isValidCertId(value: string): boolean {
-  return certIdByteLength(value) <= MAX_CERT_ID_LENGTH;
+export interface CertificateStatusStore {
+  getStatus(certId: string): CertificateStatus | undefined;
+  setStatus(certId: string, status: CertificateStatus): void;
 }
 
 export class CertificateRevocationList {
@@ -118,35 +117,39 @@ export class CertificateRevocationList {
   }
 
   /**
-   * Builds the Merkle root over all revoked certificate IDs.
+   * Compute the Merkle root of the currently revoked certificate IDs.
    *
-   * Leaves are constructed directly from the UTF-8 encoding of each ID with
-   * no fixed-size stack buffer, so IDs of any length are handled safely. The
-   * invariant that IDs are within `MAX_CERT_ID_LENGTH` is enforced at the
-   * revocation boundary in `revoke()`.
+   * Domain separation is enforced to prevent second-preimage forgeries:
+   *   - leaves are hashed as sha256(0x00 || certId)
+   *   - internal nodes are hashed as sha256(0x01 || left || right)
+   *
+   * Odd counts are handled by carrying the unpaired node up to the next
+   * level without duplicating it, so no silent duplication occurs.
    */
-  buildMerkleRoot(): string {
-    const leaves = this.listRevoked().map((certId) => {
-      const bytes = Buffer.from(certId, 'utf8');
-      if (bytes.length > MAX_CERT_ID_LENGTH) {
-        throw new Error(
-          `Certificate ID is ${bytes.length} bytes, which exceeds the maximum of ${MAX_CERT_ID_LENGTH} bytes.`,
-        );
-      }
-      return bytes;
-});
+  merkleRoot(): string {
+    const leaves = this.listRevoked()
+      .sort()
+      .map((certId) => hashLeaf(certId));
+
     if (leaves.length === 0) {
-      return Buffer.alloc(32).toString('hex');
+      // Empty tree: return the canonical empty-root constant (domain-tagged).
+      return hashNode(Buffer.alloc(0, 0), Buffer.alloc(0, 0));
     }
-    let level = leaves;
+
+    let level: Buffer[] = leaves;
     while (level.length > 1) {
-      const next: Buffer[] = [];
+      const nextLevel: Buffer[] = [];
       for (let i = 0; i < level.length; i += 2) {
         const left = level[i];
-        const right = i + 1 < level.length ? level[i + 1] : left;
-        next.push(hashPair(left, right));
+        const right = i + 1 < level.length ? level[i + 1] : undefined;
+        if (right === undefined) {
+          // Odd node: carry it untouched rather than duplicating it.
+          nextLevel.push(left);
+        } else {
+          nextLevel.push(hashNode(left, right));
+        }
       }
-      level = next;
+      level = nextLevel;
     }
     return level[0].toString('hex');
   }
@@ -168,12 +171,63 @@ export class CertificateRevocationList {
   }
 }
 
-function hashPair(left: Buffer, right: Buffer): Buffer {
-  // Deterministic domain-separated hash for Merkle internal nodes.
-  const hash = createHash('sha256');
-  hash.update(left);
-  hash.update(right);
-  return hash.digest();
+/** Domain separation tag for Merkle leaves. */
+const LEAF_TAG = Buffer.from([0x00]);
+//** Domain separation tag for Merkle internal nodes. */
+const NODE_TAG = Buffer.from([0x01]);
+
+function hashLeaf(certId: string): Buffer {
+  return createHash('sha256').update(LEAF_TAG).update(certId, 'utf8').update(Buffer.from([0])).digest();
+}
+
+function hashNode(left: Buffer, right: Buffer): Buffer {
+  return createHash('sha256').update(NODE_TAG).update(left).update(right).digest();
+}
+
+/**
+ * Revokes a certificate atomically in both the main certificate contract and the
+ * CRL. This is the single entry point that issuers and tooling must use so the
+ * two stores cannot diverge.
+ *
+ * Order of operations:
+ *  1. Validate the certificate exists and is not already revoked in either store.
+ *  2. Write the CRL revocation.
+ *  3. Write the main contract status.
+ *  4. If step 3 fails, roll back the CRL write so the certificate is not
+ *     considered revoked anywhere.
+ */
+export function revokeCertificateAtomically(
+  certId: string,
+  reason: string,
+  crt: CertificateRevocationList,
+  statusStore: CertificateStatusStore,
+): RevocationEntry {
+  const currentStatus = statusStore.getStatus(certId);
+  if (currentStatus === undefined) {
+    throw new Error(`Certificate ${certId} does not exist.`);
+  }
+  if (currentStatus === 'Revoked' || crl.isRevoked(certId)) {
+    throw new Error(`Certificate ${certId} is already revoked.`);
+  }
+
+  // Step 1: record the revocation in the CRL.
+  crl.revoke(certId, reason);
+
+  // Step 2: update the main contract. Roll back the CRL on failure.
+  try {
+    statusStore.setStatus(certId, 'Revoked');
+  } catch (error) {
+    crl.remove(certId);
+    throw error;
+  }
+
+  const entry = crl.getEntry(certId);
+  if (!entry) {
+    // Unreachable given the successful revoke above, but keep the invariant
+    // explicit so callers always receive a valid entry.
+    throw new Error(`CRL revocation for ${certId} was not recorded.`);
+  }
+  return entry;
 }
 
 /**

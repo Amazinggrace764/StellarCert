@@ -10,6 +10,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { Request } from 'express';
 import { isIP } from 'net';
+import { parseTrustedProxies } from '../../config/environment.config';
 
 /** Returned when no usable address can be determined for a request. */
 const UNKNOWN_IP = 'unknown';
@@ -87,6 +88,48 @@ function normaliseIp(value: unknown): string | undefined {
   return isIP(candidate) ? candidate : undefined;
 }
 
+/**
+ * Return true when `ip` is in the comma-separated trusted-proxy list.
+ *
+ * Supports both plain IPs and CIDR ranges (e.g. `10.0.0.0/8`). A CIDR entry
+ * is matched by comparing the network prefix of the candidate against the CIDR.
+ */
+function ipInTrustedList(ip: string, trusted: string[]): boolean {
+  const normalised = normaliseIp(ip);
+  if (!normalised) return false;
+
+  for (const entry of trusted) {
+    const trimmed = entry.trim();
+    if (!trimmed) continue;
+
+    if (trimmed.includes('/')) {
+      if (cidr4Contains(trimmed, normalised)) return true;
+    } else {
+      const normalisedEntry = normaliseIp(trimmed);
+      if (normalisedEntry && normalisedEntry === normalised) return true;
+    }
+  }
+
+  return false;
+}
+
+/** IPv4-only CIDR containment check (enough for the common load-balancer case). */
+function cidr4Contains(cidr: string, ip: string): boolean {
+  const [block, prefixRaw] = cidr.split('/');
+  const prefix = Number(prefixRaw);
+  if (!Number.isInteger(prefix) || prefix < 0 || prefix > 32) return false;
+
+  const blockIp = normaliseIp(block);
+  if (!blockIp || isIP(blockIp) !== 4) return false;
+  if (isIP(ip) !== 4) return false;
+
+  const mask = prefix === 0 ? 0 : (~0 << (32 - prefix)) >>> 0;
+  const toInt = (s: string) =>
+    s.split('.').reduce((acc, octet) => ((acc << 8) + Number(octet)) >>> 0, 0);
+
+  return (toInt(blockIp) & mask) === (toInt(ip) & mask);
+}
+
 @Injectable()
 export class IpRateLimitGuard implements CanActivate {
   /**
@@ -99,8 +142,7 @@ export class IpRateLimitGuard implements CanActivate {
   private readonly store: RateLimitStore;
   private readonly windowMs: number;
   private readonly maxRequests: number;
-  private readonly trustedProxyIps: Set<string>;
-  private readonly trustProxyHops: number;
+  private readonly trustedProxies: string[];
 
   constructor(
     private readonly configService: ConfigService,
@@ -118,16 +160,12 @@ export class IpRateLimitGuard implements CanActivate {
       100,
     );
 
-    // Empty by default: forwarded headers are ignored until an operator states
-    // which peers are allowed to set them.
-    this.trustedProxyIps = new Set(
-      this.configService
-        .get<string>('TRUSTED_PROXY_IPS', '')
-        .split(',')
-        .map((ip) => normaliseIp(ip))
-        .filter((is): ip is string => ip !== undefined),
+    // Share the same trust boundary as Express (`trust proxy`), so the
+    // guard and `req.ip` cannot disagree on who is a proxy. Defaults to
+    // loopback only.
+    this.trustedProxies = parseTrustedProxies(
+      this.configService.get<string>('TRUSTED_PROXIES'),
     );
-    this.trustProxyHops = this.configService.get<number>('TRUST_PROXY_HOPS', 0);
   }
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -169,73 +207,38 @@ export class IpRateLimitGuard implements CanActivate {
   /**
    * Resolve the address a request should be counted against (#727).
    *
-   * `X-Forwarded-For` and `X-Real-IP` are client-supplied, so they are only
-   * read when the immediate peer is a proxy this deployment actually runs. With
-   * no trusted proxies configured they are ignored entirely and the socket
-   * address is used, which is the safe default.
+   * @Express is configured with a bounded `trust proxy` setting (see
+   * `main.ts`), so `req.ip` is already the correct client address for trusted
+   * peers and the socket address for untrusted ones. We still fall back to
+   * the socket address when `req.ip` is missing or invalid.
    */
   private getClientIp(request: Request): string {
-    const peer =
+    const reqIp = normaliseIp(request.ip);
+    if (reqIp) {
+      // Only trust `req.ip` when it differs from the socket address (e.g.
+      // Express resolved a forwarded chain), or when the peer is trusted.
+      // Otherwise the socket address is authoritative.
+      const peer = normaliseIp(request.socket?.remoteAddress);
+      if (!peer || peer === reqIp || this.isTrustedPeer(peer)) {
+        return reqIp;
+      }
+    }
+
+    return (
       normaliseIp(request.socket?.remoteAddress) ??
       normaliseIp(request.connection?.remoteAddress) ??
-      UNKNOWN_IP;
-
-    if (!this.isTrustedPeer(peer)) {
-      return peer;
-    }
-
-    const chain = this.parseForwardedChain(request.headers['x-forwarded-for']);
-    if (chain.length > 0) {
-      // Determine how many hops from the right are trusted.
-      // If trustProxyHops > 0, trust that many hops (rightmost entries).
-      // Otherwise, walk right-to-left past IPs in trustedProxyIps.
-      if (this.trustProxyHops > 0) {
-        // The rightmost `trustProxyHops` entries are proxies; the client is the
-        // entry just left of them. If the chain is shorter, fall back to peer.
-        const clientIndex = chain.length - 1 - this.trustProxyHops;
-        if (clientIndex >= 0) return chain[clientIndex];
-        return peer;
-      }
-      for (let index = chain.length - 1; index >= 0; index -= 1) {
-        if (!this.isTrustedProxy(chain[index])) return chain[index];
-      }
-      return peer;
-    }
-
-    return normaliseIp(request.headers['x-real-ip']) ?? peer;
-  }
-
-  /**
-   * Parse an `X-Forwarded-For` header into validated addresses, left to right.
-   *
-   * A header containing anything that is not a valid IP is rejected wholesale
-   * rather than partially trusted.
-   */
-  private parseForwardedChain(header: unknown): string[] {
-    const raw = Array.isArray(header) ? header.join(',') : header;
-    if (typeof raw !== 'string' || raw.trim() === '') return [];
-
-    const parts = raw.split(',').map((part) => normaliseIp(part));
-    if (parts.some((part) => part === undefined)) return [];
-
-    return parts as string[];
+      UNKNOWN_IP
+    );
   }
 
   /**
    * Trusted peer check for the immediate socket connection.
    *
-   * A deployment may either list the proxy addresses explicitly or declare
-   * how many hops of proxies it operates. When hops are configured the
-   * immediate peer is trusted by definition, since the chain is then walked
-   * by hop count rather than by known addresses.
+   * Uses the same `TRUSTED_PROXIES` list as Express, so the guard and
+   * the framework agree on the trust boundary.
    */
   private isTrustedPeer(ip: string): boolean {
-    if (this.trustProxyHops > 0) return true;
-    return this.trustedProxyIps.has(ip);
-  }
-
-  private isTrustedProxy(ip: string): boolean {
-    return this.trustedProxyIps.has(ip);
+    return ipInTrustedList(ip, this.trustedProxies);
   }
 
   private pruneMirror(now: number): void {

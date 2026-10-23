@@ -1,7 +1,12 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 
+// CRLComponent is wired into the admin surface via the /admin/crl route.
+// It is intentionally exported for use by AdminAnalyticsDashboard and routes.
+
 const CRLComponent = () => {
+  const navigate = useNavigate();
   const [revokedCount, setRevokedCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -48,7 +53,7 @@ const CRLComponent = () => {
           
           <div className="mt-4">
             <button 
-              onClick={() => window.location.href = '/revoke'}
+              onClick={() => navigate('/revoke')}
               className="w-full bg-red-600 text-white py-2 px-4 rounded hover:bg-red-700 transition-colors"
             >
               Revoke Certificate

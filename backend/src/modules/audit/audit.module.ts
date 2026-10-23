@@ -25,6 +25,6 @@ import { AuthModule } from '../auth/auth.module';
 })
 export class AuditModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
-    consumer.apply(AuditContextMiddleware).forRoutes('{*path}');
+    consumer.apply(AuditContextMiddleware).forRoutes({ path: '{*path}', method: RequestMethod.ALL });
   }
 }

@@ -99,6 +99,7 @@ export class CertificateExpirationJob {
         const candidatesBySequence = await this.certificateRepository
           .createQueryBuilder('cert')
           .where('cert.status = :status', { status: CertificateStatus.ACTIVE })
+          .andWhere('(cert.expiresAt IS NULL OR cert.expiresAt > :now)', { now: new Date() })
           .andWhere('cert.stellarSequenceNumber IS NOT NULL')
           .getMany();
 
@@ -178,6 +179,7 @@ export class CertificateExpirationJob {
       .createQueryBuilder('cert')
       .where('cert.stellarTransactionHash IS NULL')
       .andWhere('cert.status = :status', { status: CertificateStatus.ACTIVE })
+      .andWhere('(cert.expiresAt IS NULL OR cert.expiresAt > :now)', { now: new Date() })
       .andWhere('cert.createdAt <= :cutoff', { cutoff })
       .getMany();
 
