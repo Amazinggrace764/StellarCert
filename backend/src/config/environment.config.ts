@@ -258,6 +258,15 @@ class EnvironmentVariables {
   @IsString()
   TRUSTED_PROXIES?: string;
 
+  /**
+   * Opt-in flag for the Swagger UI / OpenAPI document. Defaults to enabled
+   * outside production and disabled in production. Set to 'true' to expose the
+   * docs in production (e.g. behind auth), or 'false' to hide them elsewhere.
+   */
+  @IsOptional()
+  @IsString()
+  SWAGGER_ENABLED?: string;
+
   // Duplicate Detection Configuration
   @IsOptional()
   @IsNumber()
@@ -361,6 +370,7 @@ export function validateEnv(
       SECURITY_CSP: e('SECURITY_CSP'),
       SECURITY_FORCE_HSTP: e('SECURITY_FORCE_HSTP'),
       TRUSTED_PROXIES: e('TRUSTED_PROXIES'),
+      SWAGGER_ENABLED: e('SWAGGER_ENABLED'),
       DUPLICATE_DETECTION_THRESHOLD: e('DUPLICATE_DETECTION_THRESHOLD')
         ? parseInt(e('DUPLICATE_DETECTION_THRESHOLD') as string, 10)
         : undefined,
