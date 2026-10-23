@@ -66,7 +66,7 @@ class EnvironmentVariables {
   DB2_PASSWORD: string;
 
   @IsString()
-  DB2_NAME: string;
+  DB_PASSWORD: string;
 
   @IsOptional()
   @IsString()
@@ -371,6 +371,7 @@ export function validateEnv(
       EMAIL_USERNAME: e('EMAIL_USERNAME'),
       EMAIL_PASSWORD: e('EMAIL_PASSWORD'),
       EMAIL_FROM: e('EMAIL_FROM'),
+      EMAIL_QUEUE_NAME: e('EMAIL_QUEUE_NAME'),
       SENDGRID_API_KEY: e('SENDGRID_API_KEY'),
       REDIS_URL: e('REDIS_URL'),
       BULL_BOARD_ENABLED: e('BULL_BOARD_ENABLED'),
