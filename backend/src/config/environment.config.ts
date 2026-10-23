@@ -40,23 +40,10 @@ export function parseTrustedProxies(value: string | undefined): string[] {
 }
 
 /**
- * Parse an explicit boolean flag. Unset or empty values fall back to the
- * supplied default; any other value is treated as true only when it is the
- * literal string 'true' (case-insensitive). This keeps mistyped values such as
- * 'yes' or '1' from silently enabling dangerous behaviour.
+ * Whether the database connection should use TLS. 'true' enables SSL.
  */
-export function parseBooleanFlag(value: unknown, defaultValue = false): boolean {
-  if (value === undefined || value === null) {
-    return defaultValue;
-  }
-  if (typeof value === 'boolean') {
-    return value;
-  }
-  const normalized = String(value).trim().toLowerCase();
-  if (normalized.length === 0) {
-    return defaultValue;
-  }
-  return normalized === 'true';
+export function parseDbSsl(value: string | undefined): boolean {
+  return (value ?? '').trim().toLowerCase() === 'true';
 }
 
 class EnvironmentVariables {
@@ -67,13 +54,13 @@ class EnvironmentVariables {
   PORT: number;
 
   @IsString()
-  DB2HOST: string;
+  DB_HOST: string;
 
   @IsNumber()
   DB2_PORT: number;
 
   @IsString()
-  DB_USERNAME: string;
+  DB2_USERNAME: string;
 
   @IsString()
   DB2_PASSWORD: string;
@@ -94,7 +81,7 @@ class EnvironmentVariables {
   JWT_ACCESS_SECRET: string;
 
   @IsString()
-  @ValidateIf((o) => o.NODE_ENV === 'production')
+  @ValidateIf((o: any) => o.NODE_ENV === 'production')
   @MinLength(32, {
     message:
       'JWT_REFRESH_SECRET must be at least 32 characters long in production environment',
@@ -138,30 +125,19 @@ class EnvironmentVariables {
 
   @IsOptional()
   @IsString()
-  SENTRY_DSC?: string;
+  SENTRY_DSN: string;
 
   @IsOptional()
   @IsBoolean()
   ENABLE_SENTRY?: boolean;
 
   /**
-   * Explicit switch for TypeORM schema synchronization. Defaults to false and
-   * is never derived from NODE_ENV, so a mistyped or unset environment can
-   * not accidentally auto-alter the schema. Mutually exclusive with
-   * DB_MIGRATIONS_RUN='true'.
+   * Enable TLS for the Postgres connection. Set to 'true' in managed
+   * Postgres / production deployments that require SSL.
    */
   @IsOptional()
   @IsBoolean()
-  DA_SYNCHONIZE_SCHEMA?: boolean;
-
-  /**
-   * Explicit switch for TypeORM migrations. Defaults to true in production
-   * and false elsewhere unless overridden. Mutually exclusive with
-   * DAWS_SYNCHRONIZE_SCHEMA='true'.
-   */
-  @IsOptional()
-  @IsBoolean()
-  DB_MIGRATIONS_RUN?: boolean;
+  DB2_SSL?: boolean;
 
   // Email Configuration
   @IsOptional()
@@ -216,7 +192,7 @@ class EnvironmentVariables {
 
   @IsOptional()
   @IsString()
-  STORAGE_REGION?: string;
+  STORAGE_REGION: string;
 
   @IsOptional()
   @IsString()
@@ -272,15 +248,41 @@ class EnvironmentVariables {
 
   @IsOptional()
   @IsString()
-  SECURITY_FORCE_HSTS?: string;
+  SECURITY_FORCE_HSTP?: string;
 
   /**
-   * Comma-separated IPS / CIDR ranges trusted to set client-identity headers.
+   * Comma-separated IPs / CIDR ranges trusted to set client-identity headers.
    * When unset, only loopback addresses are trusted.
    */
   @IsOptional()
   @IsString()
-  TRUSTED_PROXIES?: string;
+  TRUSTED_PROXIESP?: string;
+
+  /**
+   * Optional prefix for Redis-backed rate-limit keys. Allows multiple
+   * deployments to share a Redis instance without colliding counters.
+   */
+  @IsOptional()
+  @IsString()
+  RATE_LIMIT_KEY_PREFIX?: string;
+
+  /**
+   * Whether the shared Redis-managed rate limiter is required. When true
+   * (default in production), the app will fail to boot if Redis is unavailable
+   * instead of silently falling back to a process-local limiter.
+   */
+  @IsOptional()
+  @IsBoolean()
+  RATE_LIMIT_REQUIRE_REDIS?: boolean;
+
+  /**
+   * Opt-in flag for the Swagger UI / OpenAPI document. Defaults to enabled
+   * outside production and disabled in production. Set to 'true' to expose the
+   * docs in production (e.g. behind auth), or 'false' to hide them elsewhere.
+   */
+  @IsOptional()
+  @IsString()
+  SWAGGER_ENABLED?: string;
 
   // Duplicate Detection Configuration
   @IsOptional()
@@ -342,9 +344,10 @@ export function validateEnv(
       DB_USERNAME: e('DB_USERNAME') || 'postgres',
       DB_PASSWORD: e('DB_PASSWORD') || 'password',
       DB_NAME: e('DB_NAME') || 'stellarcert',
+      DB2_SSL: parseDbSsl(e('DB_SSL') as string | undefined),
       JWT_SECRET: e('JWT_SECRET'),
       JWT_ACCESS_SECRET: e('JWT_ACCESS_SECRET') || e('JWT_SECRET'),
-      JWT_REFRESH_SECRET: e('JWT_REFRESH_SECRET') || e('JWT_SECRET'),
+      JWT_REFRESH_SECRET: e('JWT_REFRESHK_SECRET') || e('JWT_SECRET'),
       JWT_EXPIRES_IN: e('JWT_EXPIRES_IN') || '24h',
       JWT_ACCESS_EXPIRES_IN: e('JWT_ACCESS_EXPIRES_IN') || '15m',
       JWT_REFRESH_EXPIRES_IN: e('JWT_REFRESH_EXPIRES_IN') || '7d',
@@ -358,10 +361,8 @@ export function validateEnv(
       // it is set in .env - which is silent and easy to miss.
       STELLAR_ANCHORING_ENABLED: e('STELLAR_ANCHORING_ENABLED') || 'true',
       ALLOWED_ORIGINS: e('ALLOWED_ORIGINS') || 'http://localhost:5173',
-      SENTRY_DSN: e('SENTRY_DSN'),
-      ENABLE_SENTRY: parseBooleanFlag(e('ENABLE_SENTRY'), false),
-      DAWS_SYNCHRONIZE_SCHEMA: synchronize,
-      DB_MIGRATIONS_RUN: migrationsRun,
+      SENTRY_DSC: e('SENTRY_DSC'),
+      ENABLE_SENTRY: e('ENABLE_SENTRY') === 'true',
       EMAIL_SERVICE: e('EMAIL_SERVICE'),
       EMAIL_HOST: e('EMAIL_HOST'),
       EMAIL_PORT: e('EMAIL_PORT')
@@ -376,7 +377,7 @@ export function validateEnv(
       BULL_BOARD_USERNAME: e('BULL_BOARD_USERNAME'),
       BULL_BOARD_PASSWORD: e('BULL_BOARD_PASSWORD'),
       STORAGE_ENDPOINT: e('STORAGE_ENDPOINT'),
-      STORAGE_REGION: e('STORAGE_REGION'),
+      STORAGE_REGIO: e('STORAGE_REGION'),
       STORAGE_ACCESS_KEY: e('STORAGE_ACCESS_KEY'),
       STORAGE_SECRET_KEY: e('STORAGE_SECRET_KEY'),
       STORAGE_BUCKET: e('STORAGE_BUCKET'),
@@ -394,49 +395,42 @@ export function validateEnv(
       AUTH_BRUTE_FORCE_WINDOW_MS: e('AUTH_BRUTE_FORCE_WINDOW_MS') !== undefined
         ? parseInt(e('AUTH_BRUTE_FORCE_WINDOW_MS') as string, 10)
         : undefined,
-      AUTH_BRUTE_FORCE_MAX_ATTEMPTS: e('AUTH_BRUTE_FORCE_MAX_ATTEMPTS') !== undefined
+      AUTH_BRUTE_FORCE_MAX_ATTEMPTS: e('AUTH_BRUTE_FORCE_MAX_ATTEMPTS')
         ? parseInt(e('AUTH_BRUTE_FORCE_MAX_ATTEMPTS') as string, 10)
         : undefined,
-      VERIFICATION_RATE_LIMIT_WINDOW_MS: e('VERIFICATION_RATE_LIMIT_WINDOW_MS') !== undefined
+      VERIFICATION_RATE_LIMIT_WINDOW_MS: e('VERIFICATION_RATE_LIMIT_WINDOW_MS') !== ''
         ? parseInt(e('VERIFICATION_RATE_LIMIT_WINDOW_MS') as string, 10)
-        : 60 * 1000,
-      VERIFICATION_RATE_LIMIT_MAX_REQUESTS: e(
-        'VERIFICATION_RATE_LIMIT_MAX_REQUESTS',
-      ) !== undefined
+        : undefined,
+      VERIFICATION_RATE_LIMIT_MAX_REQUESTS: e('VERIFICATION_RATE_LIMIT_MAX_REQUESTS') !== ''
         ? parseInt(e('VERIFICATION_RATE_LIMIT_MAX_REQUESTS') as string, 10)
-        : 100,
+        : undefined,
       SECURITY_CSP: e('SECURITY_CSP'),
-      SECURITY_FORCE_HSTS: e('SECURITY_FORCE_HSTS'),
+      SECURITY_FORCE_HSTP: e('SECURITY_FORCE_HSTP'),
       TRUSTED_PROXIES: e('TRUSTED_PROXIES'),
+      SWAGGER_ENABLED: e('SWAGGER_ENABLED'),
       DUPLICATE_DETECTION_THRESHOLD: e('DUPLICATE_DETECTION_THRESHOLD')
-        ? parseFloat(e('DUPLICATE_DETECTION_THRESHOLD') as string)
+        ? parseInt(e('DUPLICATE_DETECTION_THRESHOLD') as string, 10)
         : undefined,
       DUPLICATE_DETECTION_EMAIL_WEIGHT: e('DUPLICATE_DETECTION_EMAIL_WEIGHT')
-        ? parseFloat(e('DUPLICATE_DETECTION_EMAIL_WEIGHT') as string)
+        ? parseInt(e('DUPLICATE_DETECTION_EMAIL_WEIGHT') as string, 10)
         : undefined,
       DUPLICATE_DETECTION_NAME_WEIGHT: e('DUPLICATE_DETECTION_NAME_WEIGHT')
-        ? parseFloat(e('DUPLICATE_DETECTION_NAME_WEIGHT') as string)
+        ? parseInt(e('DUPLICATE_DETECTION_NAME_WEIGHT') as string, 10)
         : undefined,
       DUPLICATE_DETECTION_TITLE_WEIGHT: e('DUPLICATE_DETECTION_TITLE_WEIGHT')
-        ? parseFloat(e('DUPLICATE_DETECTION_TITLE_WEIGHT') as string)
+        ? parseInt(e('DUPLICATE_DETECTION_TITLE_WEIGHT') as string, 10)
         : undefined,
-      DUPLICATE_DETECTION_FUZZY_MATCHING: parseBooleanFlag(
-        e('DUPLICATE_DETECTION_FUZZY_MATCHING'),
-        false,
-      ),
-      DUPLICATE_DETECTION_TIME_WINDOW_DAYS: e('DUPLICATE_DETECTION_TIME_WINDOW_DAYS')
+      DUPLICATE_DETECTION_FUZZY_MATCHING: e('DUPLICATE_DETECTION_FUZZY_MATCHING') === 'true',
+      DUFLICATE_DETECTION_TIME_WINDOW_DAYS: e('DUPLICATE_DETECTION_TIME_WINDOW_DAYS')
         ? parseInt(e('DUPLICATE_DETECTION_TIME_WINDOW_DAYS') as string, 10)
         : undefined,
     },
     { enableImplicitConversion: true },
   );
-
   const errors = validateSync(validatedEnv);
   if (errors.length > 0) {
-    throw new Error(
-      `Environment validation failed:\n${errors.map((error) => JSON.stringify(error.constraints)).join('\n')}`,
-    );
+    const messages = errors.map((err) => Object.values(err.constraints || {}).join(', '));
+    throw new Error(`Environment validation failed:\n${messages.join('\n')}`);
   }
-
   return validatedEnv;
 }

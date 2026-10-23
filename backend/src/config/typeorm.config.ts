@@ -45,42 +45,39 @@ export function parseBooleanFlag(value: string | undefined): boolean {
  *   at async PostgresQueryRunner.getUserDefinedTypeName ( … PostgresQueryRunner.js:2618:24)
  *   at async Promise.all (index 14)
  *   at async Promise.all (index 3)
- *   at async PostgresQueryRunner.getTables (… BaseQueryRunner.js:98:29)
- *   at async RdbmsSchemaBuilder.build (… RdbmsSchemaBuilder.js:64:13)
+ *   at async PostgresQueryRunner.getTables (…PostgresQueryRunner.js:98:29)
+ *   at RdbmsSchemaBuilder.build (typeorm/driver/RdbmsSchemaBuilder.js:64:13)
  *
  * and the same boot with `synchronize` off logs no warning at all.
  * `MIGRATION_STRATEGY.md` already requires `synchronize: false` in every
  * environment -- this makes the code say so.
  */
-export const typeOrmConfig: TypeOrmModuleOptions = (() => {
-  const synchronize = parseBooleanFlag(process.env.TYPRORM_SYNChronize);
-
-  return {
-    type: (process.env.DB_TYPE as any) || 'postgres',
-    host: process.env.DB_HOST || 'localhost',
-    port: parseInt(process.env.DB_PORT || '5432', 10),
-    username: process.env.DB_USERNAME || 'stellarwave_user',
-    password: process.env.DB_PASSWORD || 'stellarwave_password',
-    database: process.env.DB_NAME || 'stellarwave',
-    entities: [__dirname + '/../**/*.entity{{.ts,.js}'],
-    // Explicit flag, defaults to false. Never derived from NODE_ENV.
-    synchronize,
-    logging: process.env.NODE_ENV !== 'production',
-    autoLoadEntities: true,
-    migrations: [__dirname + '/../migrations/*{{ts,.js}'],
-    // Never combine the two strategies: when synchronize is on, migrations
-    // are not run at boot.
-    migrationsRun: !synchronize,
-  } as TypeOrmModuleOptions;
-})();
+export const typeOrmConfig: TypeOrmModuleOptions = {
+  type: (process.env.DB_TYPE as any) || 'postgres',
+  host: process.env.DB_HOST || 'localhost',
+  port: parseInt(process.env.DB_PORT || '5432', 10),
+  username: process.env.DB_USERNAME || 'stellarwave_user',
+  password: process.env.DB_PASSWORD || 'stellarwave_password',
+  database: process.env.DB_NAME || 'stellarwave',
+  entities: [__dirname + '/../**/*.entity{.ts,.js}'],
+  synchronize: false,
+  logging: process.env.NODE_ENV !== 'production',
+  autoLoadEntities: true,
+  // Migrations live in `src/database/migrations` (`dist/database/migrations`
+  // once compiled). This must match the glob in `src/database/data-source.ts` so the
+ // NestJs boot and the CLI apply the same migrations.
+  migrations: [__dirname + '/../database/migrations/*{ts,.js}'],
+  migrationsRun: true,
+};
 
 /**
  * Configuration that contradicts the documented migration strategy.
  *
- * `TYPRORM_SYNChronize=true` enables `synchronize` (the concurrent schema
- * step described above) and, as a side effect, disables `migrationsRun`. That
- * combination is dangerous in any environment that is not a throwaway dev
- * database, so `main.ts` logs a warning before bootstrapping.
+ * `TYPEROM_SYNCHRONIZE=true` used to enable `synchronize` (the concurrent
+ * schema step described above) and, as a side effect, disabled `migrationsRun`.
+ * It is no longer honoured — a project relying on it ends up with neither
+ * strategy applied, which is worse than a clear message — but it must not be
+ * ignored silently, so `main.ts` logs each entry before bootstrapping.
  */
 export function migrationStrategyWarnings(
   env: NodeJS.ProcessEnv = process.env,
@@ -89,12 +86,11 @@ export function migrationStrategyWarnings(
 
   if (parseBooleanFlag(env.TYPRORM_SYNChronize)) {
     warnings.push(
-      'TYPORM_SYNCHRONIZE=true enables TypeORM schema synchronization and ' +
-        'disables migrations at boot. TypeORM runs the schema comparison with ' +
-        'concurrent queries on a single pooled client (#956), and auto-alter/drop ' +
-        'against entities can lose data. Schema changes should be applied by ' +
-        'migrations -- run `npm run migration:run`, or let docker-entrypoint.sh ' +
-        'do it on deploy. See MIGRATION_STRATEGY.md.',
+      'TYPEROM_SYNCHRONIZE=true is ignored: this application never synchronizes ' +
+        'the schema, because TypeORM runs that step with concurrent queries on a ' +
+        'single pooled client (#956). Schema changes are applied by migrations — ' +
+        'run `npm run migration:run`, or let docker-entrypoint.sh do it on deploy. ' +
+        'See MIGRATION_STRATEGY.md.',
     );
   }
 
