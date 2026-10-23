@@ -68,6 +68,14 @@ export const typeOrmConfig: TypeOrmModuleOptions = {
  // NestJs boot and the CLI apply the same migrations.
   migrations: [__dirname + '/../database/migrations/*{ts,.js}'],
   migrationsRun: true,
+  ssl:
+    process.env.DB_SSL === 'true'
+      ? {
+          rejectUnauthorized:
+            process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false',
+          ...(process.env.DB_SSL_CA ? { ca: process.env.DB_SSL_CA } : {}),
+        }
+      : undefined,
 };
 
 /**
