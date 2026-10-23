@@ -18,6 +18,8 @@ import * as path from 'path';
 
 // When running via the CLI the source is compiled JS under dist/.
 // Migrations are therefore loaded from dist/database/migrations/*.js
+import { fileURLToPath } from 'url';
+
 const isCompiledJs = __filename.endsWith('.js');
 
 /**

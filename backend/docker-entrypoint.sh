@@ -46,7 +46,7 @@ if [ -z "${DB_PASSWORD:-}" ]; then
 fi
 
 echo "[entrypoint] Running TypeORM migrations…"
-node node_modules/.bin/typeorm migration:run -d dist/database/data-source.js
+node node_modules/typeorm/cli.js migration:run -d dist/database/data-source.js
 echo "[entrypoint] Migrations complete."
 
 echo "[entrypoint] Starting application…"
