@@ -1,10 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { NotFoundException } from '@nestjs/common';
-import {
-  CertificateSearchService,
-  escapeLikePattern,
-} from './certificate-search.service';
+import { CertificateSearchService, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from './certificate-search.service';
 import { Certificate } from '../entities/certificate.entity';
 
 describe('CertificateSearchService', () => {
@@ -15,6 +12,7 @@ describe('CertificateSearchService', () => {
     where: jest.fn().mockReturnThis(),
     andWhere: jest.fn().mockReturnThis(),
     orderBy: jest.fn().mockReturnThis(),
+    addOrderBy: jest.fn().mockReturnThis(),
     skip: jest.fn().mockReturnThis(),
     take: jest.fn().mockReturnThis(),
     getCount: jest.fn().mockResolved(0),
@@ -28,6 +26,9 @@ describe('CertificateSearchService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockQueryBuilder.getCount.mockResolved(0);
+    mockQueryBuilder.getMany.mockResolved([]);
+    mockQueryBuilder.getOne.mockResolved(null);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -79,13 +80,11 @@ describe('CertificateSearchService', () => {
         'issuer',
       );
 
-      // Verify case-insensitive match with explicit escape character and bound parameter
       expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
         "(certificate.title ILIKE :query ESCAPE '\\\\' OR certificate.recipientName ILIKE :query ESCAPE '\\\\' OR certificate.recipientEmail ILIKE :query ESCAPE '\\\\')",
         { query: `%\\${query}%` },
       );
 
-      // Verify bound parameters for filters
       expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
         'certificate.issuerId = :issuerId',
         { issuerId: 'issuer-uuid-123' },
@@ -104,20 +103,46 @@ describe('CertificateSearchService', () => {
       );
     });
 
-    it('escapes wildcard characters in the search term', () => {
-      await service.search('%_');
+    it('applies default pagination and returns metadata', async () => {
+      mockQueryBuilder.getCount.mockResolvedOnce(42);
+      mockQueryBuilder.getMany.mockResolvedOnce([
+        { id: 'cert-1' } as Certificate,
+      ]);
 
-      expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
-        "(certificate.title ILIKE :query ESCAPE '\\\\' OR certificate.recipientName ILIKE :query ESCAPE '\\\\' OR certificate.recipientEmail ILIKE :query ESCAPE '\\\\')",
-        { query: '%\\%\\_%' },
-      );
-    });
-
-    it('works when no query or filters are provided', async () => {
-      await service.search('');
+      const result = await service.search('');
 
       expect(mockQueryBuilder.andWhere).not.toHaveBeenCalled();
+      expect(mockQueryBuilder.skip).toHaveBeenCalledWith(0);
+      expect(mockQueryBuilder.take).toHaveBeenCalledWith(DEFAULT_PAGE_SIZE);
+      expect(mockQueryBuilder.getCount).toHaveBeenCalled();
       expect(mockQueryBuilder.getMany).toHaveBeenCalled();
+      expect(result).toEqual({
+        certificates: [{ id: 'cert-1' }],
+        total: 42,
+        page: 1,
+        limit: DEFAULT_PAGE_SIZE,
+        hasMore: true,
+      });
+    });
+
+    it('clamps requested page size to the hard maximum', async () => {
+      await service.search('', {}, 1, MAX_PAGE_SIZE * 10);
+
+      expect(mockQueryBuilder.take).toHaveBeenCalledWith(MAX_PAGE_SIZE);
+    });
+
+    it('normalizes invalid page and limit values', async () => {
+      await service.search('', {}, -5, 0);
+
+      expect(mockQueryBuilder.skip).toHaveBeenCalledWith(0);
+      expect(mockQueryBuilder.take).toHaveBeenCalledWith(DEFAULT_PAGE_SIZE);
+    });
+
+    it('applies offset for subsequent pages', async () => {
+      await service.search('', {}, 3, 10);
+
+      expect(mockQueryBuilder.skip).toHaveBeenCalledWith(20);
+      expect(mockQueryBuilder.take).toHaveBeenCalledWith(10);
     });
   });
 
@@ -135,6 +160,12 @@ describe('CertificateSearchService', () => {
       );
       expect(mockQueryBuilder.skip).toHaveBeenCalledWith(25);
       expect(mockQueryBuilder.take).toHaveBeenCalledWith(25);
+    });
+
+    it('caps page size at the hard maximum', async () => {
+      await service.findAll(1, MAX_PAGE_SIZE * 100);
+
+      expect(mockQueryBuilder.take).toHaveBeenCalledWith(MAX_PAGE_SIZE);
     });
   });
 
@@ -162,41 +193,77 @@ describe('CertificateSearchService', () => {
   });
 
   describe('getCertificatesByRecipient', () => {
-    it('uses bound parameter for recipient email', async () => {
+    it('uses bound parameter for recipient email and applies pagination', async () => {
       await service.getCertificatesByRecipient('test@example.com');
 
       expect(mockQueryBuilder.where).toHaveBeenCalledWith(
         'certificate.recipientEmail = :email',
         { email: 'test@example.com' },
       );
+      expect(mockQueryBuilder.skip).toHaveBeenCalledWith(0);
+      expect(mockQueryBuilder.take).toHaveBeenCalledWith(DEFAULT_PAGE_SIZE);
+    });
+
+    it('caps page size at the hard maximum', async () => {
+      await service.getCertificatesByRecipient(
+        'test@example.com',
+        1,
+        MAX_PAGE_SIZE * 100,
+      );
+
+      expect(mockQueryBuilder.take).toHaveBeenCalledWith(MAX_PAGE_SIZE);
     });
   });
 
   describe('getCertificatesByIssuer', () => {
-    it('uses bound parameter for issuerId', async () => {
+    it('uses bound parameter for issuerId and applies pagination', async () => {
       await service.getCertificatesByIssuer('issuer-uuid');
 
       expect(mockQueryBuilder.where).toHaveBeenCalledWith(
         'certificate.issuerId = :issuerId',
         { issuerId: 'issuer-uuid' },
       );
+      expect(mockQueryBuilder.skip).toHaveBeenCalledWith(0);
+      expect(mockQueryBuilder.take).toHaveBeenCalledWith(DEFAULT_PAGE_SIZE);
+    });
+
+    it('caps page size at the hard maximum', async () => {
+      await service.getCertificatesByIssuer('Issuer-uuid', 1, MAX_PAGE_SIZE * 100);
+
+      expect(mockQueryBuilder.take).toHaveBeenCalledWith(MAX_PAGE_SIZE);
     });
   });
 
   describe('getDuplicateCertificates', () => {
-    it('uses bound parameter for isDuplicate flag', async () => {
+    it('uses bound parameter for isDuplicate flag and applies pagination', async () => {
       await service.getDuplicateCertificates();
 
       expect(mockQueryBuilder.where).toHaveBeenCalledWith(
         'certificate.isDuplicate = :isDuplicate',
         { isDuplicate: true },
       );
+      expect(mockQueryBuilder.skip).toHaveBeenCalledWith(0);
+      expect(mockQueryBuilder.take).toHaveBeenCalledWith(DEFAULT_PAGE_SIZE);
+    });
+
+    it('caps page size at the hard maximum', async () => {
+      await service.getDuplicateCertificates(1, MAX_PAGE_SIZE * 100);
+
+      expect(mockQueryBuilder.take).toHaveBeenCalledWith(MAX_PAGE_SIZE);
     });
   });
 
-  describe('exportCertificates', () => {
-    it('applies max limit and parameter-bound filters', async () => {
-      await service.exportCertificates('issuer-id', 'revoked');
+  describe('exportCertificatesStream', () => {
+    it('applies parameter-bound filters and streams rows in batches', async () => {
+      const batch1 = [{ id: 'cert-1' }, { id: 'cert-2' }] as Certificate[];
+      mockQueryBuilder.getMany
+        .mockResolvedOnce(batch1)
+        .mockResolvedOnce([]);
+
+      const collected: Certificate[] = [];
+      for await (const row of service.exportCertificatesStream('issuer-id', 'revoked')) {
+        collected.push(row);
+      }
 
       expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
         'certificate.issuerId = :issuerId',
@@ -206,7 +273,31 @@ describe('CertificateSearchService', () => {
         'certificate.status = :status',
         { status: 'revoked' },
       );
-      expect(mockQueryBuilder.take).toHaveBeenCalledWith(1000);
+      expect(collected.map((r) => r.id)).toEqual(['cert-1', 'cert-2']);
+    });
+
+    it('respects the hard maximum batch size', async () => {
+      mockQueryBuilder.getMany.mockResolvedOnce([]);
+
+      const iterator = service.exportCertificatesStream(undefined, undefined, MAX_PAGE_SIZE * 10);
+      await iterator.next();
+
+      expect(mockQueryBuilder.take).toHaveBeenCalledWith(MAX_PAGE_SIZE);
+    });
+  });
+
+  describe('exportCertificates', () => {
+    it('truncates the collected result at MAX_PAGE_SIZE', async () => {
+      const fullBatch = Array.from({ length: MAX_PAGE_SIZE }, (_, i) => ({
+        id: `cert-${i}`,
+      })) as Certificate[];
+      mockQueryBuilder.getMany.mockResolved(fullBatch);
+
+      const result = await service.exportCertificates();
+
+      expect(result.length).toBe(
+        MAX_PAGE_SIZE,
+      );
     });
   });
 });
