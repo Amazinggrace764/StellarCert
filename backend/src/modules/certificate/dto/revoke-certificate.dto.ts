@@ -1,4 +1,10 @@
-import { IsString, IsOptional, MaxLength, MinLength } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  MaxLength,
+  MinLength,
+  IsBoolean,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class RevokeCertificateDto {
@@ -20,5 +26,6 @@ export class RevokeCertificateDto {
     description: 'Record revocation as a Stellar transaction (default: true)',
   })
   @IsOptional()
+  @IsBoolean()
   recordOnStellar?: boolean;
 }
