@@ -122,6 +122,7 @@ export class CryptoUtils {
 
   /**
    * Verifies an HMAC signature
+   * Uses a timing-safe comparison to prevent signature forgery via timing analysis.
    */
   static verifyHMAC(data: string, signature: string, secret: string): boolean {
     const expectedSignature = this.createHMAC(data, secret);
