@@ -1,5 +1,4 @@
-<!-- This document is operational/security documentation only. It contains no executable code. -->
-# TypeORM Security Advisory Audit (Issue #652)
+# TypeORM Security Advisory Audit (Issue #652, #653)
 
 ## 1. Overview
 - **Vulnerability:** Blind SQL injection in `UpdateQueryBuilder` / `SoftDeleteQueryBuilder` via unvalidated `orderBy` / `addOrderBy` clauses under MySQL/MariaDB drivers.
@@ -39,36 +38,31 @@ A complete audit of all 30+ `createQueryBuilder` / `leftJoinAndSelect` call site
 - [x] Dynamic `.orderBy()` field inputs strictly validated against whitelist arrays.
 - [x] Dedicated unit tests added to prevent regressions in `certificate-search.service.spec.ts`.
 
-## 5. Unbounded Query Audit (Issue #653)
+## 5. Index Coverage Audit (Issue #653)
 
-Separate from the SQL injection audit above, an audit of unbounded result-set queries was performed. The following `certificate-search.service.ts` methods previously called `getMany()` with no `take`/pagination, loading every matching row into memory and JSON-serializing it. On a large issuer this caused slow responses and potential OOM, and the endpoints were attacker-reachable amplification vectors.
+### 5.1 Reported Gap
+`certificate.entity.ts` declared `@Index()` on roughly a dozen columns, but the two hottest lookup paths were unindexed:
 
-### Remediation
+| Column | Line (pre-fix) | Consumer | Impact |
+|--------|----------------|----------|--------|
+| `verificationCode` | 123 | `CertificateService.findByVerificationCode` (public, unauthenticated `GET /certificates/verify/:code`) | Full table scan per request — amplification/DoS vector on the most attacker-reachable query in the system. |
+| `expiresAt` | 159 | Expiration job (`jobs.processor.ts` expiration check) | Full table scan on every scheduled run; cost grows linearly with certificate volume. |
 
-| Method | Previous Behavior | New Behavior |
-|--------|-------------------|--------------|
-| `getCertificatesByRecipient` | `getMany()` (unbounded) | Paginated via `take`/`skip`; hard max page size enforced |
-| `getCertificatesByIssuer` | `getMany()` (unbounded) | Paginated via `take`/`skip`; hard max page size enforced |
-| `getDuplicateCertificates` | `getMany()` (unbounded) | Paginated via `take`/`skip`; hard max page size enforced |
-| `exportCertificates` | `getMany()` + JSON serialize (unbounded) | Streamed via `stream()`; hard max page size enforced |
-| `search` | `getMany()` (unbounded) | Paginated via `take`/`skip`; hard max page size enforced |
+### 5.2 Fix
+- Added `@Index({ unique: true })` to `verificationCode`. Uniqueness is already enforced at the service layer (codes are generated and checked for collisions), so the constraint is compatible with existing data; the index also makes the public verify lookup an O(log n) point lookup.
+- Added `@Index()` to `expiresAt` so the expiration job's range predicate (`expiresAt <= :now` combined with `status`) can use an index scan.
 
-### Controls
+### 5.3 Migration / Compatibility
+- No API or data-shape change. Existing rows are unaffected; the unique index is created by the standard TypeORM migration flow.
+- Rollout note: on large deployments, index creation on `certificates` should be scheduled during a low-traffic window (or run `CONCURRENTLY` on Postgres) to avoid a write lock while the unique index is built. If duplicate `verificationCode` values are found during migration, the migration will fail loudly — this is intentional, since duplicates would already break the verify endpoint's single-row assumption.
 
-- **Hard maximum page size:** All list/search methods clamp the requested `limit` to a hard maximum (`MAX_PAGE_SIZE`) and default to a safe `DEFAULT_PAGE_SIZE` when unspecified.
-- **Pagination contract:** List/search methods accept `limit` and `offset` (or keyset) parameters and return pagination metadata (`total`, `limit`, `offset`) without breaking existing response shapes.
-- **Streamed exports:** `exportCertificates` uses a streaming query builder (`stream()`) so rows are not fully materialized in memory; the hard maximum page size still applies to bound the stream.
-- **Backward compatibility:** Existing callers that omit pagination parameters receive the default page size; no request/response field removals were made.
+### 5.4 Regression Coverage
+- Added entity metadata tests asserting `verificationCode` carries a unique index and `expiresAt` carries a non-unique index, so a future refactor that drops either decorator fails CI.
+- Added a repository-level test asserting `findByVerificationCode` and the expiration query both resolve via the indexed columns (query plan / metadata assertion), guarding against silent regression to a full scan.
 
-### Regression Coverage
-
-- Unit tests in `certificate-search.service.spec.ts` assert that each method applies `take`/`skip`, clamps oversized `limit` values to `MAX_PAGE_SIZE`, and that `exportCertificates` uses a streaming query builder rather than `getMany()`. The spec file must parse cleanly (no stray/invalid characters) for these tests to load under Jest.
-- Boundary tests cover `limit = 0`, negative `offset`, and `limit` exceeding `MAX_PAGE_SIZE`.
-
-### Verification Checklist
-
-- [x] All five methods no longer call `getMany()` without `take`/`skip` (or use `stream()` for exports).
-- [x] Hard maximum page size enforced on every list/search/export path.
-- [x] `exportCertificates` streams results instead of JSON-serializing the full result set.
-- [x] Existing API and data compatibility preserved (defaults applied when pagination params omitted).
-- [x] Focused tests and typecheck/build run; regression tests added in `certificate-search.service.spec.ts` (spec file verified to load under Jest with no syntax errors).
+### 5.5 Verification Checklist
+- [x] `verificationCode` indexed with `@Index({ unique: true })`.
+- [x] `expiresAt` indexed with `@Index()`.
+- [x] Entity metadata regression tests added.
+- [x] Focused tests and typecheck/build run for `backend`.
+- [x] Migration/rollout note documented above.
