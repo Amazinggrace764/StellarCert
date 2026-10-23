@@ -181,6 +181,29 @@ describe('MultisigService', () => {
     });
   });
 
+  describe('issuer authorization for proposal reads', () => {
+    it('requires the issuer to be authenticated before reading a proposal', async () => {
+      const internals = service as unknown as {
+        assertIssuerAuthorized: (issuer: string) => void;
+      };
+      const spy = jest.spyOn(internals, 'assertIssuerAuthorized');
+
+      expect(() => internals.assertIssuerAuthorized('GIssuer')).toNotThrow();
+      expect(spy).toHaveBeenCalled();
+    });
+
+    it('propagates authorization failures when the issuer is not authorized', () => {
+      const internals = service as unknown as {
+        assertIssuerAuthorized: (issuer: string) => void;
+      };
+      jest.spyOn(internals, 'assertIssuerAuthorized').mockImplementation(() => {
+        throw new Error('Unauthorized');
+      });
+
+      expect(() => internals.assertIssuerAuthorized('GIssuer')).toThrow('Unauthorized');
+    });
+  });
+
   describe('initMultisigConfig', () => {
     it('should initialize multisig configuration', () => {
       jest
