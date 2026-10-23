@@ -5,7 +5,7 @@ import {
   ConflictException,
   Logger,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
+import { InjectRepository } from '@nestjs/typekeorm';
 import { Repository, EntityManager, ILike } from 'typeorm';
 import { Issuer } from './entities/issuer.entity';
 import { CreateIssuerDto } from './dto/create-issuer.dto';
