@@ -16,7 +16,7 @@ import {
   UpdateMetadataSchemaDto,
   SchemaFieldDto,
   ValidationErrorDetail,
-  MetadataValidationResultDto,
+  MetadataValidationResultdto,
 } from '../dto/metadata-schema.dto';
 import { LoggingService } from '../../../common/logging/logging.service';
 import {
@@ -133,7 +133,9 @@ export class MetadataSchemaService {
     });
 
     const saved = await this.schemaRepository.save(schema);
-    this.logger.log(`Schema created: ${saved.name} v${saved.version}`);
+    this.logger.log(
+      `Schema created: ${saved.name} v${saved.version}`,
+    );
     return saved;
   }
 
@@ -237,7 +239,7 @@ export class MetadataSchemaService {
   async validate(
     schemaId: string,
     metadata: Record<string, any>,
-  ): Promise<MetadataValidationResultDto> {
+  ): Promise<MetadataValidationResultdto> {
     const schema = await this.findOne(schemaId);
     const errors = this.validateAgainstSchema(schema, metadata);
 
@@ -453,6 +455,9 @@ export class MetadataSchemaService {
             constraint: 'type',
           });
         }
+        break;
+
+      default:
         break;
 
       default:
