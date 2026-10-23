@@ -195,11 +195,56 @@ describe('MultisigService', () => {
 
       expect(typeof service.initMultisigConfig).toBe('function');
     });
+
+    it('rejects a threshold larger than the number of signers', async () => {
+      await expect(
+        service.initMultisigConfig(
+          'source',
+          'issuer',
+          5,
+          ['signer-1', 'signer-2', 'signer-3'],
+        ),
+      ).rejects.toThrow(
+        'threshold must be less than or equal to the number of signers',
+      );
+    });
+
+    it('rejects an empty signer list', async () => {
+      await expect(
+        service.initMultisigConfig('source', 'issuer', 1, []),
+      ).rejects.toThrow('at least one signer is required');
+    });
+
+    it('rejects a non-positive threshold', async () => {
+      await expect(
+        service.initMultisigConfig('source', 'issuer', 0, ['signer-1']),
+      ).rejects.toThrow('threshold must be a positive integer');
+    });
+
+    it('accepts a threshold equal to the number of signers', () => {
+      const internals = service as unknown as {
+        validateThreshold: (threshold: number, signers: string[]) => void;
+      };
+      expect(() => internals.validateThreshold(3, ['a', 'b', 'c'])).not.toThrow();
+    });
   });
 
   describe('updateMultisigConfig', () => {
     it('should update multisig configuration', () => {
       expect(typeof service.updateMultisigConfig).toBe('function');
+    });
+
+    it('rejects a threshold larger than the number of signers', async () => {
+      await expect(
+        service.updateMultisigConfig(
+          'source',
+          'issuer',
+          5,
+          ['signer-1', 'signer-2', 'signer-3'],
+        ),
+      ).rejects.toThrow(
+        'threshold must be less than or equal to the number of signers',
+      );
     });
   });
 
