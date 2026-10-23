@@ -65,8 +65,19 @@ STELLAR_ISSUER_SECRET_KEY=your_stellar_secret_key_here
 STELLAR_ISSUER_PUBLIC_KEY=your_stellar_public_key_here
 
 # JWT Configuration
+# REQUIRED: JWT_SECRET has no default. The stack will fail fast at startup
+# if it is unset, preventing production mode from signing/verifying JWTs
+# with a publicly known secret. Generate a strong value, e.g.:
+#   openssl rand -hex 32
 JWT_SECRET=your_jwt_secret_key_here
 JWT_EXPIRES_IN=3600
+
+# Database Credentials
+# REQUIRED: DB credentials are sourced from secrets and have no hardcoded
+# fallback. Set these (or provide them via Docker secrets) before starting.
+POSTGRES_USER=stellarwave_user
+POSTGRES_PASSWORD=your_db_password_here
+POSTGRES_DB=stellarwave
 
 # Optional: Sentry for error tracking
 SENTRY_DSN=https://your_sentry_dsn@sentry.io/project_id
@@ -101,7 +112,7 @@ The services start in the following order:
 ## Database Migrations
 
 TypeORM migrations are run automatically by the backend container on every
-startup. The flow is:
+startup (via `docker-entrypoint.sh`). The flow is:
 
 1. Docker Compose waits for the Postgres health-check to pass (`pg_isready`).
 2. The backend container starts and executes `docker-entrypoint.sh`.
@@ -116,7 +127,8 @@ The Postgres image only executes top-level `.sql` and `.sh` files in
 `/docker-entrypoint-initdb.d/` and only on the very first container startup
 (empty data volume). TypeORM migrations are TypeScript source files, not SQL,
 and nesting them inside a subdirectory means the image ignores them entirely.
-Running migrations from the backend container is the correct approach.
+Running migrations from the backend container is the correct approach, so the
+backend no longer bind-mounts migrations into the Postgres init directory.
 
 **Running migrations manually** (e.g. after a hotfix):
 
@@ -212,12 +224,15 @@ docker-compose exec redis redis-cli
 For production deployment:
 
 1. Set `NODE_ENV=production` in your `.env` file
-2. Use the production profile:
+2. Set a strong, unique `JWT_SECRET` (there is no insecure default; startup
+   fails fast if it is unset) and provide DB credentials via secrets rather
+   than hardcoded values
+3. Use the production profile:
    ```bash
    docker-compose --profile production up -d
    ```
-3. Configure SSL certificates in the `inginx/ssl` directory
-4. Update the `nginx/nginx.conf` file with your domain configuration
+4. Configure SSL certificates in the `nginx/ssl` directory
+5. Update the `nginx/nginx.conf` file with your domain configuration
 
 ## Backend Image Build (Dependency Installation)
 
