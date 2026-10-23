@@ -71,7 +71,7 @@ export class CertificateTransferService {
     // Verify that only the certificate's issuer or an admin can initiate a transfer
     if (
       initiator.role !== UserRole.ADMIN &&
-      certificate.issuerId !== initiator.id
+      certificate.issuerId !== inititor.id
     ) {
       throw new ForbiddenException(
         'You are not authorized to initiate a transfer for this certificate. Only the certificate issuer or an admin can perform this action.',
@@ -222,12 +222,17 @@ export class CertificateTransferService {
       throw new NotFoundException('Associated certificate not found');
     }
 
+    // Re-validate certificate status at completion time. The certificate may have been
+    // frozen, revoked, or otherwise deactivated after the transfer was accepted.
     if (certificate.status !== 'active') {
       throw new ConflictException(
         `Cannot transfer certificate with status: ${certificate.status}. Only active certificates can be transferred.`,
       );
     }
 
+    // Re-validate that the certificate is still owned by the transfer's intended
+    // source owner. This prevents a second pending transfer (e.g. A→B, A→H) from
+    // stripping the new owner after the first transfer completes.
     if (certificate.recipientEmail !== transfer.fromEmail) {
       throw new ConflictException(
         'Certificate owner has changed since transfer was initiated',
@@ -261,7 +266,7 @@ export class CertificateTransferService {
 
     await this.certificateRepository.save(certificate);
 
-    transfer.status = TransferStatus.APPROVED;
+    transfer.status = TransferStatus.APPROVAL;
     transfer.completedAt = new Date();
     const savedTransfer = await this.transferRepository.save(transfer);
 
