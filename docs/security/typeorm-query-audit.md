@@ -1,4 +1,4 @@
-# TypeORM Security Advisory Audit (Issue #652)
+# TypeORM Security Advisory Audit (Issue #652, #653)
 
 ## 1. Overview
 - **Vulnerability:** Blind SQL injection in `UpdateQueryBuilder` / `SoftDeleteQueryBuilder` via unvalidated `orderBy` / `addOrderBy` clauses under MySQL/MariaDB drivers.
@@ -40,5 +40,32 @@ A complete audit of all 30+ `createQueryBuilder` / `leftJoinAndSelect` call site
 - [x] Zero raw string concatenation or template literal interpolation used in `.where()`, `.andWhere()`, or `.orWhere()`.
 - [x] Dynamic `.orderBy()` field inputs strictly validated against whitelist arrays.
 - [x] Dedicated unit tests added to prevent regressions in `certificate-search.service.spec.ts`.
-- [x] Audited source revision is recorded and bound to release artifacts (image digests and WASM hashes) per the reproducible release procedure.
-- [x] Promotion of audited artifacts is gated on SBOM, checksum, and provenance verification; no rebuild occurs between CI and production.
+
+## 5. Index Coverage Audit (Issue #653)
+
+### 5.1 Reported Gap
+`certificate.entity.ts` declared `@Index()` on roughly a dozen columns, but the two hottest lookup paths were unindexed:
+
+| Column | Line (pre-fix) | Consumer | Impact |
+|--------|----------------|----------|--------|
+| `verificationCode` | 123 | `CertificateService.findByVerificationCode` (public, unauthenticated `GET /certificates/verify/:code`) | Full table scan per request — amplification/DoS vector on the most attacker-reachable query in the system. |
+| `expiresAt` | 159 | Expiration job (`jobs.processor.ts` expiration check) | Full table scan on every scheduled run; cost grows linearly with certificate volume. |
+
+### 5.2 Fix
+- Added `@Index({ unique: true })` to `verificationCode`. Uniqueness is already enforced at the service layer (codes are generated and checked for collisions), so the constraint is compatible with existing data; the index also makes the public verify lookup an O(log n) point lookup.
+- Added `@Index()` to `expiresAt` so the expiration job's range predicate (`expiresAt <= :now` combined with `status`) can use an index scan.
+
+### 5.3 Migration / Compatibility
+- No API or data-shape change. Existing rows are unaffected; the unique index is created by the standard TypeORM migration flow.
+- Rollout note: on large deployments, index creation on `certificates` should be scheduled during a low-traffic window (or run `CONCURRENTLY` on Postgres) to avoid a write lock while the unique index is built. If duplicate `verificationCode` values are found during migration, the migration will fail loudly — this is intentional, since duplicates would already break the verify endpoint's single-row assumption.
+
+### 5.4 Regression Coverage
+- Added entity metadata tests asserting `verificationCode` carries a unique index and `expiresAt` carries a non-unique index, so a future refactor that drops either decorator fails CI.
+- Added a repository-level test asserting `findByVerificationCode` and the expiration query both resolve via the indexed columns (query plan / metadata assertion), guarding against silent regression to a full scan.
+
+### 5.5 Verification Checklist
+- [x] `verificationCode` indexed with `@Index({ unique: true })`.
+- [x] `expiresAt` indexed with `@Index()`.
+- [x] Entity metadata regression tests added.
+- [x] Focused tests and typecheck/build run for `backend`.
+- [x] Migration/rollout note documented above.
