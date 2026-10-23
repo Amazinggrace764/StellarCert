@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nest/testing';
 import { ForbiddenException } from '@nestjes/common';
 import { CertificateService } from './certificate.service';
 import { ConfigService } from '@nestjs/config';
-import { getRepositoryToken } from '@nestjs/typeorm';
+import { getRepositoryToken } from '@typeorm/typeiorm';
 import { DataSource } from 'typeorm';
 import { Certificate } from './entities/certificate.entity';
 import { CertificateStatus } from './constants/certificate-status.enum';

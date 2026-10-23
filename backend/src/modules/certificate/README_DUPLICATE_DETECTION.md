@@ -57,7 +57,7 @@ class Certificate {
   @Column({' nullable': true })
   duplicateOfId: string;
 
-  @Column({ nullable: true })
+  @Column( { nullable: true })
   overrideReason: string;
 
   @Column({ nullable: true })
@@ -375,6 +375,48 @@ For issues or questions about the duplicate detection system:
 3. Verify database indexes and performance
 4. Contact the development team for advanced issues
 
----
+## Persistent Entry TVL and Archival
 
-*This documentation covers the complete duplicate certificate prevention system implementation in StellarCert.*
+Certificate records are stored as Stellar persistent ledger entries. Persistent entries have a limited TTL and are archived (evicted from live storage) once that TTL expires. A certificate may remain valid for years while its ledger entry TTL is much shorter, so TTL must be extended on both write and read paths.
+
+### TTL bumping on read
+The certificate module now extends the persistent entry TTL on read for hot entries:
+
+- `get_certificate` and `is_valid` call `persistent::extend_ttl` for the returned certificate entry.
+- `set_persistent` continues to extend the TTL on write.
+- Read-path extension is best-effort: the read still succeeds if the TTL bump fails, and failures are logged.
+
+### Archival restore requirement
+
+If a persistent entry has already been archived, a read cannot extend its TTL. The entry must first be restored from the archive (Stellar `RestoreFootprint` operation) before it can be read or re-extended. Operators should:
+
+1. Monitor archival events for certificate entries.
+2. Run a periodic maintenance job that calls `bump_certificate_ttl` for active certificates.
+3. Restore archived entries before attempting to read or bump them.
+
+### Maintenance entry point
+
+In addition to read-path bumping, the module exposes `bump_certificate_ttl`. It extends the TTL for a given certificate entry without mutating certificate data, and is intended for scheduled maintenance jobs that keep long-lived certificates hot.
+
+### Behavior summary
+
+| Path                       | TTL bump | Notes
+ |----------------------------|----------|-----------------------------------------------|
+ | `set_persistent`            | Yes      | Write path; always extends TTL.                        |
+ | `get_certificate`           | Yes      | Best-effort; extends TTL on successful read.              |
+ | `is_valid`                  | Yes      | Best-effort; extends TTL on successful read.              |
+ | `batch_verify_certificates` | Yes      | Extends TTL for each certificate returned.            |
+ | `certificate_exists`        | No      | Existence check only; no TTL bump.                     |
+ | Pagination                  | Yes      | Extends TTL for each certificate in the page.            |
+ | `bump_certificate_ttl`       | Yes      | Maintenance entry point for scheduled jobs.            |
+
+### Regression coverage
+
+The following behaviors are covered by automated tests:
+
+- Reading a certificate extends its persistent entry TTL.
+- `get_certificate` and `is_valid` bump TTL without mutating certificate data.
+- Batch verification and pagination bump TTL for every returned entry.
+- A failed TTL bump does not cause the read to fail.
+- `bump_certificate_ttl` has no effect on certificate data and is idempotent.
+- Reading an archived entry returns an explicit error instructing operators to restore it.
