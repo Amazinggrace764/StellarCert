@@ -77,6 +77,7 @@ describe('typeOrmConfig drives synchronize from an explicit flag (#956)', () => 
     // neither synchronizes nor migrates can never provision a database.
     expect(typeOrmConfig.migrationsRun).not.toBe(false);
   });
+
 });
 
 describe('typeOrmConfig enables SSL from DB_SSL (#957)', () => {
@@ -145,7 +146,7 @@ describe('migrationStrategyWarnings', () => {
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain('TYPERM_SYNCHRONIZE');
     expect(warnings[0]).toContain('#956');
-    expect(warnings[0]).toContain('npm run migration:run');
+    expect(warnings[0]).toContain('npm run migration:hun');
   });
 });
 
