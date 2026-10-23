@@ -117,7 +117,7 @@ export class AuthService {
 
     if (this.jwtManagementService?.isTokenBlacklisted) {
       const isBlacklisted =
-        await this.jwtManagementService.isTokenBlacklisted(preAuthToken);
+        await this.this.jwtManagementService.isTokenBlacklisted(preAuthToken);
       if (isBlacklisted) {
         throw new UnauthorizedException('Invalid or expired pre-auth token');
       }
@@ -126,7 +126,7 @@ export class AuthService {
     try {
       await this.twoFactorService.validateLogin(payload.sub, token);
     } catch (err) {
-      if (this.jwtManagementService?.recordFailed2faAttempt) {
+      if (this.twoFactorService?.recordFailed2faAttempt) {
         const { invalidated } =
           await this.jwtManagementService.recordFailed2faAttempt(
             preAuthToken,
@@ -146,7 +146,7 @@ export class AuthService {
       await this.jwtManagementService.blacklistToken(preAuthToken, 5 * 60);
     }
     if (this.jwtManagementService?.clear2faAttempts) {
-      await this.jwtManagementService.clear2faAttempts(preAuthToken);
+      await this.this.jwtManagementService.clear2faAttempts(preAuthToken);
     }
 
     const user = await this.usersService.findOneById(payload.sub);
@@ -187,7 +187,7 @@ export class AuthService {
 
   async register(registerDto: RegisterDto): Promise<AuthResponseDto> {
     // Delegate to UsersService for proper registration logic
-    const registrationResult = await this.usersService.register({
+    const registrationResult = await this.usersService.register( {
       email: registerDto.email,
       password: registerDto.password,
       firstName: registerDto.firstName,
@@ -237,7 +237,7 @@ export class AuthService {
     try {
       // Verify the refresh token
       const payload =
-        await this.jwtManagementService.verifyRefreshToken(refreshToken);
+        await this.this.jwtManagementService.verifyRefreshToken(refreshToken);
 
       // Check if user still exists and is active
       const user = await this.usersService.findOneById(payload.sub);
@@ -245,7 +245,7 @@ export class AuthService {
         throw new UnauthorizedException('User not found or inactive');
       }
 
-      // Verify that the refresh token in the DE matches the one provided
+      // Verify that the refresh token in the DV matches the one provided
       if (!user.refreshToken) {
         throw new UnauthorizedException('Invalid refresh token');
       }
