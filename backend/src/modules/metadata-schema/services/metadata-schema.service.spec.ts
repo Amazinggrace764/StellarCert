@@ -142,6 +142,69 @@ describe('MetadataSchemaService', () => {
     });
   });
 
+  describe('update', () => {
+    it('should update mutable fields without changing version', async () => {
+      mockRepository.findOne.mockResolvedValueOnce(savedSchema);
+      const result = await service.update('schema-uuid-1', {
+        description: 'Updated description',
+      });
+      expect(result.description).toBe('Updated description');
+      expect(result.version).toBe(savedSchema.version);
+    });
+
+    it('should reject mutating the version', async () => {
+      mockRepository.findOne.mockResolvedValueOnce(savedSchema);
+      await expect(
+        service.update('schema-uuid-1', { version: '2.0.0' }),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockRepository.save).not.toHaveBeenCalled();
+    });
+
+    it('should allow setting the same version value', async () => {
+      mockRepository.findOne.mockResolvedValueOnce(savedSchema);
+      const result = await service.update('schema-uuid-1', {
+        version: savedSchema.version,
+        description: 'Same version',
+      });
+      expect(result.version).toBe(savedSchema.version);
+    });
+
+    it('should reject renaming to a colliding name+version', async () => {
+      const conflictingSchema = {
+        ...savedSchema,
+        id: 'schema-uuid-2',
+        name: 'other-schema',
+      };
+      mockRepository.findOne
+        .mockResolvedValueOnce(savedSchema)
+        .mockResolvedValueOnce(conflictingSchema);
+
+      await expect(
+        service.update('schema-uuid-1', { name: 'other-schema' }),
+      ).rejects.toThrow(ConflictException);
+      expect(mockRepository.save).not.toHaveBeenCalled();
+    });
+
+    it('should allow renaming when no conflict exists', async () => {
+      mockRepository.findOne
+        .mockResolvedValueOnce(savedSchema)
+        .mockResolvedValueOnce(null);
+
+      const result = await service.update('schema-uuid-1', {
+        name: 'renamed-schema',
+      });
+      expect(result.name).toBe('renamed-schema');
+      expect(result.version).toBe(savedSchema.version);
+    });
+
+    it('should throw NotFoundException when schema does not exist', async () => {
+      mockRepository.findOne.mockResolvedValue(null);
+      await expect(
+        service.update('missing', { description: 'x' }),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
   describe('upgradeSchema', () => {
     it('should reject downgrade', async () => {
       // upgradeSchema resolves the current schema via findLatestByName (findOne)
@@ -271,7 +334,8 @@ describe('MetadataSchemaService', () => {
       expect(result.valid).toBe(false);
       expect(
         result.errors.some(
-          (e) => e.field === 'instructorEmail' && e.constraint === 'email',
+          (e) =>
+            e.field === 'instructorEmail' && e.constraint === 'email',
         ),
       ).toBe(true);
     });

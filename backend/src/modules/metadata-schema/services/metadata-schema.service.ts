@@ -407,7 +407,7 @@ export class MetadataSchemaService {
         if (field.minLength !== undefined && value.length < field.minLength) {
           errors.push({
             field: field.name,
-            message: `"${field.name}" must be at least ${field.minLength} characters`,
+            message: `"${field.name}" must be at least ${field.minLength} characters`,
             value,
             constraint: 'minLength',
           });
@@ -439,7 +439,7 @@ export class MetadataSchemaService {
         if (typeof value !== 'number' || Number.isNaN(value)) {
           errors.push({
             field: field.name,
-            message: `"${field.name}" must be a number`,
+            message: `"${field.name}" must be a number`,
             value,
             constraint: 'type',
           });
@@ -450,7 +450,7 @@ export class MetadataSchemaService {
         if (typeof value !== 'boolean') {
           errors.push({
             field: field.name,
-            message: `"${field.name}" must be a boolean`,
+            message: `"${field.name}" must be a boolean`,
             value,
             constraint: 'type',
           });

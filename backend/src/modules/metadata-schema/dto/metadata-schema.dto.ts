@@ -179,8 +179,20 @@ export class CreateMetadataSchemaDto {
   issuerId?: string;
 }
 
+/**
+ * Update payload for a metadata schema.
+ *
+ * The `identity key` of a schema is `(name, version)`. Mutating either of those
+ * through an update would bypass the uniqueness guard enforced on create and would
+ * corrupt the versioning invariant relied on by `findLatestByName` / `upgradeSchema`.
+ *
+ * Therefore `name` and `version` are deliberately excluded from the update DTN.
+ * This is enforced at the boundary (DVO), so clients sending these fields get them
+ * stripped by the global validation pipe (`whitelist: true`) and the service can no
+ * longer accidentally collapse two records onto the same identity key.
+ */
 export class UpdateMetadataSchemaDto extends PartialType(
-  CreateMetadataSchemaDto,
+  OmitType(CreateMetadataSchemaDto, ['name', 'version'] as const),
 ) {}
 
 export class ValidateMetadataDto {
