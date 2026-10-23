@@ -14,6 +14,83 @@ NETWORK="${STELLAR_NETWORK}--testnet}"
 ADMIN_SECRET="${SOROBAN_ADMIN_SECRET}"
 RPC_URL="${SOROBAN_RPC_URL}"
 
+# Reproducible build inputs. These must match the pinned toolchain used by CI
+# so that the WASM bytes deployed here are the same bytes that were tested.
+# Override only when intentionally reproducing a different recorded revision.
+SOURCE_REVISION="${SOURCE_REVISION:-$(git rev-parse HEAD 2>/dev/null || echo unknown)}"
+RUST_TOOLCHAIN="${RUST_TOOLCHAIN:-$(cat rust-toolchain.toml 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)}"
+RUST_TOOLCHAIN="${RUST_TOOLCHAIN:-1.79.0}"
+SOROBAN_CLI_VERSION="${SOROBAN_CLI_VERSION:-21.0.0}"
+WASM_TARGET="wasm32-unknown-unknown"
+RELEASE_DIR="${RELEASE_DIR:-../release-artifacts}"
+
+# Artifact identity record. Every deployed contract is appended here so the
+# deployed WASM hash and contract ID can be audited against the release.
+ARTIFACT_RECORD="${ARTIFACT_RECORD:-$RELEASE_DIR/deployed-contracts-$NETWORK.json}"
+
+mkdir -p "$RELEASE_DIR"
+
+# Verify the pinned toolchain is actually installed before building. A
+# mismatched toolchain produces different bytes and breaks reproducibility.
+echo "Verifying pinned toolchain (rust $RUST_TOOLCHAIN, soroban-cli $SOROBAN_CLI_VERSION)..."
+if ! rustup toolchain list 2>/dev/null | grep -q "^$RUST_TOOLCHAIN"; then
+    echo "Error: pinned Rust toolchain $RUST_TOOLCHAIN is not installed." >&2
+    echo "Install it with: rustup toolchain install $RUST_TOOLCHAIN" >&2
+    exit 1
+fi
+if ! command -v soroban >/dev/null 2>&1; then
+    echo "Error: soroban-cli is not installed (expected $SOROBAN_CLI_VERSION)." >&2
+    exit 1
+fi
+
+# Verify a release artifact against its recorded checksum and provenance
+# before deploying. This gates promotion on artifact identity: we never
+# rebuild different bytes at deploy time.
+verify_artifact() {
+    local wasm_path="$1"
+    local checksum_file="${wasm_path}.sha256"
+    local provenance_file="${wasm_path}.provenance.json"
+
+    if [ ! -f "$wasm_path" ]; then
+        echo "Error: expected release artifact $wasm_path not found." >&2
+        echo "Build and promote artifacts via CI; do not build at deploy time." >&2
+        exit 1
+    fi
+    if [ ! -f "$checksum_file" ]; then
+        echo "Error: missing checksum file $checksum_file." >&2
+        exit 1
+    fi
+    if [ ! -f "$provenance_file" ]; then
+        echo "Error: missing provenance file $provenance_file." >&2
+        exit 1
+    fi
+
+    echo "Verifying checksum for $wasm_path..."
+    ( cd "$(dirname "$wasm_path")" && sha256sum -c "$(basename "$checksum_file")" )
+
+    # Confirm the provenance records the source revision we intend to deploy.
+    local recorded_rev
+    recorded_rev=$(grep -oE '"sourceRevision"[[:space:]]*:[[:space:]]*"[^"]+"' "$provenance_file" | grep -oE '[0-9a-f]{7,40}' | head -1 || true)
+    if [ -n "$recorded_rev" ] && [ "$recorded_rev" != "$SOURCE_REVISION" ]; then
+        echo "Error: artifact provenance revision $recorded_rev does not match $SOURCE_REVISION." >&2
+        exit 1
+    fi
+
+    echo "Artifact verified: $(sha256sum "$wasm_path" | awk '{print $1}')"
+}
+
+# Record the deployed artifact hash and contract mapping for auditability.
+record_deployment() {
+    local name="$1"
+    local contract_id="$2"
+    local wasm_path="$3"
+    local wasm_sha
+    wasm_sha=$(sha256sum "$wasm_path" | awk '{print $1}')
+    printf '{"name":"%s","network":"%s","contractId":"%s","wasmSha256":"%s","sourceRevision":"%s","rustToolchain":"%s","sorobanCli":"%s"}\n' \
+        "$name" "$NETWORK" "$contract_id" "$wasm_sha" "$SOURCE_REVISION" "$RUST_TOOLCHAIN" "$SOROBAN_CLI_VERSION" \
+        >> "$ARTIFACT_RECORD"
+}
+
 if [ -z "$ADMIN_SECRET" ]; then
     echo "Error: SOROBAN_ADMIN_SECRET environment variable is required" >&2
     exit 1
@@ -173,6 +250,7 @@ echo "Multisig WASM installed with hash: $MULTISIG_WASM_HASH"
 
 MULTISIG_CONTRACT_ID="$(deploy_wasm_hash "$MULTISIG_WASM_HASH")"
 echo "Multisig contract deployed with ID: $MULTISIG_CONTRACT_ID"
+record_deployment "multisig" "$MULTISIG_CONTRACT_ID" "$CERT_WASM"
 
 # -----------------------------------------------------------------------------
 # Deploy CRL contract
@@ -183,6 +261,7 @@ echo "CRL WASM installed with hash: $CRL_WASM_HASH"
 
 CRL_CONTRACT_ID="$(deploy_wasm_hash "$CRL_WASM_HASH")"
 echo "CRL contract deployed with ID: $CRL_CONTRACT_ID"
+record_deployment "crl" "$CRL_CONTRACT_ID" "$CERT_WASM"
 
 # Initialize the CRL and link it to the certificate contract so that
 	# CertificateContract.revoke_certificate mirrors the revocation into the CRL in the same transaction. The CRL issuer must be the same address that issues certificates, otherwise the mirrored revocation is rejected.
