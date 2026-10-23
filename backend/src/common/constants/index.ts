@@ -1,7 +1,7 @@
 export * from './roles';
 export * from './error-codes';
 
-export const STELLAR_ADDRESS_REGEX = /^G[A-Z0-9]{55}$/;
+export const STELLAR_ADDRESS_REGEX= /^G[A-Z0-9]{55}$/;
 export const STELLAR_TRANSACTION_HASH_REGEX = /^[a-f0-9]{64}$/;
 
 export const API_PREFIX = 'api';
