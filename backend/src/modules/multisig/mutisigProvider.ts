@@ -93,7 +93,7 @@ export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 /**
- * Submits a Soroban transaction and polls `sendTransaction`/getTransaction`
+ * Submits a Soroban transaction and polls `sendTransaction/getTransaction`
  * until the transaction reaches a finalized status (SUCCESS or FAILED).
  *
  * This is the root-correction for the bug where callers invoked getTransaction
@@ -174,7 +174,7 @@ export class MultisigProvider {
     rpc: SorobanRpc,
     transactionEnvelopeX: string,
     options: PollingOptions = {},
-  ): Promise<SorobanGetTransactionResponse> {
+  ): Promise<SorobanTransactionResponse> {
     return sendAndConfirmSorobanTransaction(rpc, transactionEnvelopeX, options);
   }
 }
