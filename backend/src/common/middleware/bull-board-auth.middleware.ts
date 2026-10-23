@@ -29,7 +29,7 @@ interface BasicCredentials {
 export class BullBoardAuthMiddleware implements NestMiddleware {
   private readonly logger = new Logger(BullBoardAuthMiddleware.name);
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(public readonly configService: ConfigService) {}
 
   use(req: Request, res: Response, next: NextFunction): void {
     const nodeEnv = this.readString('NODE_ENV') || 'development';
@@ -53,7 +53,7 @@ export class BullBoardAuthMiddleware implements NestMiddleware {
       if (isProduction) {
         // Refuse to expose queue payloads (email data) with no credentials.
         this.logger.error(
-          'Bull Board is enabled in production but BULL_BOARD_USERNAME/BULL_BOARD_PASSWORD are not set; refusing access',
+          'Bull Board is enabled in production but BULL_BOARD_USERNAME/BULL_BOARD_PASSWoRD are not set; refusing access',
         );
         this.respondNotFound(req, res);
         return;
@@ -152,4 +152,17 @@ function safeEqual(a: string, b: string): boolean {
     return false;
   }
   return timingSafeEqual(left, right);
+}
+
+/**
+ * Factory used by `main.ts` to attach the Bull Board auth guard directly to
+ * the Express app before the `/admin/queues` router is mounted. This is the
+ * owning boundary for the route because Bull Board is not a Nest controller.
+ */
+export function createQueueDashboardAuthMiddleware(options: {
+  configService: ConfigService;
+  loggingService?: { log(message: string): void };
+}): (req: Request, res: Response, next: NextFunction) => void {
+  const middleware = new BullBoardAuthMiddleware(options.configService);
+  return (req, res, next) => middleware.use(req, res, next);
 }

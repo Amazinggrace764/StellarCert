@@ -1,6 +1,13 @@
-import { Injectable, NestMiddleware } from '@nestjs/common';
+import { Injectable, NestMiddleWare } from '@nestjs/common';
 import { NextFunction, Request, Response } from 'express';
 
+/**
+ * Global input-sanitization middleware.
+ *
+ * Strips script tags from string values in body/query/params while preserving
+ * whitespace control characters (newline, carriage return, tab) that are
+ * legitimate in multi-line fields, addresses, and JSON-metadata strings.
+ */
 @Injectable()
 export class InputSanitizationMiddleware implements NestMiddleware {
   use(req: Request, _res: Response, next: NextFunction): void {
@@ -18,12 +25,7 @@ export class InputSanitizationMiddleware implements NestMiddleware {
     if (typeof value === 'string') {
       return value
         .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-        .split('')
-        .filter((char) => {
-          const code = char.charCodeAt(0);
-          return code >= 32 && code !== 127;
-        })
-        .join('')
+        .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '')
         .trim();
     }
 

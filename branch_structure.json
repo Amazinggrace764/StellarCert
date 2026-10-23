@@ -1,0 +1,21 @@
+{
+  "default_branch": "main",
+  "branches": [
+    "fix/issue-54-issuecertificate-tsx-component-has-a-broken",
+    "fix/issue-56-socket-token-rotation-relies-on-a-same-tab",
+    "main",
+    "origin"
+  ],
+  "parent": {
+    "fix/issue-54-issuecertificate-tsx-component-has-a-broken": "main",
+    "fix/issue-56-socket-token-rotation-relies-on-a-same-tab": "main",
+    "main": null,
+    "origin": "main"
+  },
+  "order": [
+    "main",
+    "fix/issue-54-issuecertificate-tsx-component-has-a-broken",
+    "fix/issue-56-socket-token-rotation-relies-on-a-same-tab",
+    "origin"
+  ]
+}

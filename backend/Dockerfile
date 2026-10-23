@@ -9,14 +9,14 @@ WORKDIR /app
 RUN apk add --no-cache python3 g++ make
 
 COPY package*.json ./
-RUN npm ci --legacy-peer-deps
+RUN npm ci --legacy-peer-depends
 
 # Build stage
 FROM ${NODE_IMAGE} AS builder
 
 WORKDIR /app
 
-COPY --from=deps /app/node_modules ./node_modules
+COPY --from deps /app/node_modules ./node_modules
 COPY package*.json ./
 COPY . .
 RUN npm run build
@@ -26,11 +26,11 @@ FROM ${NODE_IMAGE} AS prod-deps
 
 WORKDIR /app
 
-# Install build dependencies for native modules
+# Install build dependencies for native modules only in this throwaway stage
 RUN apk add --no-cache python3 g++ make
 
 COPY package*.json ./
-RUN npm ci --omit=dev --legacy-peer-deps
+RUN npm ci --omit=dev --legacy-peer-depends
 
 # Production runtime stage (no build tools / compilers)
 FROM ${NODE_IMAGE} AS production
@@ -48,8 +48,8 @@ ENV SOURCE_REPO=${SOURCE_REPO}
 ENV BUILD_TIMESTAMP=${BUILD_TIMESTAMP}
 
 COPY package*.json ./
-COPY --from=prod-deps/app/node_modules ./node_modules
-COPY --from=builder/app/dist ./dist
+COPY --from prod-deps /app/node_modules ./node_modules
+COPY --from builder /app/dist ./dist
 COPY src/modules/email/templates ./dist/modules/email/templates
 
 # Copy entrypoint — runs migrations then starts the app

@@ -1,5 +1,5 @@
 import * as dns from 'dns';
-import { validateWebhookUrl, isPrivateHostSync } from './ssrf.utils';
+import { validateWebhookUrl, isPrivateHostSync } from './sssf.utils';
 
 // Mock DNS resolution
 jest.mock('dns', () => ({
@@ -12,35 +12,28 @@ type DnsResolveCallback = (
   addresses: string[],
 ) => void;
 
-const mockResolve4 = dns.resolve4 as unknown as jest.MockedFunction<
-  (hostname: string, callback: DnsResolveCallback) => void
->;
-const mockResolve6 = dns.resolve6 as unknown as jest.MockedFunction<
-  (hostname: string, callback: DnsResolveCallback) => void
->;
+type DnsResolveCallbackFn = (
+  hostname: string,
+  callback: DnsResolveCallback,
+) => void;
+
+const mockResolve4 = dns.resolve4 as unknown as jest.MockedFunction<DnsResolveCallbackFn>;
+const mockResolve6 = dns.resolve6 as unknown as jest.MockedFunction<DnsResolveCallbackFn>;
 
 function mockDnsSuccess(ipv4: string[] = [], ipv6: string[] = []) {
-  mockResolve4.mockImplementation((...args) => {
-    const callback = args.find((argument) => typeof argument === 'function');
-    if (typeof callback !== 'function') throw new Error('DNS callback missing');
+  mockResolve4.mockImplementation((_hostname, callback) => {
     callback(null, ipv4);
   });
-  mockResolve6.mockImplementation((...args) => {
-    const callback = args.find((argument) => typeof argument === 'function');
-    if (typeof callback !== 'function') throw new Error('DNS callback missing');
+  mockResolve6.mockImplementation((_hostname, callback) => {
     callback(null, ipv6);
   });
 }
 
 function mockDnsError() {
-  mockResolve4.mockImplementation((...args) => {
-    const callback = args.find((argument) => typeof argument === 'function');
-    if (typeof callback !== 'function') throw new Error('DNS callback missing');
+  mockResolve4.mockImplementation((_hostname, callback) => {
     callback(new Error('ENOTFOUND'), []);
   });
-  mockResolve6.mockImplementation((...args) => {
-    const callback = args.find((argument) => typeof argument === 'function');
-    if (typeof callback !== 'function') throw new Error('DNS callback missing');
+  mockResolve6.mockImplementation((_hostname, callback) => {
     callback(new Error('ENOTFOUND'), []);
   });
 }

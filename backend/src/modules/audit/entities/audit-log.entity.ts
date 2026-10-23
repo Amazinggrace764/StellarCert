@@ -12,7 +12,7 @@ import { AuditAction, AuditResourceType } from '../constants';
 @Index(['action'])
 @Index(['resourceType'])
 // @Index(['resourceId']) // Keep commented for now
-@Index(['createdAt'])
+@Index(['timestamp'])
 @Index(['correlationId'])
 @Index(['ipAddress'])
 @Index(['status'])
@@ -122,6 +122,9 @@ export class AuditLog {
   })
   timestamp: number;
 
+  // Note: `timestamp` is the hot column for search/sort/purge and is
+  // indexed at the entity level above. `createdAt` is kept for data
+  // compatibility but is no longer indexed.
   @CreateDateColumn()
   createdAt: Date;
 }
