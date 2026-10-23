@@ -18,7 +18,7 @@ The Duplicate Certificate Prevention System provides intelligent duplicate detec
 - **Enable/Disable Rules**: Turn specific rules on or off based on requirements
 - **Custom Rules**: Add new rules for specific use cases
 
-### 🚦 **Action Types**
+### 🚠 **Action Types**
 - **Block**: Completely prevents certificate issuance when duplicates are detected
 - **Warn**: Issues a warning but allows issuance with override reason
 - **Allow**: Proceeds without intervention (for logging purposes only)
@@ -29,7 +29,7 @@ The Duplicate Certificate Prevention System provides intelligent duplicate detec
 - **Breakdown by Type**: Analysis by issuer, duplicate type, and frequency
 - **Export Capabilities**: Generate reports for compliance and auditing
 
-### 🔓 **Override Mechanism**
+### 🔔 **Override Mechanism**
 - **Override Requests**: Users can request overrides for flagged duplicates
 - **Admin Approval**: Administrators can review and approve/deny override requests
 - **Audit Trail**: Complete history of override requests and decisions
@@ -47,7 +47,6 @@ The Duplicate Certificate Prevention System provides intelligent duplicate detec
 ### Database Schema
 
 The certificate entity includes the following duplicate-related fields:
-
 ```typescript
 class Certificate {
   // ... existing fields
@@ -356,6 +355,16 @@ const config = {
   debug: true, // Enable detailed logging
 };
 ```
+
+## Merkle Root Domain Separation
+
+Certificate issuance also produces a Merkle root in `crl.rs` for off-chain inclusion proofs. The Merkle tree must not allow an attacker to present an internal node as a leaf or to craft alternative trees with the same root. Therefore the hashing rules are:
+
+- **Leaf hash**: `sha256(0x00 || id)` instead of `sha256(id)`.
+- **Internal node hash**: `sha256(0x01 || left || right)` instead of `sha256(left || right)`.
+- **Odd counts**: Odd nodes are not promoted by duplicating the last leaf. The last node is carried to the next level unchanged, so the tree shape is deterministic and cannot be ambiguously reinterpreted.
+
+Any off-chain inclusion proof must be verified using the same domain tags and the same odd-node handling as the on-chain `crl.rs` implementation. The duplicate detection system does not alter this behavior; it only decides whether a certificate is allowed to be issued and thus enter the tree.
 
 ## Support
 

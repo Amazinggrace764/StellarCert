@@ -1,10 +1,12 @@
-/**
+/*
  * Certificate Revocation List (CRL) integration module.
  * Addresses issue #421: CRL contract is separate but should be integrated.
  *
  * Provides a unified interface so that certificate validity checks always
  * consult the CRL, making revocations immediately visible during verification.
  */
+
+import { createHash } from 'crypto';
 
 export interface RevocationEntry {
   certId: string;
@@ -84,6 +86,44 @@ export class CertificateRevocationList {
     return Array.from(this.revoked.keys());
   }
 
+  /**
+   * Compute the Merkle root of the currently revoked certificate IDs.
+   *
+   * Domain separation is enforced to prevent second-preimage forgeries:
+   *   - leaves are hashed as sha256(0x00 || certId)
+   *   - internal nodes are hashed as sha256(0x01 || left || right)
+   *
+   * Odd counts are handled by carrying the unpaired node up to the next
+   * level without duplicating it, so no silent duplication occurs.
+   */
+  merkleRoot(): string {
+    const leaves = this.listRevoked()
+      .sort()
+      .map((certId) => hashLeaf(certId));
+
+    if (leaves.length === 0) {
+      // Empty tree: return the canonical empty-root constant (domain-tagged).
+      return hashNode(Buffer.alloc(0, 0), Buffer.alloc(0, 0));
+    }
+
+    let level: Buffer[] = leaves;
+    while (level.length > 1) {
+      const nextLevel: Buffer[] = [];
+      for (let i = 0; i < level.length; i += 2) {
+        const left = level[i];
+        const right = i + 1 < level.length ? level[i + 1] : undefined;
+        if (right === undefined) {
+          // Odd node: carry it untouched rather than duplicating it.
+          nextLevel.push(left);
+        } else {
+          nextLevel.push(hashNode(left, right));
+        }
+      }
+      level = nextLevel;
+    }
+    return level[0].toString('hex');
+  }
+
   private emitRevocationAdded(entry: RevocationEntry): void {
     const event: CRLRevocationAddedEvent = {
       topic: 'CRLRevocationAddedEvent',
@@ -99,6 +139,19 @@ export class CertificateRevocationList {
       }
     }
   }
+}
+
+/** Domain separation tag for Merkle leaves. */
+const LEAF_TAG = Buffer.from([0x00]);
+//** Domain separation tag for Merkle internal nodes. */
+const NODE_TAG = Buffer.from([0x01]);
+
+function hashLeaf(certId: string): Buffer {
+  return createHash('sha256').update(LEAF_TAG).update(certId, 'utf8').update(Buffer.from([0])).digest();
+}
+
+function hashNode(left: Buffer, right: Buffer): Buffer {
+  return createHash('sha256').update(NODE_TAG).update(left).update(right).digest();
 }
 
 /**

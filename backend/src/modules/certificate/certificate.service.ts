@@ -1,4 +1,3 @@
-import { BadRequestException as _BadRequestException } from '@nestjs/common';
 import {
   BadRequestException,
   BadGatewayException,
@@ -11,7 +10,7 @@ import {
 } from '@nestjs/common';
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, In } from 'typeorm';
 import * as QRCode from 'qrcode';
 import { CreateCertificateDto } from './dto/create-certificate.dto';
 import { UpdateCertificateDto } from './dto/update-certificate.dto';
@@ -410,6 +409,17 @@ export class CertificateService {
     return certificate;
   }
 
+  /**
+   * Look up a certificate by its verification code.
+   *
+   * `verificationCode` is the lookup key for the public, unauthenticated
+   * verify endpoint, so this query is the most attacker-reachable path in the
+   * system. It relies on the unique index declared on
+   * `Certificate.verificationCode` (see certificate.entity.ts) so the lookup
+   * is an index seek rather than a full table scan. Do not change this to a
+   * query that cannot use the index (e.g. a `LIKE`/`ILIKE` on the column or a
+   * function wrapping it) without also updating the index.
+   */
   async findByVerificationCode(verificationCode: string): Promise<Certificate> {
     const certificate = await this.certificateRepository
       .createQueryBuilder('certificate')
@@ -432,6 +442,39 @@ export class CertificateService {
     }
 
     return certificate;
+  }
+
+  /**
+   * Find certificates whose `expiresAt` falls within the given window.
+   *
+   * Used by the expiration job. Relies on the index declared on
+   * `Certificate.expiresAt` (see certificate.entity.ts) so the scan is bounded
+   * by the window rather than the whole table.
+   */
+  async findExpiringBetween(
+    from: Date,
+    to: Date,
+  ): Promise<Certificate[]> {
+    return this.certificateRepository
+      .createQueryBuilder('certificate')
+      .where('certificate.expiresAt >= :from', { from })
+      .andWhere('certificate.expiresAt <= :to', { to })
+      .orderBy('certificate.expiresAt', 'ASC')
+      .getMany();
+  }
+
+  /**
+   * Find certificates that have already expired as of `now`.
+   *
+   * Relies on the index declared on `Certificate.expiresAt`.
+   */
+  async findExpired(now: Date = new Date()): Promise<Certificate[]> {
+    return this.certificateRepository
+      .createQueryBuilder('certificate')
+      .where('certificate.expiresAt IS NOT NULL')
+      .andWhere('certificate.expiresAt < :now', { now })
+      .orderBy('certificate.expiresAt', 'ASC')
+      .getMany();
   }
 
   async verifyCertificate(verificationCode: string): Promise<Certificate> {
