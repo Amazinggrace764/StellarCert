@@ -18,6 +18,7 @@ This module provides comprehensive Stellar address validation services for the S
 Validates a single Stellar address.
 
 **Request Body:**
+
 ```json
 {
   "address": "GD5J7YFQGYVFSJ4G6LXGJTT5Y2E5Z2X7ZQ2K7X7ZQ2K7X7ZQ2K7X7ZQ2K7X7ZQ",
@@ -27,6 +28,7 @@ Validates a single Stellar address.
 ```
 
 **Response:**
+
 ```json
 {
   "isValid": true,
@@ -47,10 +49,12 @@ Validates a single Stellar address.
 }
 ```
 
-### POST `/stellar/address-validation/bulk`
+### POST `/stellar/address-validation/bulk
+`
 Validates multiple Stellar addresses.
 
 **Request Body:**
+
 ```json
 {
   "addresses": [
@@ -63,6 +67,7 @@ Validates multiple Stellar addresses.
 ```
 
 **Response:**
+
 ```json
 {
   "results": [...],
@@ -120,10 +125,10 @@ const bulkResult = await this.addressValidationService.validateBulk({
 The service provides detailed error information for each validation step:
 
 - **Format Errors**: Invalid address format
-- **Checksum Errors**: Invalid checksum
-- **Network Errors**: Address doesn't match specified network
-- **Account Existence Errors**: Account not found on Horizon
-- **API Errors**: Horizon API connectivity issues
+- `**Checksum Errors**: Invalid checksum
+- `**Network Errors**: Address doesn't match specified network
+- `**Account Existence Errors**: Account not found on Horizon
+- `**API Errors**: Horizon API connectivity issues
 
 ## Testing
 
