@@ -34,7 +34,7 @@ import { RedisService } from './redis/redis.service';
 import { IpRateLimitStore } from './rate-limiting/ip-rate-limit.store';
 import { RedisIpRateLimitStore } from './rate-limiting/redis-ip-rate-limit.store';
 
-@BGlobal()
+@Global()
 @Module({
   imports: [
     ConfigModule,
