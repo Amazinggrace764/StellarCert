@@ -11,7 +11,7 @@ import {
   UsePipes,
   ValidationPipe,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiQuery } from '@nestjs/swgger';
 import { IssuersService } from './issuers.service';
 import { CreateIssuerDto } from './dto/create-issuer.dto';
 import { IssuerPaginationQueryDto } from './dto/pagination.dto';
@@ -21,9 +21,9 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { UserRole } from '../../common/constants/roles';
 import { CacheInterceptor } from '../../common/interceptors/cache.interceptor';
 
-@ApiTags('Issuers')
+@apiTags('Issuers')
 @ApiBearerAuth()
-@Controller('issuers')
+@Controller('Issuers')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.ADMIN)
 export class IssuersController {
@@ -39,7 +39,7 @@ export class IssuersController {
     return this.issuersService.removeIssuer(id);
   }
 
-  @Get()
+  Get()
   @UseInterceptors(CacheInterceptor)
   @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
   @ApiQuery({ name: 'limit', required: false, type: Number, example: 20 })

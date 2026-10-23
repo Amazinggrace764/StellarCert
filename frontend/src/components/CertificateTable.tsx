@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useAuth } from '../context/AuthContext';
 import {
     Search,
     ChevronUp,
@@ -50,6 +51,12 @@ const ActionError = ({ message, className = '' }: { message: string | null; clas
     ) : null;
 
 const CertificateTable = ({ onError, onSuccess }: CertificateTableProps) => {
+    const { user } = useAuth();
+    const canManageCertificates = user?.role === 'ISSUER' || user?.role === 'ADMIN';
+    const canExportCertificates = canManageCertificates || user?.role === 'VERIFIER';
+    const isOwnerOf = (cert: Certificate) => user?.email != null && cert.recipientEmail === user.email;
+    const canTransferCertificate = (cert: Certificate) => canManageCertificates || isOwnerOf(cert);
+
     // Pagination / filter / sort inputs. The list is a single query keyed on all
     // of them, so revisiting a combination that was already loaded is instant
     // and the six post-mutation refetch calls collapse into invalidation.
@@ -542,9 +549,9 @@ const CertificateTable = ({ onError, onSuccess }: CertificateTableProps) => {
 
                 {/* Bulk Actions */}
                 <div className="flex gap-2 mt-4">
-                    <ExportButton />
-                    <ExportAllButton />
-                    <RevokeButton />
+                    {canExportCertificates && <ExportButton />}
+                    {canExportCertificates && <ExportAllButton />}
+                    {canManageCertificates && <RevokeButton />}
                 </div>
             </div>
 
@@ -690,6 +697,7 @@ const CertificateTable = ({ onError, onSuccess }: CertificateTableProps) => {
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm">
                                             <div className="flex gap-2">
+                                                {canManageCertificates && (
                                                 <button
                                                     onClick={() => handleFreeze(cert.id)}
                                                     className="p-1 text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
@@ -698,7 +706,9 @@ const CertificateTable = ({ onError, onSuccess }: CertificateTableProps) => {
                                                 >
                                                     <Snowflake className="w-5 h-5" />
                                                 </button>
-                                                {cert.status === 'frozen' && (
+                                                )}
+                                                {canManageCertificates && (
+                                                cert.status === 'frozen' && (
                                                     <button
                                                         onClick={() => handleUnfreeze(cert.id)}
                                                         className="p-1 text-green-600 hover:text-green-800 dark:text-green-400 dark:hover:text-green-300"
@@ -707,7 +717,9 @@ const CertificateTable = ({ onError, onSuccess }: CertificateTableProps) => {
                                                     >
                                                         <Check className="w-5 h-5" />
                                                     </button>
+                                                )
                                                 )}
+                                                {canManageCertificates && (
                                                 <button
                                                     onClick={() => { setRevokingCertIds([cert.id]); setShowRevokeModal(true); }}
                                                     className="p-1 text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300"
@@ -716,6 +728,8 @@ const CertificateTable = ({ onError, onSuccess }: CertificateTableProps) => {
                                                 >
                                                     <XCircle className="w-5 h-5" />
                                                 </button>
+                                                )}
+                                                {canTransferCertificate(cert) && (
                                                 <button
                                                     onClick={() => handleTransfer(cert)}
                                                     className="p-1 text-purple-600 hover:text-purple-800 dark:text-purple-400 dark:hover:text-purple-300"
@@ -724,6 +738,19 @@ const CertificateTable = ({ onError, onSuccess }: CertificateTableProps) => {
                                                 >
                                                     <Send className="w-5 h-5" />
                                                 </button>
+                                                )}
+                                                {isOwnerOf(cert) && (
+                                                <button
+                                                    onClick={() => {
+                                                        const url = certificateApi.downloadUrl(cert.id);
+                                                        window.open(url, '_blank', 'noopener,noreferrer');
+                                                    }}
+                                                    className="p-1 text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-300"
+                                                    title="Download Certificate"
+                                                >
+                                                    <Download className="w-5 h-5" />
+                                                </button>
+                                                )}
                                                 <button
                                                     onClick={() => handleViewHistory(cert.id)}
                                                     className="p-1 text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"

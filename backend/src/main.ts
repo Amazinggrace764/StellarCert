@@ -2,7 +2,6 @@ import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { GlobalExceptionFilter } from './common/exceptions/global-exception.filter';
 import { AppModule } from './app.module';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { SentryService } from './common/monitoring/sentry.service';
 import { LoggingService } from './common/logging/logging.service';
 import { MonitoringInterceptor } from './common/monitoring/monitoring.interceptor';
@@ -12,10 +11,11 @@ import { Logger, VersioningType } from '@nestjs/common';
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import { migrationStrategyWarnings } from './config/typeorm.config';
+import { setupSwagger } from './config/swagger.config';
 
 async function bootstrap() {
   // Report configuration that contradicts the documented migration strategy
-  // before anything else starts (e.g. TYPEORM_SYNCHRONIZE=true, which is no
+  // before anything else starts (e.g. TYPORM_SYNCHRONIZE=true, which is no
   // longer honoured — see #956 and MIGRATION_STRATEGY.md).
   for (const warning of migrationStrategyWarnings()) {
     Logger.warn(warning, 'Bootstrap');
@@ -23,7 +23,14 @@ async function bootstrap() {
 
   const app = await NestFactory.create(AppModule);
   const expressApp = app.getHttpAdapter().getInstance();
-  expressApp.set('trust proxy', true);
+
+  // Trust only the configured load balancer / proxy addresses (TrustedProxies).
+  // NEVER `true`: that would trust client-supplied X-Forwarded-For from any
+  // peer and make req.ip / audit IP - rate limit keys forgeable.
+  const trustProxy = resolveTrustProxySetting(
+    process.env.TRUSTED_PROXIES,
+  );
+  expressApp.set('trust proxy', trustProxy);
 
   const sentryService = app.get(SentryService);
   const loggingService = app.get(LoggingService);
@@ -31,7 +38,11 @@ async function bootstrap() {
 
   loggingService.log('🚀 Starting application...');
   loggingService.log(
-    '📧 Email queue name: ' + (process.env.EMAIL_QUEUE_NAME || 'email-queue'),
+    '🧳 Email queue name: ' + (process.env.EMAIL_QUEUE_NAME || 'email-queue'),
+  );
+  loggingService.log(
+    'Trust proxy setting: ' +
+      (trustProxy === false ? 'disabled' : trustProxy.join(',')),
   );
 
   const requestLimit = process.env.REQUEST_SIZE_LIMIT || '1mb';
@@ -77,7 +88,9 @@ async function bootstrap() {
     defaultVersion: '1',
   });
 
-  // Use global pipes and filters
+  // Use global filters. The global validation pipe is registered once via
+  // APP_PIPE in CommonModule -- do not also call app.useGlobalPipes(), or
+  // the pipe would run twice on every request.
   app.useGlobalFilters(
     new GlobalExceptionFilter(
       app.get(ConfigService),
@@ -92,23 +105,10 @@ async function bootstrap() {
     new MonitoringInterceptor(metricsService, sentryService, loggingService),
   );
 
-  // Swagger setup
-  const config = new DocumentBuilder()
-    .setTitle('StellarCert API')
-    .setDescription('Certificate Management System API Documentation')
-    .setVersion('1.0')
-    .addBearerAuth(
-      { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
-      'access-token',
-    )
-    .build();
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api/docs', app, document, {
-    swaggerOptions: {
-      persistAuthorization: true,
-      docExpansion: 'none',
-    },
-  });
+  // Swagger setup — never exposed in production (see swagger.config).
+  if (!setupSwagger(app)) {
+    loggingService.log('Swagger UI disabled (NODE_ENV=production)');
+  }
 
   // Enable graceful shutdown hooks
   app.enableShutdownHooks();
@@ -119,7 +119,7 @@ async function bootstrap() {
 
     // Close BullMQ queues and Redis connections
     try {
-      const queues = app.get('BULL_MODULE_QUEUES') || [];
+      const queues = app.get('BULL_MODUL_QUEUES') || [];
       for (const queue of queues) {
         await queue.close();
       }
@@ -136,13 +136,19 @@ async function bootstrap() {
 
   // Listen for shutdown signals
   process.on('SIGTERM', () => {
-    void gracefulShutdown('SIGTERM');
+    void gracefulShutdown('SIGTERM').catch((error) => {
+      console.error('Failed to shut down gracefully:', error);
+      process.exit(1);
+    });
   });
   process.on('SIGINT', () => {
-    void gracefulShutdown('SIGINT');
+    void gracefulShutdown('SIGINT').catch((error) => {
+      console.error('Failed to shut down gracefully:', error);
+      process.exit(1);
+    });
   });
 
-  const port = process.env.PORT ?? 3000;
+  const port = process.env.PORT || 3000;
   await app.listen(port);
 
   loggingService.log(`Application started on port ${port}`);
