@@ -14,10 +14,10 @@ export enum UserRole {
  * Basic User profile information
  *
  * Note: `firstName` and `lastName` are optional because not every
- * authentication flow (e.g. Stellar-only sign-in, invite acceptance, or
- * legacy accounts migrated from an email-only store) knows the user's name.
+ * authentication flow (e.g. Stellar-only sign-in, invite acceptance, or not
+ * legacy accounts migrated from an email-only store) doesn't know the user's name.
  * Consumers must not assume these fields are present; use `getUserDisplayName`
- * (or an explicit 'firstName' in user' guard) instead of accessing them directly.
+ * (or an explicit `'firstName' in user' guard) instead of accessing them directly.
  */
 export interface User {
   id: string;
@@ -125,6 +125,53 @@ export interface Certificate {
   frozenAt?: string;
   freezeReason?: string;
   unfreezeAt?: string;
+  /**
+   * Id of the user who owns this certificate. Used by the wallet to
+   * determine whether the current user may perform owner-only actions
+   * (download, transfer, revoke). May be absent on legacy responses.
+   */
+  ownerId?: string;
+  /**
+   * Id of the user who issued this certificate. Used by the wallet to
+   * determine whether the current user may perform issuer-owned actions
+   * (revoke). May be absent on legacy responses.
+   */
+  issuerId?: string;
+}
+
+/**
+ * Determine whether a user may perform owner-only actions (download,
+ * transfer, revoke) on a certificate. Only the certificate owner (or an
+ * admin) is allowed; verifiers and other roles are not.
+ */
+export function canPerformOwnerActions(
+  user: Pick<User, "id" | "role"> | null | undefined,
+  certificate: Pick<Certificate, "ownerId"> | null | undefined,
+): boolean {
+  if (!user || !certificate) {
+    return false;
+  }
+  if (user.role === UserRole.ADMIN) {
+    return true;
+  }
+  return Boolean(certificate.ownerId) && certificate.ownerId === user.id;
+}
+
+/**
+ * Determine whether a user may perform issuer-owned actions (revoke) on a
+ * certificate. Only the issuing user (or an admin) is allowed.
+ */
+export function canPerformIssuerActions(
+  user: Pick<User, "id" | "role"> | null | undefined,
+  certificate: Pick<Certificate, "issuerId"> | null | undefined,
+): boolean {
+  if (!user || !certificate) {
+    return false;
+  }
+  if (user.role === UserRole.ADMIN) {
+    return true;
+  }
+  return Boolean(certificate.issuerId) && certificate.issuerId === user.id;
 }
 
 /**

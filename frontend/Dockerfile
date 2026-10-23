@@ -1,6 +1,9 @@
 # Multi-stage Dockerfile supporting both development and production
 # Development: docker build --target development
 # Production: docker build (default target)
+#
+# NOTE: A .dockerignore file must exist alongside this Dockerfile to keep
+# node_modules, .env*, .git, dist, coverage, etc. out of the build context.
 
 # Development stage - runs Vite dev server
 FROM node:26-alpine AS development
