@@ -40,6 +40,19 @@ export class CertificateTransferService {
     private readonly emailService?: EmailService,
   ) {}
 
+  private async generateConfirmationCode(): Promise<string> {
+    return CryptoUtils.generateRandomString(6, { digits: true, upper: false, lower: false });
+  }
+
+  private async findUserByEmail(email: string): Promise<User | null> {
+    if (!this.userRepository || !email) {
+      return null;
+    }
+    return this.userRepository.findOne({
+      where: { email },
+    });
+  }
+
   async initiateTransfer(
     dto: InitiateTransferDto,
     initiator: { id: string; role: string },
@@ -130,11 +143,7 @@ export class CertificateTransferService {
     );
 
     // Look up the new owner (toEmail) user account
-    const recipientUser = this.userRepository
-      ? await this.userRepository.findOne({
-          where: { email: dto.newOwnerEmail },
-        })
-      : null;
+    const recipientUser = await this.findUserByEmail(dto.newOwnerEmail);
 
     if (recipientUser) {
       // Send notification with confirmation code to the intended new owner
@@ -293,11 +302,7 @@ export class CertificateTransferService {
     );
 
     // Look up the new owner (toEmail) user account and notify on completion
-    const recipientUser = this.userRepository
-      ? await this.userRepository.findOne({
-          where: { email: transfer.toEmail },
-        })
-      : null;
+    const recipientUser = await this.findUserByEmail(transfer.toEmail);
 
     if (recipientUser) {
       await this.notificationsService.createNotification(
@@ -368,7 +373,6 @@ export class CertificateTransferService {
     transfer.completedAt = new Date();
     const savedTransfer = await this.transferRepository.save(transfer);
 
-    // Log audit entry
     await this.auditService.log({
       action: AuditAction.CERTIFICATE_UPDATE,
       resourceType: AuditResourceType.CERTIFICATE,
@@ -383,22 +387,21 @@ export class CertificateTransferService {
       status: 'success',
     });
 
-    // Notify the transfer initiator
-    await this.notificationsService.createNotification(
-      transfer.initiatedBy,
-      NotificationType.WARNING,
-      'Certificate Transfer Rejected',
-      `The transfer of certificate "${transfer.certificate.title}" to ${transfer.toEmail} was rejected. Reason: ${rejectionReason}`,
-    );
+    // Notify the intended new owner that the transfer was rejected
+    const recipientUser = await this.findUserByEmail(transfer.toEmail);
+    if (recipientUser) {
+      await this.notificationsService.createNotification(
+        recipientUser.id,
+        NotificationType.WARNING,
+        'Certificate Transfer Rejected',
+        `The transfer of certificate "${transfer.certificate.title}" to your account was rejected.`,
+      );
+    }
 
     this.logger.log(
       `Transfer ${transferId} rejected for certificate ${transfer.certificateId}`,
     );
 
     return savedTransfer;
-  }
-
-  private async generateConfirmationCode(): Promise<string> {
-    return CryptoUtils.generateRandomString(8);
   }
 }
