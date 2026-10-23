@@ -324,7 +324,7 @@ export function validateEnv(
       // it is set in .env - which is silent and easy to miss.
       STELLAR_ANCHORING_ENABLED: e('STELLAR_ANCHORING_ENABLED') || 'true',
       ALLOWED_ORIGINS: e('ALLOWED_ORIGINS') || 'http://localhost:5173',
-      SENTRY_DSN: e('SENTRY_DSN'),
+      SENTRY_DSC: e('SENTRY_DSC'),
       ENABLE_SENTRY: e('ENABLE_SENTRY') === 'true',
       EMAIL_SERVICE: e('EMAIL_SERVICE'),
       EMAIL_HOST: e('EMAIL_HOST'),
