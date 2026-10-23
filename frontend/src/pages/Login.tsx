@@ -151,13 +151,13 @@ const Login = () => {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label htmlFor="login-first-name" className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">First Name</label>
-                <input id="login-first-name" type="text" value={formData.firstName}
+                <input id="login-first-name" name="firstName" autoComplete="given-name" type="text" value={formData.firstName}
                   onChange={e => setFormData({ ...formData, firstName: e.target.value })}
                   className="w-full px-4 py-2 border rounded-md bg-white dark:bg-slate-800 text-gray-900 dark:text-white border-gray-300 dark:border-slate-700" required />
               </div>
               <div>
                 <label htmlFor="login-last-name" className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Last Name</label>
-                <input id="login-last-name" type="text" value={formData.lastName}
+                <input id="login-last-name" name="lastName" autoComplete="family-name" type="text" value={formData.lastName}
                   onChange={e => setFormData({ ...formData, lastName: e.target.value })}
                   className="w-full px-4 py-2 border rounded-md bg-white dark:bg-slate-800 text-gray-900 dark:text-white border-gray-300 dark:border-slate-700" required />
               </div>
@@ -165,14 +165,14 @@ const Login = () => {
           )}
           <div>
             <label htmlFor="login-email" className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Email Address</label>
-            <input id="login-email" type="email" value={formData.email}
+            <input id="login-email" name="email" autoComplete="email" type="email" value={formData.email}
               onChange={e => setFormData({ ...formData, email: e.target.value })}
               className="w-full px-4 py-2 border rounded-md bg-white dark:bg-slate-800 text-gray-900 dark:text-white border-gray-300 dark:border-slate-700" required />
           </div>
           <div>
             <label htmlFor="login-password" className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Password</label>
             <div className="relative">
-              <input id="login-password" type={showPassword ? "text" : "password"} value={formData.password}
+              <input id="login-password" name="password" autoComplete={isLogin ? "current-password" : "new-password"} type={showPassword ? "text" : "password"} value={formData.password}
                 onChange={e => setFormData({ ...formData, password: e.target.value })}
                 className="w-full px-4 py-2 border rounded-md bg-white dark:bg-slate-800 text-gray-900 dark:text-white border-gray-300 dark:border-slate-700 pr-10" required />
               <button
@@ -189,7 +189,7 @@ const Login = () => {
           {!isLogin && (
             <div>
               <label htmlFor="login-confirm-password" className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Confirm Password</label>
-              <input id="login-confirm-password" type={showPassword ? "text" : "password"} value={formData.confirmPassword}
+              <input id="login-confirm-password" name="confirmPassword" autoComplete="new-password" type={showPassword ? "text" : "password"} value={formData.confirmPassword}
                 onChange={e => setFormData({ ...formData, confirmPassword: e.target.value })}
                 className="w-full px-4 py-2 border rounded-md bg-white dark:bg-slate-800 text-gray-900 dark:text-white border-gray-300 dark:border-slate-700" required />
             </div>
@@ -213,7 +213,7 @@ const Login = () => {
                 ) : (
                   <div className="flex gap-2">
                     <label htmlFor="forgot-password-email" className="sr-only">Account email</label>
-                    <input id="forgot-password-email" type="email" value={forgotEmail} onChange={e => setForgotEmail(e.target.value)}
+                    <input id="forgot-password-email" name="forgotEmail" autoComplete="email" type="email" value={forgotEmail} onChange={e => setForgotEmail(e.target.value)}
                       placeholder="you@example.com" className="flex-1 px-3 py-2 border rounded-md dark:bg-slate-700 dark:border-slate-600 dark:text-white" />
                     <button onClick={async () => {
                       setForgotLoading(true); setError(null);

@@ -1,11 +1,11 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from 'react';
 import type { JSX } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Html5QrcodeScanner } from 'html5-qrcode';
+
+const QRScannerModal = lazy(() => import('../components/QRScannerModal'));
 import { CheckCircle, AlertTriangle } from 'lucide-react';
 import { VerificationResult } from '../api';
 import { useVerifyCertificateQuery } from '../api/queries';
-import { useDebounce } from '../hooks/useDebounce';
 
 type VerificationState = {
   loading: boolean;
@@ -21,20 +21,29 @@ type ToastState = {
 export default function VerifyCertificate(): JSX.Element {
   const [searchParams] = useSearchParams();
   // Seed from the URL so a shared link is verified without a keystroke.
-  const [serial, setSerial] = useState(
-    () => searchParams.get('serial')?.trim() ?? '',
-  );
-  const debouncedSerial = useDebounce(serial, 300);
+  const initialSerial = searchParams.get('serial')?.trim() ?? '';
+  const [serial, setSerial] = useState(initialSerial);
+  // Only verify upon explicit submit, QR scan, or initial URL parameter (#97).
+  // Avoids continuous HTTP queries and flashing failure alerts while actively typing.
+  const [submittedSerial, setSubmittedSerial] = useState(initialSerial);
   const [showQrScanner, setShowQrScanner] = useState(false);
-  const qrScannerRef = useRef<Html5QrcodeScanner | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
 
-  // Verification is keyed by serial, so re-checking the same certificate is
-  // answered from cache, and concurrent lookups of one serial collapse into a
-  // single request (no hand-rolled in-flight guard needed).
-  const verificationQuery = useVerifyCertificateQuery(debouncedSerial);
+  // Verification is keyed by submitted serial, so re-checking the same certificate is
+  // answered from cache, and concurrent lookups collapse into a single request.
+  const verificationQuery = useVerifyCertificateQuery(submittedSerial);
+
+  const isDirty = serial.trim() !== submittedSerial;
 
   const state: VerificationState = useMemo(() => {
+    if (isDirty && !verificationQuery.isFetching) {
+      return {
+        loading: false,
+        result: null,
+        error: null,
+      };
+    }
+
     if (verificationQuery.isError) {
       return {
         loading: false,
@@ -59,6 +68,7 @@ export default function VerifyCertificate(): JSX.Element {
       error: null,
     };
   }, [
+    isDirty,
     verificationQuery.isError,
     verificationQuery.data,
     verificationQuery.isFetching,
@@ -101,6 +111,7 @@ export default function VerifyCertificate(): JSX.Element {
     const serialParam = searchParams.get('serial')?.trim();
     if (serialParam) {
       setSerial(serialParam);
+      setSubmittedSerial(serialParam);
     }
   }, [searchParams]);
 
@@ -111,47 +122,17 @@ export default function VerifyCertificate(): JSX.Element {
     return () => window.clearTimeout(timeoutId);
   }, [toast]);
 
-  // Initialize QR scanner
-  useEffect(() => {
-    if (showQrScanner && !qrScannerRef.current) {
-      qrScannerRef.current = new Html5QrcodeScanner(
-        'qr-reader',
-        {
-          fps: 10,
-          qrbox: { width: 250, height: 250 },
-          aspectRatio: 1.0,
-        },
-        false
-      );
-
-      qrScannerRef.current.render(
-        (decodedText) => {
-          setSerial(decodedText);
-          setShowQrScanner(false);
-          qrScannerRef.current?.clear();
-          qrScannerRef.current = null;
-        },
-        () => {
-          // Called continuously while no QR code is in view; intentionally
-          // ignored rather than surfaced, since it fires on nearly every
-          // scan frame and isn't a user-actionable error.
-        }
-      );
-    }
-
-    return () => {
-      if (qrScannerRef.current) {
-        qrScannerRef.current.clear();
-        qrScannerRef.current = null;
-      }
-    };
-  }, [showQrScanner]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (serial.trim()) {
-      // Explicit submit forces a re-check rather than reading the cache.
-      void verificationQuery.refetch();
+    const trimmed = serial.trim();
+    if (trimmed) {
+      if (trimmed === submittedSerial) {
+        // Explicit submit of the same serial forces a re-check rather than reading the cache.
+        void verificationQuery.refetch();
+      } else {
+        setSubmittedSerial(trimmed);
+      }
     }
   };
 
@@ -339,28 +320,23 @@ export default function VerifyCertificate(): JSX.Element {
           </form>
         </div>
 
-        {/* QR Scanner */}
-        {showQrScanner && (
-          <div className="rounded-2xl border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/5 p-6">
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Scan QR Code</h3>
-                <button
-                  onClick={() => setShowQrScanner(false)}
-                  className="text-gray-500 dark:text-slate-400 hover:text-gray-900"
-                >
-                  <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-              <div id="qr-reader" className="w-full max-w-sm mx-auto"></div>
-              <p className="text-sm text-gray-500 dark:text-slate-400 text-center">
-                Point your camera at a certificate QR code to scan it.
-              </p>
-            </div>
-          </div>
-        )}
+        {/* QR Scanner Modal */}
+        <Suspense fallback={null}>
+          {showQrScanner && (
+            <QRScannerModal
+              isOpen={showQrScanner}
+              onClose={() => setShowQrScanner(false)}
+              onScanSuccess={(result) => {
+                setShowQrScanner(false);
+                const scanned = result.certificateId || result.raw;
+                if (scanned) {
+                  setSerial(scanned);
+                }
+              }}
+              verifyPathPrefix="/verify/"
+            />
+          )}
+        </Suspense>
 
         {/* Results Display */}
         <div className="rounded-2xl border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/5 p-6">

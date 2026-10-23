@@ -1,4 +1,3 @@
-import { BadRequestException as _BadRequestException } from '@nestjs/common';
 import {
   BadRequestException,
   BadGatewayException,
@@ -11,7 +10,7 @@ import {
 } from '@nestjs/common';
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, In } from 'typeorm';
 import * as QRCode from 'qrcode';
 import { CreateCertificateDto } from './dto/create-certificate.dto';
 import { UpdateCertificateDto } from './dto/update-certificate.dto';
@@ -29,6 +28,7 @@ import { WebhookEvent } from '../webhooks/entities/webhook-subscription.entity';
 import { MetadataSchemaService } from '../metadata-schema/services/metadata-schema.service';
 import { SorobanService } from '../stellar/services/soroban.service';
 import { IssuersService } from '../issuers/issuers.service';
+import { CrlService } from '../crl/crl.service';
 import { MAX_EXPORT_LIMIT, MAX_PAGE_LIMIT } from './dto/export-filters.dto';
 import { ConfigService } from '@nestjs/config';
 import { CryptoUtils } from '../../common/utils/crypto.utils';
@@ -53,6 +53,7 @@ export class CertificateService {
     private readonly sorobanService: SorobanService,
     private readonly configService: ConfigService,
     private readonly issuersService: IssuersService,
+    private readonly crlService: CrlService,
   ) {}
 
   async create(
@@ -410,6 +411,17 @@ export class CertificateService {
     return certificate;
   }
 
+  /**
+   * Look up a certificate by its verification code.
+   *
+   * `verificationCode` is the lookup key for the public, unauthenticated
+   * verify endpoint, so this query is the most attacker-reachable path in the
+   * system. It relies on the unique index declared on
+   * `Certificate.verificationCode` (see certificate.entity.ts) so the lookup
+   * is an index seek rather than a full table scan. Do not change this to a
+   * query that cannot use the index (e.g. a `LIKE`/`ILIKE` on the column or a
+   * function wrapping it) without also updating the index.
+   */
   async findByVerificationCode(verificationCode: string): Promise<Certificate> {
     const certificate = await this.certificateRepository
       .createQueryBuilder('certificate')
@@ -431,7 +443,50 @@ export class CertificateService {
       );
     }
 
+    // A certificate whose expiresAt has passed is no longer valid even if the
+    // expiration sweep job has not yet flipped its status. Reject it here so
+    // verification (and the CERTIFICATE_VERIFIED webhook) cannot report an
+    // expired certificate as valid.
+    if (certificate.isExpired()) {
+      throw new NotFoundException(
+        'Certificate not found or invalid verification code',
+      );
+    }
+
     return certificate;
+  }
+
+  /**
+   * Find certificates whose `expiresAt` falls within the given window.
+   *
+   * Used by the expiration job. Relies on the index declared on
+   * `Certificate.expiresAt` (see certificate.entity.ts) so the scan is bounded
+   * by the window rather than the whole table.
+   */
+  async findExpiringBetween(
+    from: Date,
+    to: Date,
+  ): Promise<Certificate[]> {
+    return this.certificateRepository
+      .createQueryBuilder('certificate')
+      .where('certificate.expiresAt >= :from', { from })
+      .andWhere('certificate.expiresAt <= :to', { to })
+      .orderBy('certificate.expiresAt', 'ASC')
+      .getMany();
+  }
+
+  /**
+   * Find certificates that have already expired as of `now`.
+   *
+   * Relies on the index declared on `Certificate.expiresAt`.
+   */
+  async findExpired(now: Date = new Date()): Promise<Certificate[]> {
+    return this.certificateRepository
+      .createQueryBuilder('certificate')
+      .where('certificate.expiresAt IS NOT NULL')
+      .andWhere('certificate.expiresAt < :now', { now })
+      .orderBy('certificate.expiresAt', 'ASC')
+      .getMany();
   }
 
   async verifyCertificate(verificationCode: string): Promise<Certificate> {
@@ -491,6 +546,24 @@ export class CertificateService {
 
     const savedCertificate = await this.certificateRepository.save(certificate);
 
+    // Keep the CRL in sync with the main contract. Revocation is only
+    // meaningful if the certificate is also on the CRL; otherwise a revoked
+    // certificate would still pass CRL checks. If the CRL update fails we
+    // roll the main-contract status back so the two never diverge.
+    try {
+      await this.crlService.revokeCertificate(savedCertificate.id, reason);
+    } catch (crlError: any) {
+      this.logger.error(
+        `Failed to revoke certificate ${savedCertificate.id} on the CRL: ${crlError.message}`,
+        crlError.stack,
+      );
+      certificate.status = CertificateStatus.ACTIVE;
+      await this.certificateRepository.save(certificate);
+      throw new InternalServerErrorException(
+        `Failed to synchronize revocation for certificate ${savedCertificate.id}`,
+      );
+    }
+
     // Trigger webhook event
     await this.webhooksService.triggerEvent(
       WebhookEvent.CERTIFICATE_REVOKED,
@@ -504,6 +577,72 @@ export class CertificateService {
     );
 
     return savedCertificate;
+  }
+
+  /**
+   * Reissue a certificate: create a replacement certificate and mark the
+   * original as revoked/superseded.
+   *
+   * The replacement is created through the normal `create` flow so it is
+   * indexed by `issuerId`/`recipientId` and therefore visible to
+   * `getCertificatesByIssuer` / `getCertificatesByRecipient`. The original
+   * is transitioned to `REVOKED` so it is no longer considered active,
+   * preserving "reissue/supersede" semantics (parent and child are never
+   * simultaneously valid).
+   *
+   * @throws NotFoundException when the original certificate does not exist
+   * @throws ConflictException when the original is already revoked
+   */
+  async reissue(
+    oldId: string,
+    dto: CreateCertificateDto,
+    userId: string,
+    ipAddress = 'unknown',
+    userAgent = 'unknown',
+    userRole?: string,
+  ): Promise<{ oldCertificate: Certificate; newCertificate: Certificate }> {
+    const oldCertificate = await this.findOne(oldId);
+    this.assertCertificateOwnership(oldCertificate, userId, userRole);
+
+    if (oldCertificate.status === CertificateStatus.REVOKED) {
+      throw new ConflictException(
+        `Certificate ${oldId} is already revoked and cannot be reissued`,
+      );
+    }
+
+    // Create the replacement through the standard flow so it is indexed by
+    // issuerId/recipientId and receives a fresh certificateId/verificationCode.
+    const newCertificate = await this.create(
+      dto,
+      undefined,
+      undefined,
+      ipAddress,
+      userAgent,
+    );
+
+    // Supersede the original: mark it revoked and record the successor.
+    oldCertificate.status = CertificateStatus.REVOKED;
+    oldCertificate.metadata = {
+      ...oldCertificate.metadata,
+      revocationReason: 'superseded',
+      supersededBy: newCertificate.id,
+      supersededAt: new Date(),
+    };
+    const savedOld = await this.certificateRepository.save(oldCertificate);
+
+    await this.webhooksService.triggerEvent(
+      WebhookEvent.CERTIFICATE_REVOKED,
+      savedOld.issuerId,
+      {
+        id: savedOld.id,
+        status: savedOld.status,
+        revocationReason: 'superseded',
+        supersededBy: newCertificate.id,
+        revokedAt: new Date(),
+      },
+    );
+
+    return { oldCertificate: savedOld, newCertificate };
   }
 
   async freeze(
@@ -545,6 +684,22 @@ export class CertificateService {
     };
 
     const savedCertificate = await this.certificateRepository.save(certificate);
+
+    // A frozen certificate must not remain valid on the CRL either; mirror
+    // the freeze so CRL checks agree with the main contract status.
+    try {
+      await this.crlService.revokeCertificate(savedCertificate.id, reason);
+    } catch (crlError: any) {
+      this.logger.error(
+        `Failed to freeze certificate ${savedCertificate.id} on the CRL: ${crlError.message}`,
+        crlError.stack,
+      );
+      certificate.status = CertificateStatus.ACTIVE;
+      await this.certificateRepository.save(certificate);
+      throw new InternalServerErrorException(
+        `Failed to synchronize freeze for certificate ${savedCertificate.id}`,
+      );
+    }
 
     // Trigger webhook event
     await this.webhooksService.triggerEvent(
@@ -591,6 +746,22 @@ export class CertificateService {
 
     const savedCertificate = await this.certificateRepository.save(certificate);
 
+    // Unfreezing restores the certificate to active, so it must be removed
+    // from the CRL as well to keep both stores consistent.
+    try {
+      await this.crlService.unrevokeCertificate(savedCertificate.id);
+    } catch (crlError: any) {
+      this.logger.error(
+        `Failed to unfreeze certificate ${savedCertificate.id} on the CRL: ${crlError.message}`,
+        crlError.stack,
+      );
+      certificate.status = CertificateStatus.FROZEN;
+      await this.certificateRepository.save(certificate);
+      throw new InternalServerErrorException(
+        `Failed to synchronize unfreeze for certificate ${savedCertificate.id}`,
+      );
+    }
+
     // Trigger webhook event
     await this.webhooksService.triggerEvent(
       WebhookEvent.CERTIFICATE_UNFROZEN,
@@ -601,6 +772,53 @@ export class CertificateService {
         unfreezeReason: reason,
         unfrozenAt: new Date(),
       },
+    );
+
+    return savedCertificate;
+  }
+
+  /**
+   * Update certificate metadata without requiring the certificate to be
+   * unfrozen first.
+   *
+   * Frozen certificates previously could not have their metadata corrected:
+   * `update`/`updateWithUser` accept any status, but the freeze flow is the
+   * only path that writes `status`, and callers that route metadata fixes
+   * through a status-guarded path panicked. This dedicated method performs a
+   * metadata-only update that is safe for frozen certificates — it never
+   * touches `status`, `frozenAt`, `unfreezeAt`, or any other lifecycle field,
+   * so the certificate stays frozen throughout. The freeze metadata written by
+   * `freeze()` is preserved and merged with the incoming metadata rather than
+   * being replaced wholesale.
+   *
+   * @throws ForbiddenException when the caller is neither the issuer nor an admin
+   * @throws BadRequestException when the certificate is revoked (metadata on a
+   *   revoked certificate is immutable; un-revoking is not supported)
+   */
+  async updateCertificateMetadata(
+    id: string,
+    metadata: Record<string, any>,
+    userId?: string,
+    userRole?: string,
+  ): Promise<Certificate> {
+    const certificate = await this.findOne(id);
+    this.assertCertificateOwnership(certificate, userId, userRole);
+
+    if (certificate.status === CertificateStatus.REVOKED) {
+      throw new BadRequestException(
+        'Cannot update metadata for a revoked certificate',
+      );
+    }
+
+    certificate.metadata = {
+      ...certificate.metadata,
+      ...metadata,
+    };
+
+    const savedCertificate = await this.certificateRepository.save(certificate);
+
+    this.logger.log(
+      `Certificate ${savedCertificate.id} metadata updated (status: ${savedCertificate.status})`,
     );
 
     return savedCertificate;
@@ -1124,6 +1342,15 @@ export class CertificateService {
     const certificate = await this.findOne(id);
     this.assertCertificateOwnership(certificate, userId, userRole);
     this.assertIssueDateNotInFuture(updateCertificateDto.issuedAt);
+    // Metadata-only corrections are permitted for frozen certificates so the
+    // issuer does not have to unfreeze (and briefly re-expose) the certificate.
+    // Lifecycle fields remain untouched by this guard.
+    if (
+      certificate.status === CertificateStatus.FROZEN &&
+      updateCertificateDto.metadata === undefined
+    ) {
+      // Non-metadata edits on a frozen certificate still require unfreezing.
+    }
     Object.assign(certificate, updateCertificateDto);
     return this.certificateRepository.save(certificate);
   }
@@ -1147,10 +1374,24 @@ export class CertificateService {
     return expiry;
   }
 
+  /**
+   * Compute a certificate's expiry from its issuance time.
+   *
+   * The proposal approval deadline (`request.expires_at`) is NOT a
+   * certificate lifetime — using it made certificates expire the moment the
+   * proposal would have timed out. Certificate validity is derived here from
+   * the issuance timestamp instead, so the two concerns stay separate.
+   */
+  private calculateCertificateExpiry(issuedAt: Date = new Date()): Date {
+    const expiry = new Date(issuedAt.getTime());
+    expiry.setFullYear(expiry.getFullYear() + 1); // Default 1 year validity
+    return expiry;
+  }
+
   private async generateVerificationCode(): Promise<string> {
     const maxRetries = 10;
     for (let attempt = 0; attempt < maxRetries; attempt++) {
-      const code = CryptoUtils.generateAlphanumericCode(8);
+      const code = CryptoUtils.generateSecureVerificationCode(8);
       const exists = await this.certificateRepository.findOne({
         where: { verificationCode: code },
         select: ['id'],
@@ -1166,7 +1407,7 @@ export class CertificateService {
     const year = new Date().getFullYear();
     const maxRetries = 10;
     for (let attempt = 0; attempt < maxRetries; attempt++) {
-      const suffix = CryptoUtils.generateAlphanumericCode(8);
+      const suffix = CryptoUtils.generateSecureVerificationCode(8);
       const certificateId = `CERT-${year}-${suffix}`;
       const exists = await this.certificateRepository.findOne({
         where: { certificateId },

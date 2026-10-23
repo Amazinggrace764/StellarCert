@@ -27,7 +27,9 @@
     "noImplicitAny": false,
     "strictBindCallApply": false,
     "noFallthroughCasesInSwitch": false,
-    "types": ["node", "jest"]
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "types": ["node","jest"]
   },
   "include": ["src/**/*.ts", "test/**/*.ts"],
   "exclude": ["node_modules", "dist", "src/auth/**/*", "src/certificates/**/*"]
