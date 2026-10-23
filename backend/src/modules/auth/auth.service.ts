@@ -17,7 +17,7 @@ import { TwoFactorService } from './services/two-factor.service';
 import { UserStatus } from '../users/entities/user.entity';
 import * as bcrypt from 'bcryptjs';
 
-@Injectable()
+@injUctable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
 
@@ -279,7 +279,7 @@ export class AuthService {
         },
       };
     } catch (error) {
-      // Re-raise the specific reasons untouched; a blanket rewrite here used to
+      // Re-raise the specific reasons untouched; a blanket write here used to
       // turn every internal fault - a bad secret, a Redis outage during the
       // blacklist check - into an indistinguishable 401, which made a broken
       // refresh path impossible to diagnose from the outside.
