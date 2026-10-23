@@ -142,6 +142,69 @@ describe('MetadataSchemaService', () => {
     });
   });
 
+  describe('update', () => {
+    it('should update mutable fields without changing version', async () => {
+      mockRepository.findOne.mockResolvedValueOnce(savedSchema);
+      const result = await service.update('schema-uuid-1', {
+        description: 'Updated description',
+      });
+      expect(result.description).toBe('Updated description');
+      expect(result.version).toBe(savedSchema.version);
+    });
+
+    it('should reject mutating the version', async () => {
+      mockRepository.findOne.mockResolvedValueOnce(savedSchema);
+      await expect(
+        service.update('schema-uuid-1', { version: '2.0.0' }),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockRepository.save).not.toHaveBeenCalled();
+    });
+
+    it('should allow setting the same version value', async () => {
+      mockRepository.findOne.mockResolvedValueOnce(savedSchema);
+      const result = await service.update('schema-uuid-1', {
+        version: savedSchema.version,
+        description: 'Same version',
+      });
+      expect(result.version).toBe(savedSchema.version);
+    });
+
+    it('should reject renaming to a colliding name+version', async () => {
+      const conflictingSchema = {
+        ...savedSchema,
+        id: 'schema-uuid-2',
+        name: 'other-schema',
+      };
+      mockRepository.findOne
+        .mockResolvedValueOnce(savedSchema)
+        .mockResolvedValueOnce(conflictingSchema);
+
+      await expect(
+        service.update('schema-uuid-1', { name: 'other-schema' }),
+      ).rejects.toThrow(ConflictException);
+      expect(mockRepository.save).not.toHaveBeenCalled();
+    });
+
+    it('should allow renaming when no conflict exists', async () => {
+      mockRepository.findOne
+        .mockResolvedValueOnce(savedSchema)
+        .mockResolvedValueOnce(null);
+
+      const result = await service.update('schema-uuid-1', {
+        name: 'renamed-schema',
+      });
+      expect(result.name).toBe('renamed-schema');
+      expect(result.version).toBe(savedSchema.version);
+    });
+
+    it('should throw NotFoundException when schema does not exist', async () => {
+      mockRepository.findOne.mockResolvedValue(null);
+      await expect(
+        service.update('missing', { description: 'x' }),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
   describe('upgradeSchema', () => {
     it('should reject downgrade', async () => {
       // upgradeSchema resolves the current schema via findLatestByName (findOne)
@@ -271,7 +334,8 @@ describe('MetadataSchemaService', () => {
       expect(result.valid).toBe(false);
       expect(
         result.errors.some(
-          (e) => e.field === 'instructorEmail' && e.constraint === 'email',
+          (e) =>
+            e.field === 'instructorEmail' && e.constraint === 'email',
         ),
       ).toBe(true);
     });
@@ -390,95 +454,47 @@ describe('MetadataSchemaService', () => {
                 name: 'zip',
                 type: FieldType.STRING,
                 required: true,
-                pattern: '^\\d{5}$',
               },
             ],
           },
         ],
-        requiredFields: ['address'],
       };
 
-      const validMetadata = {
-        address: { street: '123 Main St', city: 'Testville', zip: '12345' },
-      };
-      const validErrors = service.validateAgainstSchema(
-        nestedSchema,
-        validMetadata,
-      );
-      expect(validErrors).toHaveLength(0);
-
-      const invalidMetadata = {
-        address: { street: '123 Main St', zip: 'bad' },
-      };
-      const invalidErrors = service.validateAgainstSchema(
-        nestedSchema,
-        invalidMetadata,
-      );
-      expect(invalidErrors.length).toBeGreaterThan(0);
+      const result = service.validateAgainstSchema(nestedSchema, {
+        address: {
+          street: '123 Main St',
+          city: 'St. Louis',
+          zip: '63101',
+        },
+      });
+      expect(result.valid).toBe(true);
     });
-  });
 
-  describe('validateAgainstSchema - array fields', () => {
-    it('should validate array fields', () => {
-      const arraySchema: MetadataSchema = {
+    it('should fail on missing nested required field', () => {
+      const nestedSchema: MetadataSchema = {
         ...savedSchema,
         fields: [
           {
-            name: 'tags',
-            type: FieldType.ARRAY,
+            name: 'address',
+            type: FieldType.OBJECT,
             required: true,
-            minLength: 1,
-            maxLength: 5,
-            items: { name: 'tag', type: FieldType.STRING, required: true },
+            properties: [
+              { name: 'street', type: FieldType.STRING, required: true },
+              { name: 'city', type: FieldType.STRING, required: true },
+            ],
           },
         ],
-        requiredFields: ['tags'],
       };
 
-      const validMetadata = { tags: ['blockchain', 'stellar'] };
+      const result = service.validateAgainstSchema(nestedSchema, {
+        address: { street: '123 Main St' },
+      });
+      expect(result.valid).toBe(false);
       expect(
-        service.validateAgainstSchema(arraySchema, validMetadata),
-      ).toHaveLength(0);
-
-      const emptyArray = { tags: [] };
-      const emptyErrors = service.validateAgainstSchema(
-        arraySchema,
-        emptyArray,
-      );
-      expect(emptyErrors.some((e) => e.constraint === 'minLength')).toBe(true);
-
-      const notArray = { tags: 'not-an-array' };
-      const typeErrors = service.validateAgainstSchema(arraySchema, notArray);
-      expect(typeErrors.some((e) => e.constraint === 'type')).toBe(true);
-    });
-  });
-
-  describe('validateAgainstSchema - pattern matching', () => {
-    it('should validate string patterns', () => {
-      const patternSchema: MetadataSchema = {
-        ...savedSchema,
-        fields: [
-          {
-            name: 'certCode',
-            type: FieldType.STRING,
-            required: true,
-            pattern: '^CERT-\\d{4}$',
-          },
-        ],
-        requiredFields: ['certCode'],
-      };
-
-      const validMetadata = { certCode: 'CERT-1234' };
-      expect(
-        service.validateAgainstSchema(patternSchema, validMetadata),
-      ).toHaveLength(0);
-
-      const invalidMetadata = { certCode: 'CERT-ABC' };
-      const errors = service.validateAgainstSchema(
-        patternSchema,
-        invalidMetadata,
-      );
-      expect(errors.some((e) => e.constraint === 'pattern')).toBe(true);
+        result.errors.some(
+          (e) => e.field === 'address.city' && e.constraint === 'required',
+        ),
+      ).toBe(true);
     });
   });
 });

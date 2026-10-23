@@ -1,4 +1,6 @@
-import { Component, ErrorInfo, ReactNode } from "react";
+import { Component, ErrorInfo, ReactNode, useState, useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useLocation } from "react-router-dom";
 
 interface Props {
   children: ReactNode;
@@ -84,9 +86,25 @@ class ErrorBoundaryImpl extends Component<Props, State> {
   }
 }
 
-export function ErrorBoundary({ children, fallback, onReset, resetKey }: Props) {
+export function ErrorBoundary({ children, fallback, onReset }: Props) {
+  const location = useLocation();
+  const queryClient = useQueryClient();
+  const [key, setKey] = useState(0);
+
+  // Reset error boundary when route changes
+  useEffect(() => {
+    setKey((k) => k + 1);
+  }, [location.pathname]);
+
+  const handleReset = () => {
+    // Clear cached query errors so remounted children refetch instead of
+    // immediately re-rendering stale error states.
+    queryClient.resetQueries();
+    onReset?.();
+  };
+
   return (
-    <ErrorBoundaryImpl fallback={fallback} onReset={onReset} resetKey={resetKey}>
+    <ErrorBoundaryImpl key={key} fallback={fallback} onReset={handleReset}>
       {children}
     </ErrorBoundaryImpl>
   );
