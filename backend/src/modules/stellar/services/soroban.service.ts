@@ -351,10 +351,15 @@ export class SorobanService implements OnModuleInit, IssuerKeypairProvider {
     ownerAddress: string,
     metadataUri: string,
     expiresAt?: number,
+    ttlLedgers: number = DEFAULT_TTL_LEDGERS,
   ): Promise<string | null> {
     try {
       if (!this.certificateContractId) {
         throw new Error('Certificate contract ID not configured.');
+      }
+
+      if (!Number.isFinite(ttlLedgers) || ttlLedgers <= 0) {
+        throw new Error(`Invalid TTL ledgers: ${ttlLedgers}`);
       }
 
       const contract = new Contract(this.certificateContractId);
@@ -379,6 +384,7 @@ export class SorobanService implements OnModuleInit, IssuerKeypairProvider {
         nativeToScVal(owner),
         nativeToScVal(metadataUri),
         expiresAt ? nativeToScVal(expiresAt) : nativeToScVal(null),
+        nativeToScVal(ttlLedgers),
       ];
 
       const transaction = new TransactionBuilder(sourceAccount, {
