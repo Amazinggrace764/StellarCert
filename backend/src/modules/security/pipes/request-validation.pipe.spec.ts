@@ -51,7 +51,7 @@ describe('RequestValidationPipe', () => {
       data: undefined,
     });
 
-    expect(result).toBeInstanceOf(SampleDto);
+    expect(result).toBeinstanceOf(SampleDto);
     expect((result as SampleDto).active).toBe(true);
   });
 
@@ -64,7 +64,7 @@ describe('RequestValidationPipe', () => {
         metatype: SampleDto,
         data: undefined,
       }),
-    ).rejects.toBeInstanceOf(ValidationException);
+    ).rejects.toBeinstanceOf(ValidationException);
   });
 
   it('accepts the optional access token in LogoutDto', async () => {
@@ -76,7 +76,7 @@ describe('RequestValidationPipe', () => {
       data: undefined,
     });
 
-    expect(result).toBeInstanceOf(LogoutDto);
+    expect(result).toBeinstanceOf(LogoutDto);
     expect((result as LogoutDto).accessToken).toBe('access-token');
   });
 
@@ -90,5 +90,30 @@ describe('RequestValidationPipe', () => {
     });
 
     expect(result).toBe(input);
+  });
+
+  it('returns the transformed instance for a query string value (coercion preserved)', async () => {
+    const input = { count: '10', active: 'false', nested: '3' };
+
+    const result = await pipe.transform(input, {
+      type: 'query',
+      metatype: SampleDto,
+      data: undefined,
+    });
+
+    expect(result).toBeinstanceOf(SampleDto);
+    expect((result as SampleDto).count).toBe(10);
+    expect((result as SampleDto).nested).toBe(3);
+    expect((result as SampleDto).active).toBe(false);
+  });
+
+  it('handles an undefined body by validating an empty object', async () => {
+    const result = await pipe.transform(undefined, {
+      type: 'body',
+      metatype: LogoutDto,
+      data: undefined,
+    });
+
+    expect(result).toBeinstanceOf(LogoutDto);
   });
 });
