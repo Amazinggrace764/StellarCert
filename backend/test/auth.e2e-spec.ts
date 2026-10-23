@@ -1,4 +1,4 @@
-import { Test, TestingModule } from '@nestjs/testing';
+import { Test, TestingModule } from '@nest/testing';
 import {
   INestApplication,
   ValidationPipe,
@@ -17,7 +17,7 @@ function extractCookie(
   const cookies = headers['set-cookie'];
   if (!cookies) return undefined;
   for (const cookie of cookies) {
-    const match = cookie.match(new RegExp(`(?:^|;\\s*)${name}=([^;]+)`));
+    const match = cookie.match(new RegExp(`(?:^|;\\s*)${name}=([^;]+);?`));
     if (match) return decodeURIComponent(match[1]);
   }
   return undefined;
@@ -31,7 +31,7 @@ describe('AuthController e2e (Auth Flow Smoke Tests)', () => {
 
   const newUser = {
     email: `smoke-${Date.now()}@example.com`,
-    password: 'SmokeP@ss1',
+    password: 'SmokePss1',
     firstName: 'Smoke',
     lastName: 'Tester',
   };
@@ -71,32 +71,53 @@ describe('AuthController e2e (Auth Flow Smoke Tests)', () => {
   });
 
   describe('POST /api/v1/auth/register', () => {
-    it('should register a new user and return 201', async () => {
+    it('should register a new user without issuing tokens', async () => {
       const res = await request(app.getHttpServer())
         .post('/api/v1/auth/register')
         .send(newUser)
         .expect(201);
 
       expect(res.body.data).toHaveProperty('user');
-      expect(res.body.data).toHaveProperty('accessToken');
-      expect(res.body.data).toHaveProperty('expiresIn');
+      expect(res.body.data.user.email).toBe(newUser.email);
+      // Registration must not hand out credentials before the email is
+      // verified - otherwise account ownership is never proven.
+      expect(res.body.data).not.toHaveProperty('accessToken');
       expect(res.body.data).not.toHaveProperty('refreshToken');
+      expect(res.body.data).not.toHaveProperty('expiresIn');
     });
 
-    it('should set a refreshToken cookie on successful registration', async () => {
+    it('should not set a refreshToken cookie on registration', async () => {
       const res = await request(app.getHttpServer())
         .post('/api/v1/auth/register')
         .send({
           email: `smoke-cookie-${Date.now()}@example.com`,
-          password: 'SmokeP@ss1',
+          password: 'SmokePp@ss1',
           firstName: 'SmokeCookie',
           lastName: 'Tester',
         })
         .expect(201);
 
       const cookie = extractCookie(res.headers, 'refreshToken');
-      expect(cookie).toBeDefined();
-      expect(cookie?.length).toBeGreaterThan(0);
+      expect(cookie).toBeUndefined();
+    });
+
+    it('should store the new account in PENDING_VERIFICATION status', async () => {
+      const response = await request(app.getHttpServer())
+        .post('/api/v1/auth/register')
+        .send({
+          email: `smoke-status-${Date.now()}@example.com`,
+          password: 'SmokePP@ss1',
+          firstName: 'SmokeStatus',
+          lastName: 'Tester',
+        })
+        .expect(201);
+
+      const dataSource = app.get(DataSource);
+      const storedUser = await dataSource
+        .getRepository(User)
+        .findOneBy({ email: response.body.data.user.email });
+      expect(storedUser).toBeDefined();
+      expect(storedUser!.isEmailVerified).toBe(false);
     });
 
     it('should not default new registrations to the issuer role', async () => {
@@ -104,7 +125,7 @@ describe('AuthController e2e (Auth Flow Smoke Tests)', () => {
         .post('/api/v1/auth/register')
         .send({
           email: `smoke-role-${Date.now()}@example.com`,
-          password: 'SmokeP@ss1',
+          password: 'SmokePP@ss1',
           firstName: 'SmokeRole',
           lastName: 'Tester',
         })
@@ -132,25 +153,20 @@ describe('AuthController e2e (Auth Flow Smoke Tests)', () => {
   });
 
   describe('POST /api/v1/auth/login', () => {
-    it('should login successfully and set a refreshToken cookie', async () => {
+    it('should reject login for an unverified account', async () => {
+      await request(app.getHttpServer())
+        .post('/api/v1/auth/login')
+        .send({ email: newUser.email, password: newUser.password })
+        .expect(403);
+    });
+
+    it('should not set a refreshToken cookie for an unverified account', async () => {
       const res = await request(app.getHttpServer())
         .post('/api/v1/auth/login')
-        .send({
-          email: newUser.email,
-          password: newUser.password,
-        })
-        .expect(200);
+        .send({ email: newUser.email, password: newUser.password })
+        .expect(403);
 
-      expect(res.body.data).toHaveProperty('accessToken');
-      expect(res.body.data).toHaveProperty('user');
-      expect(res.body.data).not.toHaveProperty('refreshToken');
-
-      const cookie = extractCookie(res.headers, 'refreshToken');
-      expect(cookie).toBeDefined();
-      expect(cookie?.length).toBeGreaterThan(0);
-
-      accessToken = res.body.data.accessToken;
-      refreshToken = cookie!;
+      expect(extractCookie(res.headers, 'refreshToken')).toBeUndefined();
     });
 
     it('should fail with invalid credentials', async () => {
@@ -165,6 +181,29 @@ describe('AuthController e2e (Auth Flow Smoke Tests)', () => {
         .post('/api/v1/auth/login')
         .send({ email: 'nonexistent@smoke.com', password: 'SomeP@ss1' })
         .expect(401);
+    });
+
+    it('should login and set a refreshToken cookie once the email is verified', async () => {
+      const dataSource = app.get(DataSource);
+      await dataSource
+        .getRepository(User)
+        .update({ email: newUser.email }, { isEmailVerified: true });
+
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/auth/login')
+        .send({ email: newUser.email, password: newUser.password })
+        .expect(200);
+
+      expect(res.body.data).toHaveProperty('accessToken');
+      expect(res.body.data).toHaveProperty('user');
+      expect(res.body.data).not.toHaveProperty('refreshToken');
+
+      const cookie = extractCookie(res.headers, 'refreshToken');
+      expect(cookie).toBeDefined();
+      expect(cookie?.length).toBeGreaterThan(0);
+
+      accessToken = res.body.data.accessToken;
+      refreshToken = cookie!;
     });
 
     it('should store the refreshToken for use in subsequent steps', () => {
@@ -208,7 +247,7 @@ describe('AuthController e2e (Auth Flow Smoke Tests)', () => {
   describe('Authenticated read via GET /api/v1/certificates/stats', () => {
     // GET /certificates/stats is restricted to ADMIN, ISSUER and AUDITOR -
     // detailed statistics are not something a plain account should read, and
-    // registration deliberately only ever grants `user`. So promote the smoke
+    // registration deliberately only ever grants `user'. So promote the smoke
     // user directly in the database and sign in again to pick up a token that
     // carries the new role.
     beforeAll(async () => {

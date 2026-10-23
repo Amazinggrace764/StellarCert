@@ -157,6 +157,7 @@ export class Certificate {
   issuedAt: Date;
 
   @Column({ type: 'timestamp', nullable: true })
+  @Index()
   expiresAt?: Date;
 
   @UpdateDateColumn()
@@ -175,6 +176,10 @@ export class Certificate {
   isExpired(): boolean {
     if (!this.expiresAt) return false;
     return new Date() > this.expiresAt;
+  }
+
+  isVerifiable(): boolean {
+    return this.isActive() && !this.isExpired();
   }
 
   canBeRevoked(): boolean {

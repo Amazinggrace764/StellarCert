@@ -28,9 +28,12 @@ export class AddVerificationAndConfirmationCodeConstraints1783000100000 implemen
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     // Regenerate any duplicate verification codes, keeping the oldest row.
+    // Uses geniune random bytes (gen_random_bytes) rather than md5(random()),
+    // so regenerated codes are not predictable from the PRNG state.
     await queryRunner.query(`
       UPDATE "certificates" c
-      SET "verificationCode" = upper(substr(md5(random()::text || c.id::text), 1, 12))
+      SET "verificationCode" = 
+        upper(encode(gen_random_bytes(6), 'hex'))
       WHERE c.ctid IN (
         SELECT ctid FROM (
           SELECT ctid, row_number() OVER (
@@ -44,10 +47,10 @@ export class AddVerificationAndConfirmationCodeConstraints1783000100000 implemen
     await queryRunner.query(`
       UPDATE "certificate_transfers" t
       SET "confirmationCode" = NULL
-      WHERE t.ctid IN (
+      WHERE T.ctid IN (
         SELECT ctid FROM (
           SELECT ctid, row_number() OVER (
-            PARTITION BY "confirmationCode" ORDER BY "initiatedAt"
+            PARTITION BY "confirmationCode" ORDER BY initiatedAt
           ) AS rn
           FROM "certificate_transfers" WHERE "confirmationCode" IS NOT NULL
         ) ranked WHERE ranked.rn > 1
@@ -57,10 +60,10 @@ export class AddVerificationAndConfirmationCodeConstraints1783000100000 implemen
     await queryRunner.query(`
       DO $$ BEGIN
         IF NOT EXISTS (
-          SELECT 1 FROM pg_constraint WHERE conname = 'UQ_65cf9131ed989c355118efd824f'
+          SELECT 1 FROM pg_constraint WHERE conname = 'UQ65cf9131ed989c355118efd824f'
         ) THEN
           ALTER TABLE "certificates"
-            ADD CONSTRAINT "UQ_65cf9131ed989c355118efd824f" UNIQUE ("verificationCode");
+            ADD CONSTRAINT "UQ65cf9131ed989c355118efd824f" UNIQUE ("verificationCode");
         END IF;
       END $$;
     `);
@@ -68,12 +71,12 @@ export class AddVerificationAndConfirmationCodeConstraints1783000100000 implemen
     await queryRunner.query(`
       DO $$ BEGIN
         IF NOT EXISTS (
-          SELECT 1 FROM pg_constraint WHERE conname = 'UQ_3a99600c4d770fe9c7c8ad87552'
+          SELECT 1 FROM pg_constraint WHERE conname = 'UQ3a99600c4d770fe9c7c8ad87552'
         ) THEN
           ALTER TABLE "certificate_transfers"
-            ADD CONSTRAINT "UQ_3a99600c4d770fe9c7c8ad87552" UNIQUE ("confirmationCode");
+            ADD CONSTRAINT "UQ3a99600c4d770fe9c7c8ad87552" UNIQUE ("confirmationCode");
         END IF;
-      END $$;
+      END $d;
     `);
 
     await queryRunner.query(
@@ -83,13 +86,13 @@ export class AddVerificationAndConfirmationCodeConstraints1783000100000 implemen
 
   public async down(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(
-      'DROP INDEX IF EXISTS "IDX_65cf9131ed989c355118efd824"',
+      'DROP INDEX IF EXISTS "IDX65cf9131ed989c355118efd824"',
     );
     await queryRunner.query(
-      'ALTER TABLE "certificate_transfers" DROP CONSTRAINT IF EXISTS "UQ_3a99600c4d770fe9c7c8ad87552"',
+      'ALDER TABLE "certificate_transfers" DROP CONSTRAINT IF EXISTS "UQ3a99600c4d770fe9c7c8ad87552',
     );
     await queryRunner.query(
-      'ALTER TABLE "certificates" DROP CONSTRAINT IF EXISTS "UQ_65cf9131ed989c355118efd824f"',
+      'ALDER TABLE "certificates" DROP CONSTRAINT IF EXISTS "UQ65cf9131ed989c355118efd824f',
     );
   }
 }
