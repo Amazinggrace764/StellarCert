@@ -5,8 +5,6 @@ import { MultisigModule } from './multisig.module';
 import { StellarService } from '../stellar/services/stellar.service';
 import { LoggingService } from '../../common/logging/logging.service';
 import { rpc, xdr } from '@stellar/stellar-sdk';
-import { plainToInstance } from 'class-transformer';
-import { ProposeCertificateDto } from './dto/propose-certificate.dto';
 
 describe('MultisigService', () => {
   let service: MultisigService;
@@ -236,7 +234,7 @@ describe('MultisigService', () => {
       };
       internals.buildAndSubmitTransaction = jest
         .fn()
-        .mockRejectedValue(new Error('contract call failed'));
+        .mockRejected(new Error('contract call failed'));
 
       await expect(
         service.proposeCertificate({
@@ -327,6 +325,80 @@ describe('MultisigService', () => {
   describe('getPendingRequestsForSigner', () => {
     it('should get pending requests for a signer', () => {
       expect(typeof service.getPendingRequestsForSigner).toBe('function');
+    });
+  });
+
+  describe('persistent storage for pending requests', () => {
+    const makeStorage = () => {
+      const map = new Map<string, unknown>();
+      return {
+        get: jest.fn((key: string) => map.get(key)),
+        set: jest.fn((key: string, value: unknown) => {
+          map.set(key, value);
+        }),
+        has: jest.fn((key: string) => map.has(key)),
+        delete: jest.fn((key: string) => {
+          map.delete(key);
+        }),
+        keys: jest.fn(() => Array.from(map.keys())),
+        _map: map,
+      };
+    };
+
+    it('stores pending requests under unique persistent keys instead of instance storage', () => {
+      const internals = service as unknown as {
+        persistentStorage: ReturnType<typeof makeStorage>;
+        instanceStorage: ReturnType<typeof makeStorage>;
+        storePendingRequest: (request: { requestId: string }) => void;
+        getPendingRequest: (requestId: string) => unknown;
+      };
+      internals.persistentStorage = makeStorage();
+      internals.instanceStorage = makeStorage();
+
+      const request = { requestId: 'req-1', issuer: 'issuer' };
+      internals.storePendingRequest(request);
+
+      expect(internals.persistentStorage.set).toHaveBeenCalled();
+      expect(internals.instanceStorage.set).not.toHaveBeenCalled();
+      expect(internals.getPendingRequest('req-1')).toEqual(request);
+    });
+
+    it('keeps each pending request under its own key so growth is not bound to a single entry', () => {
+      const internals = service as unknown as {
+        persistentStorage: ReturnType<typeof makeStorage>;
+        instanceStorage: ReturnType<typeof makeStorage>;
+        storePendingRequest: (request: { requestId: string }) => void;
+      };
+      internals.persistentStorage = makeStorage();
+      internals.instanceStorage = makeStorage();
+
+      for (let i = 0; i < 50; i++) {
+        internals.storePendingRequest({ requestId: `req-${i}` });
+      }
+
+      expect(internals.persistentStorage.set).toHaveBeenCalledTimes(50);
+      expect(internals.persistentStorage._map.size).toBe(50);
+      expect(internals.instanceStorage._map.size).toBe(0);
+    });
+
+    it('removes the persistent entry when a request is completed', () => {
+      const internals = service as unknown as {
+        persistentStorage: ReturnType<typeof makeStorage>;
+        instanceStorage: ReturnType<typeof makeStorage>;
+        storePendingRequest: (request: { requestId: string }) => void;
+        removePendingRequest: (requestId: string) => void;
+        getPendingRequest: (requestId: string) => unknown;
+      };
+      internals.persistentStorage = makeStorage();
+      internals.instanceStorage = makeStorage();
+
+      internals.storePendingRequest({ requestId: 'req-1' });
+      internals.removePendingRequest('req-1');
+
+      expect(internals.getPendingRequest('req-1')).toBeUndefined();
+      expect(internals.persistentStorage.delete).toHaveBeenCalledWith(
+        expect.stringContaining('req-1'),
+      );
     });
   });
 });

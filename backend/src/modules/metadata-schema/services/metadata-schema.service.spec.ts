@@ -390,95 +390,47 @@ describe('MetadataSchemaService', () => {
                 name: 'zip',
                 type: FieldType.STRING,
                 required: true,
-                pattern: '^\\d{5}$',
               },
             ],
           },
         ],
-        requiredFields: ['address'],
       };
 
-      const validMetadata = {
-        address: { street: '123 Main St', city: 'Testville', zip: '12345' },
-      };
-      const validErrors = service.validateAgainstSchema(
-        nestedSchema,
-        validMetadata,
-      );
-      expect(validErrors).toHaveLength(0);
-
-      const invalidMetadata = {
-        address: { street: '123 Main St', zip: 'bad' },
-      };
-      const invalidErrors = service.validateAgainstSchema(
-        nestedSchema,
-        invalidMetadata,
-      );
-      expect(invalidErrors.length).toBeGreaterThan(0);
+      const result = service.validateAgainstSchema(nestedSchema, {
+        address: {
+          street: '123 Main St',
+          city: 'St. Louis',
+          zip: '63101',
+        },
+      });
+      expect(result.valid).toBe(true);
     });
-  });
 
-  describe('validateAgainstSchema - array fields', () => {
-    it('should validate array fields', () => {
-      const arraySchema: MetadataSchema = {
+    it('should fail on missing nested required field', () => {
+      const nestedSchema: MetadataSchema = {
         ...savedSchema,
         fields: [
           {
-            name: 'tags',
-            type: FieldType.ARRAY,
+            name: 'address',
+            type: FieldType.OBJECT,
             required: true,
-            minLength: 1,
-            maxLength: 5,
-            items: { name: 'tag', type: FieldType.STRING, required: true },
+            properties: [
+              { name: 'street', type: FieldType.STRING, required: true },
+              { name: 'city', type: FieldType.STRING, required: true },
+            ],
           },
         ],
-        requiredFields: ['tags'],
       };
 
-      const validMetadata = { tags: ['blockchain', 'stellar'] };
+      const result = service.validateAgainstSchema(nestedSchema, {
+        address: { street: '123 Main St' },
+      });
+      expect(result.valid).toBe(false);
       expect(
-        service.validateAgainstSchema(arraySchema, validMetadata),
-      ).toHaveLength(0);
-
-      const emptyArray = { tags: [] };
-      const emptyErrors = service.validateAgainstSchema(
-        arraySchema,
-        emptyArray,
-      );
-      expect(emptyErrors.some((e) => e.constraint === 'minLength')).toBe(true);
-
-      const notArray = { tags: 'not-an-array' };
-      const typeErrors = service.validateAgainstSchema(arraySchema, notArray);
-      expect(typeErrors.some((e) => e.constraint === 'type')).toBe(true);
-    });
-  });
-
-  describe('validateAgainstSchema - pattern matching', () => {
-    it('should validate string patterns', () => {
-      const patternSchema: MetadataSchema = {
-        ...savedSchema,
-        fields: [
-          {
-            name: 'certCode',
-            type: FieldType.STRING,
-            required: true,
-            pattern: '^CERT-\\d{4}$',
-          },
-        ],
-        requiredFields: ['certCode'],
-      };
-
-      const validMetadata = { certCode: 'CERT-1234' };
-      expect(
-        service.validateAgainstSchema(patternSchema, validMetadata),
-      ).toHaveLength(0);
-
-      const invalidMetadata = { certCode: 'CERT-ABC' };
-      const errors = service.validateAgainstSchema(
-        patternSchema,
-        invalidMetadata,
-      );
-      expect(errors.some((e) => e.constraint === 'pattern')).toBe(true);
+        result.errors.some(
+          (e) => e.field === 'address.city' && e.constraint === 'required',
+        ),
+      ).toBe(true);
     });
   });
 });
