@@ -2,7 +2,6 @@ import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { GlobalExceptionFilter } from './common/exceptions/global-exception.filter';
 import { AppModule } from './app.module';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { SentryService } from './common/monitoring/sentry.service';
 import { LoggingService } from './common/logging/logging.service';
 import { MonitoringInterceptor } from './common/monitoring/monitoring.interceptor';
@@ -11,8 +10,8 @@ import { SecurityHeadersInterceptor } from './modules/security/interceptor';
 import { Logger, VersioningType } from '@nestjs/common';
 import express from 'express';
 import cookieParser from 'cookie-parser';
-import { migrationStrategyWarnings } from './config/typeiorm.config';
-import { resolveTrustProxySetting } from './config/trust-proxy.config';
+import { migrationStrategyWarnings } from './config/typeorm.config';
+import { setupSwagger } from './config/swagger.config';
 
 async function bootstrap() {
   // Report configuration that contradicts the documented migration strategy
@@ -39,7 +38,7 @@ async function bootstrap() {
 
   loggingService.log('🚀 Starting application...');
   loggingService.log(
-    '📧 Email queue name: ' + (process.env.EMAIL_QUEUE_NAME || 'email-queue'),
+    '🧳 Email queue name: ' + (process.env.EMAIL_QUEUE_NAME || 'email-queue'),
   );
   loggingService.log(
     'Trust proxy setting: ' +
@@ -104,23 +103,10 @@ async function bootstrap() {
     new MonitoringInterceptor(metricsService, sentryService, loggingService),
   );
 
-  // Swagger setup
-  const config = new DocumentBuilder()
-    .setTitle('StellarCert API')
-    .setDescription('Certificate Management System API Documentation')
-    .setVersion('1.0')
-    .addBearerAuth(
-      { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
-      'access-token',
-    )
-    .build();
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api/docs', app, document, {
-    swaggerOptions: {
-      persistAuthorization: true,
-      docExpansion: 'none',
-    },
-  });
+  // Swagger setup — never exposed in production (see swagger.config).
+  if (!setupSwagger(app)) {
+    loggingService.log('Swagger UI disabled (NODE_ENV=production)');
+  }
 
   // Enable graceful shutdown hooks
   app.enableShutdownHooks();

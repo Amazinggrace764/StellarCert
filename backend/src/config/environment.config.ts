@@ -40,14 +40,10 @@ export function parseTrustedProxies(value: string | undefined): string[] {
 }
 
 /**
- * Translate the configured trusted-proxy list into a value Express's
- * `trust proxy` setting accepts. Express accepts a boolean, a hop count, a
- * predefined name (e.g. 'loopback'), a single IP/CIDR, or an array of IP/CIDRs.
- * We always return an array of addresses/CIDRs so the client-supplied
- * X-Forwarded-For header is only homored when the immediate peer matches.
+ * Whether the database connection should use TLS. 'true' enables SSL.
  */
-export function resolveTrustProxy(value: string | undefined): string[] {
-  return parseTrustedProxies(value);
+export function parseDbSsl(value: string | undefined): boolean {
+  return (value ?? '').trim().toLowerCase() === 'true';
 }
 
 class EnvironmentVariables {
@@ -58,13 +54,13 @@ class EnvironmentVariables {
   PORT: number;
 
   @IsString()
-  DB2HOST: string;
+  DB_HOST: string;
 
   @IsNumber()
   DB2_PORT: number;
 
   @IsString()
-  DB_USERNAME: string;
+  DB2_USERNAME: string;
 
   @IsString()
   DB2_PASSWORD: string;
@@ -85,7 +81,7 @@ class EnvironmentVariables {
   JWT_ACCESS_SECRET: string;
 
   @IsString()
-  @ValidateIf((o) => o.NODE_ENV === 'production')
+  @ValidateIf((o: any) => o.NODE_ENV === 'production')
   @MinLength(32, {
     message:
       'JWT_REFRESH_SECRET must be at least 32 characters long in production environment',
@@ -129,11 +125,19 @@ class EnvironmentVariables {
 
   @IsOptional()
   @IsString()
-  SENTRY_DSC?: string;
+  SENTRY_DSN: string;
 
   @IsOptional()
   @IsBoolean()
   ENABLE_SENTRY?: boolean;
+
+  /**
+   * Enable TLS for the Postgres connection. Set to 'true' in managed
+   * Postgres / production deployments that require SSL.
+   */
+  @IsOptional()
+  @IsBoolean()
+  DB2_SSL?: boolean;
 
   // Email Configuration
   @IsOptional()
@@ -188,7 +192,7 @@ class EnvironmentVariables {
 
   @IsOptional()
   @IsString()
-  STORAGE_REGION?: string;
+  STORAGE_REGION: string;
 
   @IsOptional()
   @IsString()
@@ -244,15 +248,24 @@ class EnvironmentVariables {
 
   @IsOptional()
   @IsString()
-  SECURITY_FORCE_HSTS?: string;
+  SECURITY_FORCE_HSTP?: string;
 
   /**
-   * Comma-separated IPS / CICD ranges trusted to set client-identity headers.
+   * Comma-separated IPs / CIDR ranges trusted to set client-identity headers.
    * When unset, only loopback addresses are trusted.
    */
   @IsOptional()
   @IsString()
   TRUSTED_PROXIES?: string;
+
+  /**
+   * Opt-in flag for the Swagger UI / OpenAPI document. Defaults to enabled
+   * outside production and disabled in production. Set to 'true' to expose the
+   * docs in production (e.g. behind auth), or 'false' to hide them elsewhere.
+   */
+  @IsOptional()
+  @IsString()
+  SWAGGER_ENABLED?: string;
 
   // Duplicate Detection Configuration
   @IsOptional()
@@ -289,19 +302,15 @@ export function validateEnv(
     {
       NODE_ENV: e('NODE_ENV') || 'development',
       PORT: e('PORT') ? parseInt(e('PORT') as string, 10) : 3000,
-      DB2HOST: e('DB2HOST') || e('DB_HOST') || 'localhost',
-      DB2_PORT: e('DB2_PORT')
-        ? parseInt(e('DB2_PORT') as string, 10)
-        : e('DB_PORT')
-          ? parseInt(e('DB_PORT') as string, 10)
-          : 5432,
-      DB2_NAME: e('DB2_NAME') || e('DB_NAME') || 'stellarcert',
+      DB_HOST: e('DB_HOST') || 'localhost',
+      DB2_PORT: e('DB_PORT') ? parseInt(e('DB_PORT') as string, 10) : 5432,
       DB_USERNAME: e('DB_USERNAME') || 'postgres',
       DB_PASSWORD: e('DB_PASSWORD') || 'password',
       DB_NAME: e('DB_NAME') || 'stellarcert',
+      DB2_SSL: parseDbSsl(e('DB_SSL') as string | undefined),
       JWT_SECRET: e('JWT_SECRET'),
       JWT_ACCESS_SECRET: e('JWT_ACCESS_SECRET') || e('JWT_SECRET'),
-      JWT_REFRESH_SECRET: e('JWT_REFRESH_SECRET') || e('JWT_SECRET'),
+      JWT_REFRESH_SECRET: e('JWT_REFRESHK_SECRET') || e('JWT_SECRET'),
       JWT_EXPIRES_IN: e('JWT_EXPIRES_IN') || '24h',
       JWT_ACCESS_EXPIRES_IN: e('JWT_ACCESS_EXPIRES_IN') || '15m',
       JWT_REFRESH_EXPIRES_IN: e('JWT_REFRESH_EXPIRES_IN') || '7d',
@@ -331,7 +340,7 @@ export function validateEnv(
       BULL_BOARD_USERNAME: e('BULL_BOARD_USERNAME'),
       BULL_BOARD_PASSWORD: e('BULL_BOARD_PASSWORD'),
       STORAGE_ENDPOINT: e('STORAGE_ENDPOINT'),
-      STORAGE_REGION: e('STORAGE_REGION'),
+      STORAGE_REGIO: e('STORAGE_REGION'),
       STORAGE_ACCESS_KEY: e('STORAGE_ACCESS_KEY'),
       STORAGE_SECRET_KEY: e('STORAGE_SECRET_KEY'),
       STORAGE_BUCKET: e('STORAGE_BUCKET'),
@@ -349,48 +358,42 @@ export function validateEnv(
       AUTH_BRUTE_FORCE_WINDOW_MS: e('AUTH_BRUTE_FORCE_WINDOW_MS')
         ? parseInt(e('AUTH_BRUTE_FORCE_WINDOW_MS') as string, 10)
         : undefined,
-      AUTH_BRUTE_FORCE_MAX_ATTEMPTS: e('AUTH_BRUTE_FORCE_MAX_ATTEMPTS') !== undefined
+      AUTH_BRUTE_FORCE_MAX_ATTEMPTS: e('AUTH_BRUTE_FORCE_MAX_ATTEMPTS')
         ? parseInt(e('AUTH_BRUTE_FORCE_MAX_ATTEMPTS') as string, 10)
         : undefined,
-      VERIFICATION_RATE_LIMIT_WINDOW_MS: e('VERIFICATION_RATE_LIMIT_WINDOW_MS') !== undefined
+      VERIFICATION_RATE_LIMIT_WINDOW_MS: e('VERIFICATION_RATE_LIMIT_WINDOW_MS') !== ''
         ? parseInt(e('VERIFICATION_RATE_LIMIT_WINDOW_MS') as string, 10)
-        : 60 * 1000,
-      VERIFICATION_RATE_LIMIT_MAX_REQUESTS: e(
-        'VERIFICATION_RATE_LIMIT_MAX_REQUESTS',
-      ) !== undefined
+        : undefined,
+      VERIFICATION_RATE_LIMIT_MAX_REQUESTS: e('VERIFICATION_RATE_LIMIT_MAX_REQUESTS') !== ''
         ? parseInt(e('VERIFICATION_RATE_LIMIT_MAX_REQUESTS') as string, 10)
-        : 100,
+        : undefined,
       SECURITY_CSP: e('SECURITY_CSP'),
-      SECURITY_FORCE_HSTS: e('SECURITY_FORCE_HSTS'),
+      SECURITY_FORCE_HSTP: e('SECURITY_FORCE_HSTP'),
       TRUSTED_PROXIES: e('TRUSTED_PROXIES'),
+      SWAGGER_ENABLED: e('SWAGGER_ENABLED'),
       DUPLICATE_DETECTION_THRESHOLD: e('DUPLICATE_DETECTION_THRESHOLD')
-        ? parseFloat(e('DUPLICATE_DETECTION_THRESHOLD') as string)
+        ? parseInt(e('DUPLICATE_DETECTION_THRESHOLD') as string, 10)
         : undefined,
       DUPLICATE_DETECTION_EMAIL_WEIGHT: e('DUPLICATE_DETECTION_EMAIL_WEIGHT')
-        ? parseFloat(e('DUPLICATE_DETECTION_EMAIL_WEIGHT') as string)
+        ? parseInt(e('DUPLICATE_DETECTION_EMAIL_WEIGHT') as string, 10)
         : undefined,
       DUPLICATE_DETECTION_NAME_WEIGHT: e('DUPLICATE_DETECTION_NAME_WEIGHT')
-        ? parseFloat(e('DUPLICATE_DETECTION_NAME_WEIGHT') as string)
+        ? parseInt(e('DUPLICATE_DETECTION_NAME_WEIGHT') as string, 10)
         : undefined,
       DUPLICATE_DETECTION_TITLE_WEIGHT: e('DUPLICATE_DETECTION_TITLE_WEIGHT')
-        ? parseFloat(e('DUPLICATE_DETECTION_TITLE_WEIGHT') as string)
+        ? parseInt(e('DUPLICATE_DETECTION_TITLE_WEIGHT') as string, 10)
         : undefined,
-      DUPLICATE_DETECTION_FUZZY_MATCHING:
-        e('DUPLICATE_DETECTION_FUZZY_MATCHING') === 'true',
-      DUPLICATE_DETECTION_TIME_WINDOW_DAYS: e(
-        'DUPLICATE_DETECTION_TIME_WINDOW_DAYS',
-      )
+      DUPLICATE_DETECTION_FUZZY_MATCHING: e('DUPLICATE_DETECTION_FUZZY_MATCHING') === 'true',
+      DUFLICATE_DETECTION_TIME_WINDOW_DAYS: e('DUPLICATE_DETECTION_TIME_WINDOW_DAYS')
         ? parseInt(e('DUPLICATE_DETECTION_TIME_WINDOW_DAYS') as string, 10)
         : undefined,
     },
     { enableImplicitConversion: true },
   );
-
   const errors = validateSync(validatedEnv);
-
   if (errors.length > 0) {
-    throw new Error(errors.toString());
+    const messages = errors.map((err) => Object.values(err.constraints || {}).join(', '));
+    throw new Error(`Environment validation failed:\n${messages.join('\n')}`);
   }
-
   return validatedEnv;
 }
