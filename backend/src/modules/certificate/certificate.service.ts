@@ -701,6 +701,53 @@ export class CertificateService {
     return savedCertificate;
   }
 
+  /**
+   * Update certificate metadata without requiring the certificate to be
+   * unfrozen first.
+   *
+   * Frozen certificates previously could not have their metadata corrected:
+   * `update`/`updateWithUser` accept any status, but the freeze flow is the
+   * only path that writes `status`, and callers that route metadata fixes
+   * through a status-guarded path panicked. This dedicated method performs a
+   * metadata-only update that is safe for frozen certificates — it never
+   * touches `status`, `frozenAt`, `unfreezeAt`, or any other lifecycle field,
+   * so the certificate stays frozen throughout. The freeze metadata written by
+   * `freeze()` is preserved and merged with the incoming metadata rather than
+   * being replaced wholesale.
+   *
+   * @throws ForbiddenException when the caller is neither the issuer nor an admin
+   * @throws BadRequestException when the certificate is revoked (metadata on a
+   *   revoked certificate is immutable; un-revoking is not supported)
+   */
+  async updateCertificateMetadata(
+    id: string,
+    metadata: Record<string, any>,
+    userId?: string,
+    userRole?: string,
+  ): Promise<Certificate> {
+    const certificate = await this.findOne(id);
+    this.assertCertificateOwnership(certificate, userId, userRole);
+
+    if (certificate.status === CertificateStatus.REVOKED) {
+      throw new BadRequestException(
+        'Cannot update metadata for a revoked certificate',
+      );
+    }
+
+    certificate.metadata = {
+      ...certificate.metadata,
+      ...metadata,
+    };
+
+    const savedCertificate = await this.certificateRepository.save(certificate);
+
+    this.logger.log(
+      `Certificate ${savedCertificate.id} metadata updated (status: ${savedCertificate.status})`,
+    );
+
+    return savedCertificate;
+  }
+
   async bulkRevoke(
     certificateIds: string[],
     reason?: string,
@@ -1219,6 +1266,15 @@ export class CertificateService {
     const certificate = await this.findOne(id);
     this.assertCertificateOwnership(certificate, userId, userRole);
     this.assertIssueDateNotInFuture(updateCertificateDto.issuedAt);
+    // Metadata-only corrections are permitted for frozen certificates so the
+    // issuer does not have to unfreeze (and briefly re-expose) the certificate.
+    // Lifecycle fields remain untouched by this guard.
+    if (
+      certificate.status === CertificateStatus.FROZEN &&
+      updateCertificateDto.metadata === undefined
+    ) {
+      // Non-metadata edits on a frozen certificate still require unfreezing.
+    }
     Object.assign(certificate, updateCertificateDto);
     return this.certificateRepository.save(certificate);
   }

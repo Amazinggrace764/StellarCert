@@ -420,4 +420,4 @@ describe('CertificateService', () => {
       expect(promoted.equals(duplicated)).toBe(false);
     });
   });
-});
+})

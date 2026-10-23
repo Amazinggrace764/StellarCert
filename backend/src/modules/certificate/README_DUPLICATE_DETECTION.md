@@ -61,7 +61,7 @@ class Certificate {
   overrideReason: string;
 
   @Column({ nullable: true })
-  overriddenBy: string;
+  overridenBy: string;
 }
 ```
 
