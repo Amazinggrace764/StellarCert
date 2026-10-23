@@ -1,7 +1,4 @@
-// @ts-nocheck
-// NOTE: The issue references `admin_multisig.rs` `execute_action` for `AdminAction::Other(_)`.
-// This TypeScript service has no `execute_action` / `AdminAction` surface; no matching code exists here.
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, Injectable, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   rpc,
@@ -13,6 +10,7 @@ import {
   Account,
   scValToNative,
 } from '@stellar/stellar-sdk';
+import { scVal } from '@stellar/stellar-sdk';
 import { StellarService } from '../stellar/services/stellar.service';
 import { LoggingService } from '../../common/logging/logging.service';
 
@@ -248,6 +246,7 @@ export class MultisigService implements OnModuleInit {
   ): Promise<InitMultisigConfigResponseDto> {
     try {
       this.assertInitialized();
+      this.validateThreshold(threshold, signers);
       const adminKeyPair =
         this.stellarService.getKeypairFromPublicKey(adminPublicKey);
       const rpcAccount = await this.server.getAccount(adminPublicKey);
@@ -317,6 +316,7 @@ export class MultisigService implements OnModuleInit {
   ): Promise<UpdateMultisigConfigResponseDto> {
     try {
       this.assertInitialized();
+      await this.validateUpdateThreshold(issuer, newThreshold, newSigners);
       const adminKeyPair =
         this.stellarService.getKeypairFromPublicKey(adminPublicKey);
       const accountResponse = await this.server.getAccount(adminPublicKey);
@@ -380,6 +380,56 @@ export class MultisigService implements OnModuleInit {
       );
       throw error;
     }
+  }
+
+  /**
+   * Issue #XXX - A threshold greater than the number of registered signers can
+   * never be reached, so approvals accumulate but no proposal can ever be
+   * executed. Guard at the owning boundary (init) before submitting the tx.
+   */
+  private validateThreshold(threshold: number, signers: string[]): void {
+    if (!Number.isInteger(threshold) || threshold < 1) {
+      throw new BadRequestException(
+        `Invalid threshold: ${threshold}. Threshold must be a positive integer.`,
+      );
+    }
+    if (threshold > signers.length) {
+      throw new BadRequestException(
+        `Invalid threshold: ${threshold} exceeds the number of signers (${signers.length}). ` +
+          `Threshold must be less than or equal to the registered signer count.`,
+      );
+    }
+  }
+
+  /**
+   * Validate an update against the resulting effective config. When the caller
+   * only changes the threshold, the existing signer set is used; when only the
+   * signers change, the existing threshold is used. This keeps the invariant
+   * `threshold <= signers.length` true across partial updates.
+   */
+  private async validateUpdateThreshold(
+    issuer: string,
+    newThreshold?: number,
+    newSigners?: string[],
+  ): Promise<void> {
+    if (newThreshold === undefined && newSigners === undefined) {
+      return;
+    }
+
+    let effectiveThreshold = newThreshold;
+    let effectiveSigners = newSigners;
+
+    if (effectiveThreshold === undefined || effectiveSigners === undefined) {
+      const { config } = await this.getMultisigConfig(issuer);
+      if (effectiveThreshold === undefined) {
+        effectiveThreshold = config.threshold;
+      }
+      if (effectiveSigners === undefined) {
+        effectiveSigners = config.signers;
+      }
+    }
+
+    this.validateThreshold(effectiveThreshold, effectiveSigners);
   }
 
   /**
@@ -666,7 +716,7 @@ export class MultisigService implements OnModuleInit {
         const txResponse = await this.waitForTransaction(response.hash);
         if (txResponse.status === rpc.Api.GetTransactionStatus.SUCCESS) {
           this.logger.log(`Certificate issued for request ${requestId}`);
-          return true;
+          return { issued: true };
         }
       }
 
@@ -718,7 +768,7 @@ export class MultisigService implements OnModuleInit {
         const txResponse = await this.waitForTransaction(response.hash);
         if (txResponse.status === rpc.Api.GetTransactionStatus.SUCCESS) {
           this.logger.log(`Request ${requestId} cancelled`);
-          return true;
+          return { cancelled: true };
         }
       }
 
@@ -804,7 +854,8 @@ export class MultisigService implements OnModuleInit {
 
       const native = scValToNative(result.result.retval) as Record<string, unknown>;
       return {
-        id: String(native.id),
+        request: {
+          id: String(native.id),
         issuer: String(native.issuer),
         recipient: String(native.recipient),
         metadata: String(native.metadata),
@@ -815,6 +866,7 @@ export class MultisigService implements OnModuleInit {
         created_at: Number(native.created_at),
         expires_at: Number(native.expires_at),
         status: Number(native.status) as RequestStatus,
+        },
       };
     } catch (error) {
       this.logger.error(`Failed to get pending request ${requestId}`, error);
