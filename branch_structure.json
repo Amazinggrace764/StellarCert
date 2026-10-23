@@ -1,21 +1,21 @@
 {
   "default_branch": "main",
   "branches": [
-    "fix/issue-101-verifycertificate-has-dead-toast-ui-and-uses",
-    "fix/issue-103-theme-applied-only-in-a-post-mount-useeffect",
+    "fix/issue-54-issuecertificate-tsx-component-has-a-broken",
+    "fix/issue-56-socket-token-rotation-relies-on-a-same-tab",
     "main",
     "origin"
   ],
   "parent": {
-    "fix/issue-101-verifycertificate-has-dead-toast-ui-and-uses": "main",
-    "fix/issue-103-theme-applied-only-in-a-post-mount-useeffect": "main",
+    "fix/issue-54-issuecertificate-tsx-component-has-a-broken": "main",
+    "fix/issue-56-socket-token-rotation-relies-on-a-same-tab": "main",
     "main": null,
     "origin": "main"
   },
   "order": [
     "main",
-    "fix/issue-101-verifycertificate-has-dead-toast-ui-and-uses",
-    "fix/issue-103-theme-applied-only-in-a-post-mount-useeffect",
+    "fix/issue-54-issuecertificate-tsx-component-has-a-broken",
+    "fix/issue-56-socket-token-rotation-relies-on-a-same-tab",
     "origin"
   ]
 }

@@ -4,34 +4,22 @@ import {
   MaxLength,
   IsOptional,
   IsUUID,
-  ValidateIf,
   ValidatorConstraintInterface,
+  ValidatorConstraint,
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 /**
- * Ensures at least one of the certificate identifiers (code, tx hash,
- * or database UUID) is provided so the verification request is actionable.
+ * Custom constraint: at least one verification identifier must be provided.
  */
-@injectable()
-export class AtLeastOneIdentifierConstraint
-  implements ValidatorConstraintInterface
-{
-  public validate(
-    value: VerifyCertificateDto,
-    args: { constraints?: unknown },
-  ): boolean {
-    const hasCode = typeof value.verificationCode === 'string' && value.verificationCode.trim().length > 0;
-    const hasTxHash =
-      typeof value.stellarTransactionHash === 'string' &&
-      value.stellarTransactionHash.trim().length > 0;
-    const hasId =
-      typeof value.certificateId === 'string' && value.certificateId.trim().length > 0;
-    return hasCode || hasTxHash || hasId;
+@ValidatorConstraint({ name: 'AtLeastOneVerificationIdentifier', async: false })
+export class AtLeastOneVerificationIdentifier implements ValidatorConstraintInterface {
+  validate(object: VerifyCertificateDto): boolean {
+    return Boolean(object.verificationCode || object.stellarTransactionHash || object.certificateId);
   }
 
-  public defaultMessage(args: { constraints?: unknown }): string {
-    return 'At least one of verificationCode, stellarTransactionHash, or certificateId must be provided';
+  defaultMessage(): string {
+    return 'One of verificationCode, stellarTransactionHash, or certificateId must be provided';
   }
 }
 

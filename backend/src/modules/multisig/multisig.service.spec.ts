@@ -5,8 +5,6 @@ import { MultisigModule } from './multisig.module';
 import { StellarService } from '../stellar/services/stellar.service';
 import { LoggingService } from '../../common/logging/logging.service';
 import { rpc, xdr } from '@stellar/stellar-sdk';
-import { plainToInstance } from 'class-transformer';
-import { ProposeCertificateDto } from './dto/propose-certificate.dto';
 
 describe('MultisigService', () => {
   let service: MultisigService;
@@ -51,8 +49,6 @@ describe('MultisigService', () => {
 
   describe('transaction polling', () => {
     it('keeps polling until the transaction succeeds', async () => {
-      // waitForTransaction must be defined on the service instance before use.
-      // (The beforeEach below runs before each test, so `service` is available.)
       const success = { status: rpc.Api.GetTransactionStatus.SUCCESS };
       const getTransaction = jest
         .fn()
@@ -62,7 +58,7 @@ describe('MultisigService', () => {
         .mockResolvedOnce(success);
 
       const internals = service as unknown as {
-        server: { getTransaction: jest.Mock };
+        server: { getTransaction: jest.Mock; };
         waitForTransaction: (
           hash: string,
           options?: { maxAttempts?: number; intervalMs?: number },
@@ -75,7 +71,7 @@ describe('MultisigService', () => {
           maxAttempts: 3,
           intervalMs: 0,
         }),
-      ).resolvesToBe(success);
+      ).resolves.toBe(success);
       expect(getTransaction).toHaveBeenCalledTimes(2);
     });
 
@@ -83,13 +79,13 @@ describe('MultisigService', () => {
       const failed = { status: rpc.Api.GetTransactionStatus.FAILED };
       const getTransaction = jest
         .fn()
-        .mockResolvedValueOnce({
+        .mockResolvedOnce({
           status: rpc.Api.GetTransactionStatus.NOT_FOUND,
         })
-        .mockResolvedValueOnce(failed);
+        .mockResolvedOnce(failed);
 
       const internals = service as unknown as {
-        server: { getTransaction: jest.Mock };
+        server: { getTransaction: jest.Mock; };
         waitForTransaction: (
           hash: string,
           options?: { maxAttempts?: number; intervalMs?: number },
@@ -112,7 +108,7 @@ describe('MultisigService', () => {
       });
 
       const internals = service as unknown as {
-        server: { getTransaction: jest.Mock };
+        server: { getTransaction: jest.Mock; };
         waitForTransaction: (
           hash: string,
           options?: { maxAttempts?: number; intervalMs?: number },
@@ -130,12 +126,12 @@ describe('MultisigService', () => {
     });
 
     it('rejects when the transaction is still PENDING after max attempts', async () => {
-      const getTransaction = jest.fn().mockResolvedValue({
+      const getTransaction = jest.fn().mockResolved({
         status: rpc.Api.GetTransactionStatus.PENDING,
       });
 
       const internals = service as unknown as {
-        server: { getTransaction: jest.Mock };
+        server: { getTransaction: jest.Mock; };
         waitForTransaction: (
           hash: string,
           options?: { maxAttempts?: number; intervalMs?: number },
@@ -163,7 +159,7 @@ describe('MultisigService', () => {
   });
 
   describe('contract boolean results', () => {
-    const parseBooleanResult = (retval: sdr.ScVal | undefined) =>
+    const parseBooleanResult = (retval: xdr.ScVal | undefined) =>
       (
         service as unknown as {
           parseBooleanResult: (value: xdr.ScVal | undefined) => boolean;
@@ -185,6 +181,29 @@ describe('MultisigService', () => {
     });
   });
 
+  describe('issuer authorization for proposal reads', () => {
+    it('requires the issuer to be authenticated before reading a proposal', async () => {
+      const internals = service as unknown as {
+        assertIssuerAuthorized: (issuer: string) => void;
+      };
+      const spy = jest.spyOn(internals, 'assertIssuerAuthorized');
+
+      expect(() => internals.assertIssuerAuthorized('GIssuer')).toNotThrow();
+      expect(spy).toHaveBeenCalled();
+    });
+
+    it('propagates authorization failures when the issuer is not authorized', () => {
+      const internals = service as unknown as {
+        assertIssuerAuthorized: (issuer: string) => void;
+      };
+      jest.spyOn(internals, 'assertIssuerAuthorized').mockImplementation(() => {
+        throw new Error('Unauthorized');
+      });
+
+      expect(() => internals.assertIssuerAuthorized('GIssuer')).toThrow('Unauthorized');
+    });
+  });
+
   describe('initMultisigConfig', () => {
     it('should initialize multisig configuration', () => {
       jest
@@ -199,11 +218,56 @@ describe('MultisigService', () => {
 
       expect(typeof service.initMultisigConfig).toBe('function');
     });
+
+    it('rejects a threshold larger than the number of signers', async () => {
+      await expect(
+        service.initMultisigConfig(
+          'source',
+          'issuer',
+          5,
+          ['signer-1', 'signer-2', 'signer-3'],
+        ),
+      ).rejects.toThrow(
+        'threshold must be less than or equal to the number of signers',
+      );
+    });
+
+    it('rejects an empty signer list', async () => {
+      await expect(
+        service.initMultisigConfig('source', 'issuer', 1, []),
+      ).rejects.toThrow('at least one signer is required');
+    });
+
+    it('rejects a non-positive threshold', async () => {
+      await expect(
+        service.initMultisigConfig('source', 'issuer', 0, ['signer-1']),
+      ).rejects.toThrow('threshold must be a positive integer');
+    });
+
+    it('accepts a threshold equal to the number of signers', () => {
+      const internals = service as unknown as {
+        validateThreshold: (threshold: number, signers: string[]) => void;
+      };
+      expect(() => internals.validateThreshold(3, ['a', 'b', 'c'])).not.toThrow();
+    });
   });
 
   describe('updateMultisigConfig', () => {
     it('should update multisig configuration', () => {
       expect(typeof service.updateMultisigConfig).toBe('function');
+    });
+
+    it('rejects a threshold larger than the number of signers', async () => {
+      await expect(
+        service.updateMultisigConfig(
+          'source',
+          'issuer',
+          5,
+          ['signer-1', 'signer-2', 'signer-3'],
+        ),
+      ).rejects.toThrow(
+        'threshold must be less than or equal to the number of signers',
+      );
     });
   });
 
@@ -219,7 +283,7 @@ describe('MultisigService', () => {
       };
       internals.buildAndSubmitTransaction = jest
         .fn()
-        .mockResolvedValue(xdr.ScVal.scvBool(true));
+        .mockResolved(xdr.ScVal.scvBool(true));
 
       await expect(
         service.proposeCertificate({
@@ -238,7 +302,7 @@ describe('MultisigService', () => {
       };
       internals.buildAndSubmitTransaction = jest
         .fn()
-        .mockRejectedValue(new Error('contract call failed'));
+        .mockRejected(new Error('contract call failed'));
 
       await expect(
         service.proposeCertificate({
@@ -262,7 +326,7 @@ describe('MultisigService', () => {
       };
       internals.buildAndSubmitTransaction = jest
         .fn()
-        .mockResolvedValue(xdr.ScVal.scvBool(true));
+        .mockResolved(xdr.ScVal.scvBool(true));
 
       await expect(
         service.approveRequest({ requestId: 'req-1', signer: 'signer-1' } as never),
@@ -276,7 +340,7 @@ describe('MultisigService', () => {
       };
       internals.buildAndSubmitTransaction = jest
         .fn()
-        .mockResolvedValue(xdr.ScVal.scvU32(1));
+        .mockResolved(xdr.ScVal.scvU32(1));
 
       await expect(
         service.approveRequest({ requestId: 'req-1', signer: 'signer-1' } as never),
@@ -303,7 +367,7 @@ describe('MultisigService', () => {
   });
 
   describe('getMultisigConfig', () => {
-    it('should get multisig configuration for an issuer', () => {
+    it('should retrieve the multisig configuration', () => {
       expect(typeof service.getMultisigConfig).toBe('function');
     });
   });
@@ -329,6 +393,80 @@ describe('MultisigService', () => {
   describe('getPendingRequestsForSigner', () => {
     it('should get pending requests for a signer', () => {
       expect(typeof service.getPendingRequestsForSigner).toBe('function');
+    });
+  });
+
+  describe('persistent storage for pending requests', () => {
+    const makeStorage = () => {
+      const map = new Map<string, unknown>();
+      return {
+        get: jest.fn((key: string) => map.get(key)),
+        set: jest.fn((key: string, value: unknown) => {
+          map.set(key, value);
+        }),
+        has: jest.fn((key: string) => map.has(key)),
+        delete: jest.fn((key: string) => {
+          map.delete(key);
+        }),
+        keys: jest.fn(() => Array.from(map.keys())),
+        _map: map,
+      };
+    };
+
+    it('stores pending requests under unique persistent keys instead of instance storage', () => {
+      const internals = service as unknown as {
+        persistentStorage: ReturnType<typeof makeStorage>;
+        instanceStorage: ReturnType<typeof makeStorage>;
+        storePendingRequest: (request: { requestId: string }) => void;
+        getPendingRequest: (requestId: string) => unknown;
+      };
+      internals.persistentStorage = makeStorage();
+      internals.instanceStorage = makeStorage();
+
+      const request = { requestId: 'req-1', issuer: 'issuer' };
+      internals.storePendingRequest(request);
+
+      expect(internals.persistentStorage.set).toHaveBeenCalled();
+      expect(internals.instanceStorage.set).not.toHaveBeenCalled();
+      expect(internals.getPendingRequest('req-1')).toEqual(request);
+    });
+
+    it('keeps each pending request under its own key so growth is not bound to a single entry', () => {
+      const internals = service as unknown as {
+        persistentStorage: ReturnType<typeof makeStorage>;
+        instanceStorage: ReturnType<typeof makeStorage>;
+        storePendingRequest: (request: { requestId: string }) => void;
+      };
+      internals.persistentStorage = makeStorage();
+      internals.instanceStorage = makeStorage();
+
+      for (let i = 0; i < 50; i++) {
+        internals.storePendingRequest({ requestId: `req-${i}` });
+      }
+
+      expect(internals.persistentStorage.set).toHaveBeenCalledTimes(50);
+      expect(internals.persistentStorage._map.size).toBe(50);
+      expect(internals.instanceStorage._map.size).toBe(0);
+    });
+
+    it('removes the persistent entry when a request is completed', () => {
+      const internals = service as unknown as {
+        persistentStorage: ReturnType<typeof makeStorage>;
+        instanceStorage: ReturnType<typeof makeStorage>;
+        storePendingRequest: (request: { requestId: string }) => void;
+        removePendingRequest: (requestId: string) => void;
+        getPendingRequest: (requestId: string) => unknown;
+      };
+      internals.persistentStorage = makeStorage();
+      internals.instanceStorage = makeStorage();
+
+      internals.storePendingRequest({ requestId: 'req-1' });
+      internals.removePendingRequest('req-1');
+
+      expect(internals.getPendingRequest('req-1')).toBeUndefined();
+      expect(internals.persistentStorage.delete).toHaveBeenCalledWith(
+        expect.stringContaining('req-1'),
+      );
     });
   });
 });
