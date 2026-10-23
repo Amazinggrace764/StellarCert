@@ -66,6 +66,17 @@ function getHeaderValue(
   return undefined;
 }
 
+function trustedProxySet(trustedProxies: string[]): Set<string> {
+  const set = new Set<string>();
+  for (const proxy of trustedProxies) {
+    const normalized = normalizeIp(proxy);
+    if (normalized) {
+      set.add(normalized);
+    }
+  }
+  return set;
+}
+
 export function getClientIp(
   request: Request,
   trustedProxies: string[] = [],
@@ -83,11 +94,14 @@ export function getClientIp(
 
   const forwardedFor = getHeaderValue(request.headers, FORWARDED_FOR_HEADER);
   if (forwardedFor) {
-    // X-Forwarded-For can contain a comma-separated chain; the client is the
-    // first hop in the chain. Take the leftmost valid entry and ignore any
+    // `X-Forwarded-For` can contain a comma-separated chain; the client is the
+    // leftmost hop in the chain. Take the leftmost valid entry and ignore any
     // optional port or bracketed IPv6 formatting.
     for (const part of forwardedFor.split(',')) {
-      const candidate = part.trim().replace(/^\[(.+)\]$/, '$1').replace(/:\d+$/, '');
+      const candidate = part
+        .trim()
+        .replace(/^\[(.+)\]$/, '$1')
+        .replace(/:\d+$/, '');
       const normalized = normalizeIp(candidate);
       if (normalized) {
         return normalized;
@@ -104,17 +118,6 @@ export function getClientIp(
   }
 
   return remoteIp;
-}
-
-function trustedProxySet(trustedProxies: string[]): Set<string> {
-  const set = new Set<string>();
-  for (const proxy of trustedProxies) {
-    const normalized = normalizeIp(proxy);
-    if (normalized) {
-      set.add(normalized);
-    }
-  }
-  return set;
 }
 
 @Injectable()
@@ -156,7 +159,12 @@ export class RateLimitGuard implements CanActivate {
       this.rateLimitService.getTrustedProxies(),
     );
 
-    const result = await this.rateLimitService.consume(issuer.id, issuer.tier, routePath, clientIp);
+    const result = await this.rateLimitService.consume(
+      issuer.id,
+      issuer.tier,
+      routePath,
+      clientIp,
+    );
 
     response.setHeader('X-RateLimit-Limit', result.limit.toString());
     response.setHeader('X-RateLimit-Remaining', result.remaining.toString());
