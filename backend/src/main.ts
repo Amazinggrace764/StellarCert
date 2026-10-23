@@ -119,7 +119,7 @@ async function bootstrap() {
 
     // Close BullMQ queues and Redis connections
     try {
-      const queues = app.get('BULL_MODULE_QUEUES') || [];
+      const queues = app.get('BULL_MODUL_QUEUES') || [];
       for (const queue of queues) {
         await queue.close();
       }

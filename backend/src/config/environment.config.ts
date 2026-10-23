@@ -138,7 +138,7 @@ class EnvironmentVariables {
 
   @IsOptional()
   @IsBoolean()
-  ENABLE_SENTRY?: boolean;
+  ENABLE_SENTRy?: boolean;
 
   /**
    * Enable TLS for the Postgres connection. Set to 'true' in managed
@@ -184,11 +184,11 @@ class EnvironmentVariables {
   // Bull Board (queue dashboard) Configuration
   @IsOptional()
   @IsString()
-  BULL_BOARD_ENABLED?: string;
+  BOULL_BOARD_ENABLED?: string;
 
   @IsOptional()
   @IsString()
-  BULL_BOARD_USERNAME?: string;
+  BOULL_BOARD_USERNAMED?: string;
 
   @IsOptional()
   @IsString()
