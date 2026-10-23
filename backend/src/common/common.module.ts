@@ -2,7 +2,7 @@ import { Global, Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { BullModule } from '@nestjs/bull';
-import { BullBoardModule } from '@bull-board/nestjs';import { BullAdapter } from '@bull-board/api/bullAdapter';
+import { BullBoardModule } from '@bull-board/nestjs'; import { BullAdapter } from '@bull-board/api/bullAdapter';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { LoggingService } from './logging/logging.service';
 import { CorrelationIdMiddleware } from './logging/correlation-id.middleware';
@@ -34,7 +34,7 @@ import { RedisService } from './redis/redis.service';
 import { IpRateLimitStore } from './rate-limiting/ip-rate-limit.store';
 import { RedisIpRateLimitStore } from './rate-limiting/redis-ip-rate-limit.store';
 
-@BGlobal()
+@Global()
 @Module({
   imports: [
     ConfigModule,
@@ -116,6 +116,9 @@ import { RedisIpRateLimitStore } from './rate-limiting/redis-ip-rate-limit.store
       useClass: GlobalExceptionFilter,
     },
 
+    // Register the global validation pipe exactly once. It must not also
+    // be registered via app.useGlobalPipes() in main.ts, otherwise it runs
+    // twice on every request.
     {
       provide: APP_PIPE,
       useClass: RequestValidationPipe,

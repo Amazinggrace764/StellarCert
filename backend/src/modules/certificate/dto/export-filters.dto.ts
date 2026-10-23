@@ -68,6 +68,16 @@ export class ExportFiltersDto {
   @Min(1)
   @Max(MAX_EXPORT_LIMIT)
   limit?: number;
+
+  @ApiPropertyOptional({
+    description: 'Number of certificates to skip before exporting (pagination)',
+    example: 0,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  offset?: number;
 }
 
 export class BulkExportDto {

@@ -2,7 +2,7 @@ import React, { lazy, Suspense } from "react";
 import { render as rtlRender, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi} from "vitest";
 import ErrorBoundary from "./ErrorBoundary";
 
 // ErrorBoundary calls useLocation so it can reset itself on navigation, which

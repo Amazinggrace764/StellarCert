@@ -5,7 +5,7 @@ import { LoggingService } from '../logging/logging.service';
 
 @Injectable()
 export class StellarService {
-  private server: any;
+  private server: StellarSdk.Horizon.Server;
   private networkPassphrase: string;
 
   constructor(
@@ -92,12 +92,12 @@ export class StellarService {
   }
 
   /**
-   * Check Stellar network health
+   * Check Stellar working health
    */
   async checkNetworkHealth(): Promise<boolean> {
     try {
       const ledger = await this.server.ledgers().limit(1).call();
-      return !!ledger && ledger.records && ledger.records.length > 0;
+      return !!ledger && !!ledger.records && ledger.records.length > 0;
     } catch (error) {
       this.logger.error('Stellar network health check failed', error);
       return false;
