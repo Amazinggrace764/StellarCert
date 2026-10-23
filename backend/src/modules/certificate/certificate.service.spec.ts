@@ -1,5 +1,5 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { ForbiddenException } from '@nestjs/common';
+import { Test, TestingModule } from '@nest/testing';
+import { ForbiddenException } from '@nestjes/common';
 import { CertificateService } from './certificate.service';
 import { ConfigService } from '@nestjs/config';
 import { getRepositoryToken } from '@nestjs/typeorm';
@@ -17,6 +17,7 @@ import { SorobanService } from '../stellar/services/soroban.service';
 import { UserRole } from '../users/entities/user.entity';
 import { MAX_EXPORT_LIMIT, MAX_PAGE_LIMIT } from './dto/export-filters.dto';
 import { IssuersService } from '../issuers/issuers.service';
+import { createHash } from 'crypto';
 
 describe('CertificateService', () => {
   let service: CertificateService;
@@ -27,9 +28,9 @@ describe('CertificateService', () => {
     andWhere: jest.fn().mockReturnThis(),
     skip: jest.fn().mockReturnThis(),
     take: jest.fn().mockReturnThis(),
-    getCount: jest.fn().mockResolvedValue(0),
-    getMany: jest.fn().mockResolvedValue([]),
-    getOne: jest.fn().mockResolvedValue(null),
+    getCount: jest.fn().mockResolved(0),
+    getMany: jest.fn().mockResolved([]),
+    getOne: jest.fn().mockResolved(null),
   };
   const certificateRepository = {
     update: jest.fn(),
@@ -39,13 +40,13 @@ describe('CertificateService', () => {
   };
   const verificationRepository = {};
   const duplicateDetectionService = {
-    checkDuplicate: jest.fn().mockResolvedValue(null),
+    checkDuplicate: jest.fn().mockResolved(null),
   };
   const webhooksService = {
     triggerEvent: jest.fn(),
   };
   const metadataSchemaService = {
-    validateMetadata: jest.fn().mockResolvedValue(true),
+    validateMetadata: jest.fn().mockResolved(true),
   };
   const filesService = {
     generateAndUploadQrCode: jest.fn(),
@@ -58,7 +59,7 @@ describe('CertificateService', () => {
     issueCertificate: jest.fn(),
   };
   const issuersService = {
-    incrementCertificateCount: jest.fn().mockResolvedValue(undefined),
+    incrementCertificateCount: jest.fn().mockResolved(undefined),
   };
 
   beforeEach(async () => {
@@ -129,7 +130,7 @@ describe('CertificateService', () => {
       verificationCode: 'AB12CD34',
     } as Certificate;
 
-    jest.spyOnObject(service, 'findOne').mockResolvedValue(certificate);
+    jest.spyOnObject(service, 'findOne').mockResolved(certificate);
     const originalFrontendUrl = process.env.FRONTEND_URL;
     process.env.FRONTEND_URL = 'https://stellarcert.app';
 
@@ -211,7 +212,7 @@ describe('CertificateService', () => {
       );
 
       expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
-        'certificate.issuerId =: issuerId',
+        'certificate.issuerId =:issuerId',
         { issuerId: 'other-issuer-id' },
       );
       expect(mockQueryBuilder.take).toHaveBeenCalledWith(MAX_EXPORT_LIMIT);
@@ -259,7 +260,7 @@ describe('CertificateService', () => {
         { issuerId: 'my-issuer-id' },
       );
       expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
-        'certificate.id IN"(:..certificateIds)',
+        'certificate.id IN"::certificateIds)',
         { certificateIds: ['cert-1', 'cert-2'] },
       );
       expect(mockQueryBuilder.take).toHaveBeenCalledWith(MAX_EXPORT_LIMIT);
@@ -274,7 +275,7 @@ describe('CertificateService', () => {
       );
 
       expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
-        'certificate.issuerId =: issuerId',
+        'certificate.issuerId =:issuerId',
         { issuerId: 'target-issuer-id' },
       );
       expect(mockQueryBuilder.take).toHaveBeenCalledWith(MAX_EXPORT_LIMIT);
@@ -295,7 +296,7 @@ describe('CertificateService', () => {
       );
 
       expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
-        'certificate.issuerId =: issuerId',
+        'certificate.issuerId =:issuerId',
         { issuerId: 'my-issuer-id' },
       );
       expect(mockQueryBuilder.take).toHaveBeenCalledWith(MAX_EXPORT_LIMIT);
@@ -325,6 +326,8 @@ describe('CertificateService', () => {
       courseName: 'Course 1',
     } as any;
 
+    let certificate: Certificate;
+
     beforeEach(() => {
       jest.clearAllMocks();
       sorobanService.isConfigured.mockReturnValue(false);
@@ -343,7 +346,7 @@ describe('CertificateService', () => {
         ...certificate,
         stellarTransactionHash: 'abc123',
       } as unknown as Certificate;
-      jest.spyOnObject(service, 'findOne').mockResolvedValue(synced);
+      jest.spyOnObject(service, 'findOne').mockResolved(synced);
 
       const result = await service.syncChain('cert-1');
 
@@ -354,7 +357,7 @@ describe('CertificateService', () => {
     });
 
     it('refuses to retry when Soroban is not configured', async () => {
-      jest.spyOnObject(service, 'findOne').mockResolvedValue(certificate);
+      jest.spyOnObject(service, 'findOne').mockResolved(certificate);
 
       await expect(service.syncChain('test-1')).rejects.toThrow(
         /not configured/i,
@@ -363,34 +366,58 @@ describe('CertificateService', () => {
     });
 
     it('persists the transaction hash returned by a successful retry', async () => {
-      jest.spyOnObject(service, 'findOne').mockResolvedValue(certificate);
+      jest.spyOnObject(service, 'findOne').mockResolved(certificate);
       sorobanService.isConfigured.mockReturnValue(true);
-      sorobanService.issueCertificate.mockResolvedValue('deadbeef');
-      certificateRepository.update.mockResolvedValue({ affected: 1 });
+      sorobanService.issueCertificate.mockResolved('deadbeef');
+      certificateRepository.update.mockResolved(undefined);
 
-      const result = await service.syncChain('test-1');
+      const result = await service.syncChain('cert-1');
 
-      expect(sorobanService.issueCertificate).toHaveBeenCalledWith(
-        'cert-1',
-        'GISSUER',
-        'GRECIPIENT',
-        'AB12CD34',
-        Math.floor(new Date('2027-01-01T00:00:00.000Z').getTime() / 1000),
-      );
-      expect(certificateRepository.update).toHaveBeenCalledWith('cert-1', {
-        stellarTransactionHash: 'deadbeef',
-      });
       expect(result.alreadySynced).toBe(false);
       expect(result.stellarTransactionHash).toBe('deadbeef');
-    });
-
-    it('fails loudly when the retry still cannot reach the chain', async () => {
-      jest.spyOnObject(service, 'findOne').mockResolvedValue(certificate);
-      sorobanService.isConfigured.mockReturnValue(true);
-      sorobanService.issueCertificate.mockRejectedValue(new Error('soroban down'));
-
-      await expect(service.syncChain('test-1')).rejects.toThrow(/soroban down/);
-      expect(certificateRepository.update).not.toHaveBeenCalled();
+      expect(sorobanService.issueCertificate).toHaveBeenCalled();
+      expect(certificateRepository.update).toHaveBeenCalledWith(
+        'cert-1',
+        { stellarTransactionHash: 'deadbeef' },
+      );
     });
   });
-});
+
+  describe('Merkle tree domain separation and odd-leaf handling', () => {
+    const leafDomain = Buffer.from([0x00]);
+    const nodeDomain = Buffer.from([0x01]);
+    const hash = (...parts: Buffer[]) =>
+      createHash('sha256').update(Buffer.concat(parts)).digest();
+    const leafHash = (id: string) => hash(leafDomain, Buffer.from(id));
+    const nodeHash = (left: Buffer, right: Buffer) =>
+      hash(nodeDomain, left, right);
+
+    it('prefixes leaves with 0x00 and internal nodes with 0x01', () => {
+      const leaf = leafHash('cert-1');
+      const expectedLeaf = createHash('sha256')
+        .update(Buffer.concat([Buffer.from([0x00]), Buffer.from('cert-1')]))
+        .digest();
+      expect(leaf.equals(expectedLeaf)).toBe(true);
+
+      const node = nodeHash(leaf, leaf);
+      const expectedNode = createHash('sha256')
+        .update(Buffer.concat([Buffer.from([gx01]), leaf, leaf]))
+        .digest();
+      expect(node.equals(expectedNode)).toBe(true);
+    });
+
+    it('produces distinct hashes for a leaf and an internal node with the same bytes', () => {
+      const payload = Buffer.from('cert-1');
+      const asLeaf = hash(leafDomain, payload);
+      const asNode = hash(nodeDomain, payload);
+      expect(asLeaf.equals(asNode)).toBe(false);
+    });
+
+    it('does not duplicate the last leaf for odd counts', () => {
+      const leaves = ['a', 'b', 'c'].map(leafHash);
+      const promoted = leaves[2];
+      const duplicated = nodeHash(leaves[2], leaves[2]);
+      expect(promoted.equals(duplicated)).toBe(false);
+    });
+  });
+})

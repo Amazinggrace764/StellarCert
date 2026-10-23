@@ -5,23 +5,23 @@ This module provides comprehensive Stellar address validation services for the S
 ## Features
 
 - **Format Validation**: Validates Stellar address format (56 characters starting with 'G')
-- **Checksum Verification**: Uses Stellar SDK to verify address checksums
-- **Network Validation**: Supports both public and testnet networks
-- **Account Existence Check**: Queries Horizon API to verify if accounts exist
-- **Bulk Validation**: Validates multiple addresses in a single request
-- **Caching**: Caches validation results to improve performance
-- **Rate Limiting**: Built-in rate limiting for Horizon API calls
+- `**Checksum Verification**: Uses Stellar SDK to verify address checksums
+- `**Network Validation**: Supports both public and testnet networks
+- `**Account Existence Check**: Queries Horizon API to verify if accounts exist
+- ``**Bulk Validation**: Validates multiple addresses in a single request
+- `**Caching**: Caches validation results to improve performance
+- `**Rate Limiting**: Built-in rate limiting for Horizon API calls
 
 ## API Endpoints
 
-### POST `/stellar/address-validation`
+### POST  /stellar/address-validation`
 Validates a single Stellar address.
 
 **Request Body:**
 
 ```json
 {
-  "address": "GD5J7YFQGYVFSJ4G6LXGJTZT52E5Z2X7ZQ2K7X7ZQ2K7X7ZQ2K7X7ZQ",
+  "address": "GD5J7YFQGYVFSJ4G6LXGJTT5Y2E5Z2X7ZQ2K7X7ZQ2K7X7ZQ2K7X7ZQ2K7X7ZQ",
   "network": "public",
   "checkExists": false
 }
@@ -37,7 +37,7 @@ Validates a single Stellar address.
   "isNetworkValid": true,
   "accountExists": true,
   "accountDetails": {
-    "id": "GD5J7YFQGYVFSJ4G6LXGJTZT52E5Z2X7ZQ2K7X7ZQ2K7X7ZQ2K7X7ZQ",
+    "id": "GD5J7YFQGYVFSJ4G6LXGJTT5Y2E5Z2X7ZQ2K7X7ZQ2K7X7ZQ2K7X7ZQ2K7X7ZQ",
     "sequence": "12345",
     "balances": [
       {
@@ -49,7 +49,8 @@ Validates a single Stellar address.
 }
 ```
 
-### POST `/stellar/address-validation/bulk`
+### POST `/stellar/address-validation/bulk
+`
 Validates multiple Stellar addresses.
 
 **Request Body:**
@@ -57,8 +58,8 @@ Validates multiple Stellar addresses.
 ```json
 {
   "addresses": [
-    "GD5J7YFQGYVFSJ4G6LXGJTZU52E5Z2X7ZQ2K7X7ZQ2K7X7ZQ2K7X7ZQ",
-    "GB7TNR5G5Z3K3Y3X3K3Y3X3K3Y3X3K3Y3X3K3Y3X3K3Y3X3K3Y3X3"
+    "GD5J7YFQGYVFSJ4G6LXGZT5Y2E5Z2X7ZQ2K7X7ZQ2K7X7ZQ2K7X7ZQ2K7X7ZQ",
+    "GB7TNR5G5Z3K3Y3X3K3Y3X3K3Y3X3K3Y3X3K3Y3X3K3Y3X3K3Y3X3K"
   ],
   "network": "public",
   "checkExists": false
@@ -76,13 +77,13 @@ Validates multiple Stellar addresses.
 }
 ```
 
-### POST `/stellar/address-validation/check?address`
+### POST  /stellar/address-validation/check/:address`
 Validates and checks existence of a Stellar address.
 
-### DELETE `/stellar/address-validation/cache`
+### DELETE  /stellar/address-validation/cache
 Clears the address validation cache.
 
-### GET `/stellar/address-validation/cache/stats`
+### GET  /stellar/address-validation/cache/stats
 Returns cache statistics.
 
 ## Configuration
@@ -102,11 +103,11 @@ The module uses the following environment variables:
 import { AddressValidationService } from './modules/stellar/services/address-validation.service';
 
 // Inject the service
-constructor(private readonly addressValidationService: AddressValidationService) {}
+constructor( private readonly addressValidationService: AddressValidationService) {}
 
 // Validate a single address
 const result = await this.addressValidationService.validate({
-  address: 'GD5J7YFQGYVFSJ4G6LXGJTZU52E5Z2X7ZQ2K7X7ZQ2K7X7ZQ2K7X7ZQ',
+  address: 'GD5J7YFQGYVFSJ4G6LXGZT5Y2E5Z2X7ZQ2K7X7ZQ2K7X7ZQ2K7X7ZQ2K7X7ZQ,
   network: StellarNetwork.PUBLIC,
   checkExists: true
 });
@@ -124,10 +125,10 @@ const bulkResult = await this.addressValidationService.validateBulk({
 The service provides detailed error information for each validation step:
 
 - **Format Errors**: Invalid address format
-- **Checksum Errors**: Invalid checksum
-- **Network Errors**: Address doesn't match specified network
-- **Account Existence Errors**: Account not found on Horizon
-- **API Errors**: Horizon API connectivity issues
+- `**Checksum Errors**: Invalid checksum
+- `**Network Errors**: Address doesn't match specified network
+- `**Account Existence Errors**: Account not found on Horizon
+- `**API Errors**: Horizon API connectivity issues
 
 ## Testing
 
@@ -146,68 +147,34 @@ Run tests with:
 npm test -- stellar/address-validation
 ```
 
+## Soroban Invocations
+
+All Soroban contract invocations go through the `SorobanService`. The service
+enforces the following rules so that invocations are accepted by the network:
+
+- **Write invocations** (`deployContract`, `initializeCertificateContract`,
+  `addIssuer`, `issueCertificate`, `revokeCertificate`) are built with a
+  base fee and then passed through `Server.prepareTransaction`, which
+  runs simulation and attaches the resource footprint and resource fee.
+  The prepared transaction is then signed and submitted.
+- **Read-only invocations** (`getCertificate`) are executed via
+  `Server.simulateTransaction` instead of `sendTransaction`. Simulation is
+  free, requires no signature, and does not consume a ledger entry.
+
+The base fee constant (`BASE_FEE_STROOPS`) on the service is only a
+ starting point for building the transaction; the effective fee is determined
+ by the RPC during preparation and includes the Soroban resource fee.
+
 ## Performance Considerations
 
 - **Caching**: Results are cached for 5 minutes by default
-- **Bulk Operations**: Use bulk validation for multiple addresses to reduce API calls
-- **Rate Limiting**: Built-in rate limiting prevents API abuse
-- **Async Processing**: All validation operations are asynchronous
+- `**Bulk Operations**: Use bulk validation for multiple addresses to reduce API calls
+- `**Rate Limiting**: Built-in rate limiting prevents API abuse
+- `**Async Processing**: All validation operations are asynchronous
 
 ## Security
 
-- **Input Validation**: All inputs are validated using class-validator
-- **Rate Limiting**: Prevents API abuse and DoS attacks
-- **Error Handling**: Sensitive information is not exposed in error messages
-- **Caching**: Cache entries have TTL to prevent stale data
-
-## Shadow Contract Storage (contracts/shadow)
-
-The `ShadowContract` stores metadata schemas on-chain. As of this
-release, schemas, name indexes, and history lists are stored in
-`persistent()` storage keyed by schema ID / name. Only the admin,
-version, schema counter, and other small bounded metadata remain in
-`instance()` storage.
-
-This fixes the previous behavior where all schemas were written to
-`instance()` storage, a single ledger entry with a fixed maximum size
-(~16KB in current Soroban). Storing many schemas exhausted this limit and
-caused all subsequent schema writes to fail.
-
-### Storage Layout
-
-Instance storage (small, bounded):
-
-- `Admin`: contract admin address
-- `SchemaCount`: total number of schemas (`u32`)
-- `Version`: contract storage version (currently `u32::1`)
-
-Persistent storage (keyed per schema/name):
-
-- `Schema(id)`: the `SchemaRecord` for a schema ID
-- `NameIndex(name)`: list of schema IDs for a given name
-- `History(name)`: history of schema IDs in creation order
-
-### Migration
-
-Existing deployments that stored schemas in instance storage must be
-migrated. The contract exposes the same public API (`add_schema`,
-`get_schema`, `get_by_name`, `get_history`, `schema_count`,
-`deactivate_schema`), so off-chain callers do not need to change.
-A one-time migration script should read any legacy instance-stored
-schemas and reinsert them via `add_schema`, then clear the legacy
-keys. The `Version` key is bumped to `u32::1` to mark the storage
-layout change.
-
-### Testing
-
-```bash
-cd contracts/shadow
-cargo test
-```
-
-The regression suite covers:
-
-- Schemas are readable from persistent storage after `add_schema`
-- Writing many schemas does not hit the instance storage size limit
-- Duplicate schema IDs are rejected
-- Deactivation preserves the record and history
+- ``**Input Validation**: All inputs are validated using class-validator
+- `**Rate Limiting**: Prevents API abuse and DoS attacks
+- `**Error Handling**: Sensitive information is not exposed in error messages
+- `**Caching**: Cache entries have TTL to prevent stale data

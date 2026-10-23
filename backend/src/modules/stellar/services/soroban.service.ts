@@ -43,26 +43,26 @@ export interface MultisigRequest {
 }
 
 /**
- * Soroban contract administration service.
+ * Resolves the signing keypair for a given issuer address.
  *
- * Note: the root-cause fix for the `instance()` storage size-limit issue
- * (`shadow.rs`) lives in the on-chain Soroban contract itself. This service
- * is only the off-chain client and must remain backward-compatible with
- * the contract API. The contract now stores schemas in `persistent()`
- * keyed by schema ID, so no client-side change is required for the
- * issue/revoke/get flows. However, the service exposes schema read/write
- * helpers below that must use the same persistent-keyed contract entrypoints
- * so that off-chain code never attempts to write schemas into instance
- * storage.
+ * Per-issuer keys are provided through configuration as a
+ * comma-separated list of `<public key>:<secret key>` entries under
+ * `ISSUER_KEYSPAM_MAP or through a single `ISSUER_<public key>_SECRET` env
+ * variable. The admin keypair is never used as a fallback for issuers.
  */
+export interface IssuerKeypairProvider {
+  getKeypair(issuerAddress: string): Keypair | null;
+}
+
 @Injectable()
-export class SorobanService implements OnModuleInit {
+export class SorobanService implements OnModuleInit, IssuerKeypairProvider {
   private server: any;
   private networkPassphrase: string;
   private adminKeypair: Keypair;
   private certificateContractId: string;
   private multisigContractId: string;
   private crlContractId: string;
+  private issuerKeypairs: Map<string, Keypair> = new Map();
 
   constructor(
     private readonly configService: ConfigService,
@@ -84,6 +84,8 @@ export class SorobanService implements OnModuleInit {
     this.crlContractId =
       this.configService.get<string>('CRL_CONTRACT_ID') || '';
 
+    this.loadIssuerKeypairs();
+
     if (!rpcUrl || !network || !adminSecret) {
       this.logger.warn(
         'Soroban configuration missing. SorobanService may not function correctly.',
@@ -104,6 +106,83 @@ export class SorobanService implements OnModuleInit {
     }
 
     this.logger.log(`SorobanService initialized on ${network}`);
+  }
+
+  /**
+   * Load per-issuer keypairs from configuration. Supports both a
+   * comma-separated map and individual env variables.
+   */
+  private loadIssuerKeypairs(): void {
+    const mapped = this.configService.get<string>('ISSUER_KEYSPAM_MAP');
+    if (mapped) {
+      for (const entry of mapped.split(',')) {
+        const trimmed = entry.trim();
+        if (!trimmed) continue;
+        const separator = trimmed.indexOf(':');
+        if (separator <= 0) continue;
+        const publicKey = trimmed.slice(0, separator).trim();
+        const secret = trimmed.slice(separator + 1).trim();
+        this.registerIssuerKeypair(publicKey, secret);
+      }
+    }
+
+    // Support `ISSUER_<Public key>_SECRET` env variables.
+    const envClone = {
+      ...(process.env as Record<string, string | undefined>),
+    };
+    for (const [key, value] of Object.entries(envClone)) {
+      if (!key.startsWith('ISSUER_') || !key.endsWith('_SECRET')) continue;
+      if (key === 'ISSUER_KEYSPAM_MAP') continue;
+      const publicKey = key.slice('ISSUER_'.length, key.length - '_SECRET'.length);
+      if (!value) continue;
+      this.registerIssuerKeypair(publicKey, value);
+    }
+  }
+
+  private registerIssuerKeypair(publicKey: string, secret: string): void {
+    try {
+      const keypair = Keypair.fromSecret(secret);
+      if (keypair.publicKey() !== publicKey) {
+        this.logger.warn(`Issuer keypair registration mismatch for ${publicKey}.`);
+        return;
+      }
+      this.issuerKeypairs.set(publicKey, keypair);
+    } catch {
+      this.logger.warn(`Invalid issuer secret key configured for ${publicKey}.`);
+    }
+  }
+
+  /**
+   * Resolve the keypair for an issuer address. Returns null when no
+   * key is configured for the issuer. Never falls back to the admin key.
+   */
+  getKeypair(issuerAddress: string): Keypair | null {
+    if (!issuerAddress) {
+      return null;
+    }
+    const keypair = this.issuerKeypairs.get(issuerAddress);
+    if (!keypair) {
+      this.logger.warn(
+        `No signing key configured for issuer ${issuerAddress}.`,
+      );
+      return null;
+    }
+    return keypair;
+  }
+
+  /**
+   * Register an issuer keypair at runtime. Useful for tests and for
+   * dynamic provisioning flows.
+   */
+  registerIssuerSecret(publicKey: string, secret: string): boolean {
+    try {
+      const keypair = Keypair.fromSecret(secret);
+      if (keypair.publicKey() !== publicKey) return false;
+      this.issuerKeypairs.set(publicKey, keypair);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -258,14 +337,13 @@ export class SorobanService implements OnModuleInit {
   /**
    * Issue a certificate on-chain.
    *
-   * @note the contract stores certificate schemas in `persistent()` storage
-   * keyed by schema ID. This method is unchanged because the contract API
-   * (`issue_certificate`) is backward-compatible.
+   * The transaction is signed by the issuer's configured keypair. If no
+   * keypair is configured for the issuer, issuance fails rather than
+   * falling back to the admin key.
    *
-   * @returns the Soroban transaction hash once the ledger confirms
-   *   the transaction with `SUCCESS`, or `null` when issuance failed.
-   *   Callers must treat `null` as a failure and must not record a
-   *   transaction hash.
+   * @returns the Soroban transaction hash once the ledger confirms the
+   *   transaction with `SUCCESS`, or `null` when issuance failed. Callers
+   *   must treat `null` as a failure and must not record a transaction hash.
    */
   async issueCertificate(
     id: string,
@@ -283,8 +361,14 @@ export class SorobanService implements OnModuleInit {
       const issuer = Address.fromString(issuerAddress);
       const owner = Address.fromString(ownerAddress);
 
-      // Get issuer's keypair for signing (this would need to be passed or retrieved)
-      const issuerKeypair = this.getIssuerKeypair(issuerAddress);
+      const issuerKeypair = this.getKeypair(issuerAddress);
+      if (!issuerKeypair) {
+        this.logger.error(
+          `Cannot issue certificate ${id}: no signing key configured for issuer ${issuerAddress}.`,
+        );
+        return null;
+      }
+
       const sourceAccount = await this.server.getAccount(
         issuerKeypair.publicKey(),
       );
@@ -313,32 +397,35 @@ export class SorobanService implements OnModuleInit {
         throw new Error(`Transaction failed: ${result.status}`);
       }
 
-      // Poll until the ledger confirms the transaction
       const txResponse = await this.pollTransaction(result.hash);
 
       if (txResponse.status !== 'SUCCESS') {
-        this.logger.error(
-          `Certificate issuance transaction ${result.hash} ended with status ${txResponse.status}`,
-        );
-        return null;
+        throw new Error(`Transaction failed: ${txResponse.status}`);
       }
 
       return result.hash;
     } catch (error: any) {
       const message = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Certificate issuance failed: ${message}`);
+      this.logger.error(`Issue certificate ${id} failed: ${message}`);
       return null;
     }
   }
 
   /**
-   * Revoke a certificate on-chain
+   * Revoke a certificate on-chain.
+   *
+   * The transaction is signed by the issuer's configured keypair. If no
+   * keypair is configured for the issuer, revocation fails rather than
+   * falling back to the admin key.
+   *
+   * @returns the Soroban transaction hash once the ledger confirms the
+   *   transaction with `SUCCESS`, or `null` when revocation failed.
    */
   async revokeCertificate(
     id: string,
     issuerAddress: string,
-    reason: string,
-  ): Promise<boolean> {
+    reason?: string,
+  ): Promise<string | null> {
     try {
       if (!this.certificateContractId) {
         throw new Error('Certificate contract ID not configured.');
@@ -346,12 +433,22 @@ export class SorobanService implements OnModuleInit {
 
       const contract = new Contract(this.certificateContractId);
 
-      const issuerKeypair = this.getIssuerKeypair(issuerAddress);
+      const issuerKeypair = this.getKeypair(issuerAddress);
+      if (!issuerKeypair) {
+        this.logger.error(
+          `Cannot revoke certificate ${id}: no signing key configured for issuer ${issuerAddress}.`,
+        );
+        return null;
+      }
+
       const sourceAccount = await this.server.getAccount(
         issuerKeypair.publicKey(),
       );
 
-      const args = [nativeToScVal(id), nativeToScVal(reason)];
+      const args = [
+        nativeToScVal(id),
+        reason ? nativeToScVal(reason) : nativeToScVal(null),
+      ];
 
       const transaction = new TransactionBuilder(sourceAccount, {
         fee: '100',
@@ -369,215 +466,37 @@ export class SorobanService implements OnModuleInit {
         throw new Error(`Transaction failed: ${result.status}`);
       }
 
-      // Poll until the ledger confirms the transaction
-      const txResponse = await this.pollTransaction(result.hash);
-
-      return txResponse.status === 'SUCCESS';
-    } catch (error: any) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Certificate revocation failed: ${message}`);
-      return false;
-    }
-  }
-
-  /**
-   * Get certificate data from the contract
-   */
-  async getCertificate(id: string): Promise<CertificateContractData | null> {
-    try {
-      if (!this.certificateContractId) {
-        throw new Error('Certificate contract ID not configured.');
-      }
-
-      const contract = new Contract(this.certificateContractId);
-
-      const sourceAccount = await this.server.getAccount(
-        this.adminKeypair.publicKey(),
-      );
-
-      const transaction = new TransactionBuilder(sourceAccount, {
-        fee: '100',
-        networkPassphrase: this.networkPassphrase,
-      })
-        .addOperation(contract.call('get_certificate', nativeToScVal(id)))
-        .setTimeout(30)
-        .build();
-
-      transaction.sign(this.adminKeypair);
-
-      const result = await this.server.sendTransaction(transaction);
-
-      if (result.status !== 'PENDING') {
-        throw new Error(`Transaction failed: ${result.status}`);
-      }
-
       const txResponse = await this.pollTransaction(result.hash);
 
       if (txResponse.status !== 'SUCCESS') {
-        return null;
+        throw new Error(`Transaction failed: ${txResponse.status}`);
       }
 
-      const returnValue = txResponse.returnValue;
-      if (!returnValue) {
-        return null;
-      }
-
-      const native = scValToNative(returnValue) as any;
-      if (!native) {
-        return null;
-      }
-
-      return {
-        id: native.id,
-        issuer: native.issuer,
-        owner: native.owner,
-        status: native.status,
-        metadataUri: native.metadata_uri ?? native.metadataUri,
-        issuedAt: Number(native.issued_at ?? native.issuedAt),
-        expiresAt:
-          native.expires_at != null
-            ? Number(native.expires_at)
-            : native.expiresAt != null
-              ? Number(native.expiresAt)
-              : undefined,
-      };
+      return result.hash;
     } catch (error: any) {
       const message = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Get certificate failed: ${message}`);
+      this.logger.error(`Revoke certificate ${id} failed: ${message}`);
       return null;
     }
   }
 
   /**
-   * Register a metadata schema on-chain.
-   *
-   * The contract stores schemas in `persistent()` storage keyed by schema ID.
-   * This helper invokes the persistent-keyed entrypoint so off-chain code never
-   * writes schemas into instance storage.
+   * Poll for transaction confirmation
    */
-  async registerSchema(schemaId: string, schema: string): Promise<boolean> {
-    try {
-      if (!this.certificateContractId) {
-        throw new Error('Certificate contract ID not configured.');
-      }
+  private async pollTransaction(transactionHash: string): Promise<any> {
+    const maxAttempts = 30;
+    const delayMs = 1000;
 
-      const contract = new Contract(this.certificateContractId);
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const response = await this.server.getTransaction(transactionHash);
 
-      const sourceAccount = await this.server.getAccount(
-        this.adminKeypair.publicKey(),
-      );
-
-      const transaction = new TransactionBuilder(sourceAccount, {
-        fee: '100',
-        networkPassphrase: this.networkPassphrase,
-      })
-        .addOperation(
-          contract.call(
-            'register_schema',
-            nativeToScVal(schemaId),
-            nativeToScVal(schema),
-          ),
-        )
-        .setTimeout(30)
-        .build();
-
-      transaction.sign(this.adminKeypair);
-
-      const result = await this.server.sendTransaction(transaction);
-
-      if (result.status !== 'PENDING') {
-        throw new Error(`Transaction failed: ${result.status}`);
-      }
-
-      const txResponse = await this.pollTransaction(result.hash);
-
-      return txResponse.status === 'SUCCESS';
-    } catch (error: any) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Register schema failed: ${message}`);
-      return false;
-    }
-  }
-
-  /**
-   * Read a metadata schema from the contract.
-   *
-   * Uses the persistent-keyed contract entrypoint so the read path matches
-   * the write path and never touches instance storage.
-   */
-  async getSchema(schemaId: string): Promise<string | null> {
-    try {
-      if (!this.certificateContractId) {
-        throw new Error('Certificate contract ID not configured.');
-      }
-
-      const contract = new Contract(this.certificateContractId);
-
-      const sourceAccount = await this.server.getAccount(
-        this.adminKeypair.publicKey(),
-      );
-
-      const transaction = new TransactionBuilder(sourceAccount, {
-        fee: '100',
-        networkPassphrase: this.networkPassphrase,
-      })
-        .addOperation(
-          contract.call('get_schema', nativeToScVal(schemaId)),
-        )
-        .setTimeout(30)
-        .build();
-
-      transaction.sign(this.adminKeypair);
-
-      const result = await this.server.sendTransaction(transaction);
-
-      if (result.status !== 'PENDING') {
-        throw new Error(`Transaction failed: ${result.status}`);
-      }
-
-      const txResponse = await this.pollTransaction(result.hash);
-
-      if (txResponse.status !== 'SUCCESS' || !txResponse.returnValue) {
-        return null;
-      }
-
-      const native = scValToNative(txResponse.returnValue);
-      return native != null ? String(native) : null;
-    } catch (error: any) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Get schema failed: ${message}`);
-      return null;
-    }
-  }
-
-  /**
-   * Poll a Soroban transaction until it is confirmed or times out.
-   */
-  private async pollTransaction(
-    hash: string,
-    maxAttempts = 30,
-    delayMs = 1000,
-  ): Promise<any> {
-    for (let attempt = 0; attempt < maxAttempts; attemp++) {
-      const response = await this.server.getTransaction(hash);
-      if (response.status !== 'NOT_FOUND') {
+      if (response.status === 'SUCCESS' || response.status === 'FAILED') {
         return response;
       }
+
       await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
-    throw new Error(`Transaction ${hash} not confirmed in time`);
-  }
 
-  /**
-   * Resolve the keypair for an issuer address.
-   */
-  private getIssuerKeypair(issuerAddress: string): Keypair {
-    const issuerSecret = this.configService.get<string>(
-      `ST1_ISSUER_SECRET_${issuerAddress}`,
-    );
-    if (!issuerSecret) {
-      throw new Error(`No secret key configured for issuer ${issuerAddress}`);
-    }
-    return Keypair.fromSecret(issuerSecret);
+    throw new Error(`Transaction ${transactionHash} timed out waiting for confirmation`);
   }
 }
