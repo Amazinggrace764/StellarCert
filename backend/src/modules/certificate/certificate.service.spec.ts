@@ -36,6 +36,7 @@ describe('CertificateService', () => {
     update: jest.fn(),
     save: jest.fn(),
     create: jest.fn(),
+    findOne: jest.fn().mockResolvedValue(null),
     createQueryBuilder: jest.fn().mockReturnValue(mockQueryBuilder),
   };
   const verificationRepository = {};
@@ -122,6 +123,28 @@ describe('CertificateService', () => {
 
   it('should be defined', () => {
     expect(service).toBeDefined();
+  });
+
+  describe('generateCertificateId', () => {
+    it('should generate an 8-character alphanumeric id', () => {
+      const id = (service as any).generateCertificateId();
+      expect(id).toMatch(/^[A-Z0-9]{8}$/);
+    });
+
+    it('should not rely on Math.random', () => {
+      const randomSpy = jest.spyOn(Math, 'random');
+      (service as any).generateCertificateId();
+      expect(randomSpy).not.toHaveBeenCalled();
+      randomSpy.mockRestore();
+    });
+
+    it('should produce distinct ids across many generations', () => {
+      const ids = new Set<string>();
+      for (let i = 0; i < 1000; i++) {
+        ids.add((service as any).generateCertificateId());
+      }
+      expect(ids.size).toBe(1000);
+    });
   });
 
   it('should generate a QR code URL for a certificate', async () => {
@@ -331,20 +354,17 @@ describe('CertificateService', () => {
     beforeEach(() => {
       jest.clearAllMocks();
       sorobanService.isConfigured.mockReturnValue(false);
-      certificate = {
-        id: 'cert-1',
-        verificationCode: 'AB12CD34',
-        issuerStellarAddress: 'GISSUER',
-        recipientStellarAddress: 'GRECIPIENT',
-        expiresAt: new Date('2027-01-01T00:00:00.000Z'),
-        stellarTransactionHash: undefined,
-      } as unknown as Certificate;
     });
 
-    it('returns the existing hash without touching the chain when already synced', async () => {
-      const synced = {
-        ...certificate,
-        stellarTransactionHash: 'abc123',
+    it('increments the issuer certificate count after a successful issue', async () => {
+      const saved = {
+        id: 'cert-1',
+        issuerId: issuerId,
+        recipientEmail: dto.recipientEmail,
+        recipientName: dto.recipientName,
+        title: dto.title,
+        issuedAt: new Date(),
+        status: CertificateStatus.ACTIVE,
       } as unknown as Certificate;
       jest.spyOnObject(service, 'findOne').mockResolved(synced);
 

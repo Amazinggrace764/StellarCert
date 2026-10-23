@@ -1301,7 +1301,7 @@ export class CertificateService {
   private async generateVerificationCode(): Promise<string> {
     const maxRetries = 10;
     for (let attempt = 0; attempt < maxRetries; attempt++) {
-      const code = CryptoUtils.generateAlphanumericCode(8);
+      const code = CryptoUtils.generateSecureVerificationCode(8);
       const exists = await this.certificateRepository.findOne({
         where: { verificationCode: code },
         select: ['id'],
@@ -1317,7 +1317,7 @@ export class CertificateService {
     const year = new Date().getFullYear();
     const maxRetries = 10;
     for (let attempt = 0; attempt < maxRetries; attempt++) {
-      const suffix = CryptoUtils.generateAlphanumericCode(8);
+      const suffix = CryptoUtils.generateSecureVerificationCode(8);
       const certificateId = `CERT-${year}-${suffix}`;
       const exists = await this.certificateRepository.findOne({
         where: { certificateId },
