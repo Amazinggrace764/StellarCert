@@ -37,7 +37,15 @@ export default tseslint.config(
       '@typescript-eslint/no-redundant-type-constituents': 'off', // Temporarily disabled for cleanup
       '@typescript-eslint/no-base-to-string': 'off', // Temporarily disabled for cleanup
       '@typescript-eslint/no-require-imports': 'off', // Temporarily disabled for cleanup
-      '@typescript-eslint/no-unused-vars': 'off', // Temporarily disabled for cleanup
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+          ignoreRestSiblings: true,
+          varsIgnorePattern: '^_',
+        },
+      ],
       '@typescript-eslint/unbound-method': 'off', // Temporarily disabled for cleanup
       '@typescript-eslint/no-namespace': 'off', // Temporarily disabled for cleanup
       '@typescript-eslint/prefer-promise-reject-errors': 'off', // Temporarily disabled for cleanup

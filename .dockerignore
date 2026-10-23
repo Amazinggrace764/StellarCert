@@ -1,0 +1,24 @@
+# Dependencies & build artifacts
+node_modules
+**/node_modules
+dist
+**/dist
+build
+coverage
+**/coverage
+stellar-contracts/target
+
+# Secrets & environment files
+.env
+.env.*
+!.env.example
+!.env.soroban.example
+
+# Git & IDE metadata
+.git
+.gitignore
+.github
+.vscode
+.idea
+*.log
+npm-debug.log*

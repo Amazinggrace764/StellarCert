@@ -1,5 +1,13 @@
 import { PipeTransform, Injectable, ArgumentMetadata } from '@nestjs/common';
 
+/**
+ * Sanitizes string inputs by escaping HTML-sensitive characters.
+ *
+ * This pipe intentionally preserves whitespace control characters (`\n`, `\r`, `\t`)
+ * so that multi-line text, tabbed data, and JSON-encoded metadata submitted as
+ * strings are not silently corrupted. Only HTML-significant characters are
+ * escaped.
+ */
 @Injectable()
 export class SanitizeInputPipe implements PipeTransform {
   private sanitize(value: any): any {

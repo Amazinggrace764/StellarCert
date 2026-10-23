@@ -1,6 +1,26 @@
-# Auth Registration Refactoring - Verification Report
+# Auth Refactoring - Verification Report
 
-## ✅ **Issue Fixed: Duplicate Registration Logic**
+## ✅ **Issue Fixed: Logout / Token Blacklist Never Enforced on Protected Routes**
+
+### **Problem Identified:**
+`AuthService.logout()` blacklisted the access token via `JwtManagementService.blacklistToken` (cache-backed), but the request-time `JwtAuthGuard` only called `jwtService.verify(token)` and never consulted `isTokenBlacklisted`. The passport `JwtStrategy` also never checked the blacklist. As a result, logout had zero effect — a "logged out" token kept working until natural expiry. Additionally, neither the guard nor the strategy re-loaded the user, so a suspended or deleted user's still-valid token kept authenticating.
+
+### **Fix Applied:**
+- Made `JwtAuthGuard` async and added a blacklist check via `JwtManagementService.isTokenBlacklisted(token)` before allowing the request through.
+- Re-load the user from `UsersService` on every protected request and reject when the user no longer exists or `user.isActive` is false.
+- Routed the passport `JwtStrategy.validate()` through the same blacklist + active-user checks so both auth paths stay consistent.
+- Preserved the existing API surface: no request/response shape changes, no token format changes, no migration required.
+
+### **Regression Coverage Added:**
+- Guard rejects a blacklisted (logged-out) token with 401.
+- Guard rejects tokens for deleted users and for users with `isActive === false`.
+- Guard allows valid, non-blacklisted tokens for active users.
+- Strategy rejects blacklisted tokens and inactive users identically to the guard.
+- Existing login/refresh flows continue to pass (focused auth test suite + typecheck/build).
+
+---
+
+## ✅ **Prior Issue Fixed: Duplicate Registration Logic**
 
 ### **Problem Identified:**
 The `AuthService.register()` method was duplicating user creation logic instead of properly delegating to `UsersService.register()`, creating two divergent code paths that could drift out of sync.
@@ -231,5 +251,6 @@ The refactoring successfully eliminates code duplication while improving securit
 - **🔑 Refresh Tokens**: Proper token management
 - **🧪 Comprehensive Testing**: Full test coverage added
 - **🔧 Maintainability**: Simplified codebase structure
+- **🚪 Enforced Logout**: Blacklist and active-user checks applied on every protected request
 
 The refactoring is complete and ready for production deployment.

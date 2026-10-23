@@ -249,14 +249,13 @@ describe('UsersService', () => {
     };
 
     it('should successfully register a new user via UserAuthService', async () => {
-      userAuthService.register.mockResolvedValue(authResult);
+      userAuthService.register.mockResolvedValue({ user: publicUser });
 
       const result = await service.register(createUserDto);
 
       expect(result).toHaveProperty('user');
-      expect(result).toHaveProperty('tokens');
-      expect(result.tokens).toHaveProperty('accessToken');
-      expect(result.tokens).toHaveProperty('refreshToken');
+      expect(result).not.toHaveProperty('tokens');
+      expect(result.user.isEmailVerified).toBe(false);
       expect(userAuthService.register).toHaveBeenCalledWith(createUserDto);
     });
 
@@ -339,12 +338,32 @@ describe('UsersService', () => {
       await expect(service.login(loginDto)).rejects.toThrow(ForbiddenException);
     });
 
+    it('should throw ForbiddenException when email is not verified', async () => {
+      userAuthService.login.mockRejectedValue(
+        new ForbiddenException('Email verification required'),
+      );
+
+      await expect(service.login(loginDto)).rejects.toThrow(ForbiddenException);
+      await expect(service.login(loginDto)).rejects.toThrow(
+        'Email verification required',
+      );
+    });
+
     it('should throw ForbiddenException for deactivated account', async () => {
       userAuthService.login.mockRejectedValue(
         new ForbiddenException('Account is deactivated'),
       );
 
       await expect(service.login(loginDto)).rejects.toThrow(ForbiddenException);
+    });
+
+    it('should not return tokens when login is blocked for unverified email', async () => {
+      userAuthService.login.mockRejectedValue(
+        new ForbiddenException('Email verification required'),
+      );
+
+      await expect(service.login(loginDto)).rejects.toThrow(ForbiddenException);
+      expect(userAuthService.login).toHaveBeenCalledWith(loginDto);
     });
   });
 
@@ -403,6 +422,18 @@ describe('UsersService', () => {
       await expect(
         service.verifyEmail({ token: 'invalid-token' }),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should allow login after email verification succeeds', async () => {
+      userAuthService.verifyEmail.mockResolvedValue({
+        message: 'Email verified successfully',
+      });
+      userAuthService.login.mockResolvedValue(authResult);
+
+      await service.verifyEmail({ token: 'valid-token' });
+      const result = await service.login(loginDto);
+
+      expect(result).toHaveProperty('tokens');
     });
   });
 

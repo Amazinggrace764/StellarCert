@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useRef, useCallback } from
 import { io, Socket } from 'socket.io-client';
 import { API_URL } from '../api';
 import { tokenStorage } from '../api/tokens';
+import { setTokenRefreshCallback } from '../api/client';
 import { useQueryClient } from '@tanstack/react-query';
 import {
     queryKeys,
@@ -91,17 +92,15 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
         connectSocket(token);
 
-        // #563 — reconnect with the new token whenever it is rotated.
-        const handleTokenRotation = (e: StorageEvent) => {
-            if (e.key === 'accessToken' && e.newValue && e.newValue !== e.oldValue) {
-                connectSocket(e.newValue);
-            }
-        };
-
-        window.addEventListener('storage', handleTokenRotation);
+        // #563 — reconnect with the new token whenever it is rotated. The
+        // `storage` event only fires in other tabs, so hook into the refresh
+        // callback that apiClient invokes in the current tab instead.
+        setTokenRefreshCallback((newToken) => {
+            connectSocket(newToken);
+        });
 
         return () => {
-            window.removeEventListener('storage', handleTokenRotation);
+            setTokenRefreshCallback(null);
             socketRef.current?.disconnect();
         };
     }, [isAuthenticated, queryClient, connectSocket]);

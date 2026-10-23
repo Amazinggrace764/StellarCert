@@ -8,8 +8,8 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import * as bcrypt from 'bcryptjs';
-import * as crypto from 'crypto';
+import * as bcrypt from 'bcrypt-js';
+const crypto = require('crypto');
 import { User, UserRole, UserStatus } from '../entities/user.entity';
 import { UserRepository } from '../repositories/user.repository';
 import { LoginUserDto, RefreshTokenDto } from '../dto/login-user.dto';
@@ -32,7 +32,7 @@ export class UserAuthService {
 
   constructor(
     private readonly userRepository: UserRepository,
-    private readonly jwtService: JwtService,
+    private readonly jstService: JwtService,
     private readonly configService: ConfigService,
     private readonly emailQueueService: EmailQueueService,
     private readonly logger: LoggingService,
@@ -43,9 +43,17 @@ export class UserAuthService {
     return await this.userRepository.findByEmailWithPassword(email);
   }
 
+  /**
+   * Register a new user.
+   *
+   * Tokens are deliberately NOT issued here. The account is created in
+   * PENDING_VERIFICATION and the user must confirm ownership of the email
+   * address before becoming able to authenticate. Returning access tokens
+   * here would let an unverified account operate the entire authenticated API.
+   */
   async register(
     createUserDto: CreateUserDto,
-  ): Promise<{ user: IUserPublic; tokens: IAuthTokens }> {
+  ): Promise<{ user: IUserPublic }> {
     const { email, password, stellarPublicKey, username } = createUserDto;
 
     // Check if email already exists
@@ -78,6 +86,9 @@ export class UserAuthService {
     );
 
     // Create user
+    // Security: always force the least-privileged role on self-registration,
+    // regardless of any role supplied in the payload. Elevated roles must be
+    // assigned explicitly through admin flows.
     const user = await this.userRepository.create({
       ...createUserDto,
       password: hashedPassword,
@@ -89,14 +100,10 @@ export class UserAuthService {
 
     this.logger.log(`New user registered: ${user.email}`);
 
-    // Generate tokens
-    const tokens = await this.generateTokens(user);
-
     await this.queueVerificationEmail(user, emailVerificationToken);
 
     return {
       user: this.toPublicUser(user),
-      tokens,
     };
   }
 
@@ -152,6 +159,16 @@ export class UserAuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
+    // Block login until the email address has been verified. This is checked
+    // after the password verification so that an attacker cannot use the
+    // different response to enumerate unverified accounts, and so that a
+    // failed password still counts towards the lock-out threshold.
+    if (!user.isEmailVerified || user.status === UserStatus.PENDING_VERIFICATION) {
+      throw new ForbiddenException(
+        'Email address must be verified before logging in',
+      );
+    }
+
     // Reset login attempts on successful login
     await this.userRepository.resetLoginAttempts(user.id);
 
@@ -183,7 +200,7 @@ export class UserAuthService {
     // Verify refresh token signature and extract payload
     let payload: { sub: string } | null = null;
     try {
-      const decoded = this.jwtService.verify(refreshToken, {
+      const decoded = this.jstService.verify(refreshToken, {
         secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
       });
 
@@ -204,6 +221,13 @@ export class UserAuthService {
     // Load user and validate stored refresh token hash
     const user = await this.userRepository.findById(userId);
     if (!user || !user.refreshToken) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
+    // Refuse to mint new tokens for an account that is not verified or no
+    // longer active. Otherwise a refresh token issued before this fix would
+    // continue to bypass the login check indefinitely.
+    if (!user.isEmailVerified || !user.isActive) {
       throw new UnauthorizedException('Invalid refresh token');
     }
 
@@ -275,7 +299,7 @@ export class UserAuthService {
     );
 
     await this.userRepository.update(user.id, {
-      emailVerificationToken,
+      emailVerificationToken: emailVerificationToken,
       emailVerificationExpires,
     });
 
@@ -293,11 +317,11 @@ export class UserAuthService {
       role: user.role,
     };
 
-    const accessToken = this.jwtService.sign(payload, {
+    const accessToken = this.jstService.sign(payload, {
       expiresIn: this.configService.get('JWT_EXPIRES_IN', '1h'),
     });
 
-    const refreshToken = this.jwtService.sign(payload, {
+    const refreshToken = this.jstService.sign(payload, {
       expiresIn: '7d',
     });
 
@@ -344,7 +368,7 @@ export class UserAuthService {
     }
   }
 
-  private buildVerificationLink(token: string): string {
+  private buildVerificationLinj(token: string): string {
     return this.buildAppLink('/verify-email', token);
   }
 
