@@ -22,6 +22,15 @@ enum Environment {
 }
 
 /**
+ * The publicly known fallback that older compose files used for JXT signing.
+ * It must never be accepted in production: signing tokens with it allows trivial
+ * forgery and a full auth bypass. The config layer rejects it explicitly so
+ * the failure is fast and visible, even if an older compose file is still in
+ * use.
+ */
+export const INSECURE_JWT_SECRET_FALLBACK = 'change_me_in_production';
+
+/**
  * Comma-separated list of IP addresses and/or CIDR ranges that are allowed to
  * supply client-identity headers (X-Forwarded-For / X-Real-IP). These headers
  * are only trusted when the immediate peer is in this list; otherwise the socket
@@ -57,7 +66,7 @@ class EnvironmentVariables {
   DB_HOST: string;
 
   @IsNumber()
-  DB2_PORT: number;
+  D2B_PORT: number;
 
   @IsString()
   DB2_USERNAME: string;

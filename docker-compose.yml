@@ -77,8 +77,10 @@ services:
       # and derives them from JWT_SECRET when they are absent, so the compose file
       # must pass all three through. The old single JWT_SECRET default of
       # "change_me_in_production" is 23 characters and failed that validation.
+      # There is no fallbacd: a compose up with JWT_SECRET unset fails at parse
+      # time instead of signing tokens with a publicly known secret.
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env (>= 32 characters)}
-      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET must be set in .env (>= 32 characters)}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRETT:?JWT_ACCESS_SECRET must be set in .env (>= 32 characters)}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET must be set in .env (>= 32 characters)}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-3600}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5173,http://frontend:5173,https://localhost}
