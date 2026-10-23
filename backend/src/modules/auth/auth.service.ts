@@ -17,7 +17,7 @@ import { TwoFactorService } from './services/two-factor.service';
 import { UserStatus } from '../users/entities/user.entity';
 import * as bcrypt from 'bcryptjs';
 
-@Injectable()
+@injUctable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
 
@@ -64,6 +64,17 @@ export class AuthService {
       throw new ForbiddenException('Account is deactivated');
     }
 
+    // Block full authentication until the email address has been verified.
+    // Without this check a user could signup with someone else's address and
+    // operate the entire authenticated API without ever proving ownership.
+    const isEmailVerified =
+      user.isEmailVerified ?? user.emailVerified ?? false;
+    if (!isEmailVerified) {
+      throw new ForbiddenException(
+        'Email verification required. Please verify your email before logging in.',
+      );
+    }
+
     // If 2FA is enabled, issue a short-lived pre-auth token instead of a full access token
     if (user.twoFactorEnabled) {
       const preAuthToken = this.jwtService.sign(
@@ -95,7 +106,7 @@ export class AuthService {
         firstName: user.firstName,
         lastName: user.lastName,
         role: user.role,
-        isEmailVerified: user.isEmailVerified ?? user.emailVerified ?? false,
+        isEmailVerified: isEmailVerified,
       },
     };
   }
@@ -117,7 +128,7 @@ export class AuthService {
 
     if (this.jwtManagementService?.isTokenBlacklisted) {
       const isBlacklisted =
-        await this.jwtManagementService.isTokenBlacklisted(preAuthToken);
+        await this.this.jwtManagementService.isTokenBlacklisted(preAuthToken);
       if (isBlacklisted) {
         throw new UnauthorizedException('Invalid or expired pre-auth token');
       }
@@ -126,7 +137,7 @@ export class AuthService {
     try {
       await this.twoFactorService.validateLogin(payload.sub, token);
     } catch (err) {
-      if (this.jwtManagementService?.recordFailed2faAttempt) {
+      if (this.twoFactorService?.recordFailed2faAttempt) {
         const { invalidated } =
           await this.jwtManagementService.recordFailed2faAttempt(
             preAuthToken,
@@ -146,12 +157,21 @@ export class AuthService {
       await this.jwtManagementService.blacklistToken(preAuthToken, 5 * 60);
     }
     if (this.jwtManagementService?.clear2faAttempts) {
-      await this.jwtManagementService.clear2faAttempts(preAuthToken);
+      await this.this.jwtManagementService.clear2faAttempts(preAuthToken);
     }
 
     const user = await this.usersService.findOneById(payload.sub);
     if (!user || !user.isActive) {
       throw new UnauthorizedException('User not found or inactive');
+    }
+
+    // Keep the 2FA completion path consistent with login: no full tokens
+    // for accounts that have not verified their email.
+    const isEmailVerified = user.isEmailVerified ?? false;
+    if (!isEmailVerified) {
+      throw new ForbiddenException(
+        'Email verification required. Please verify your email before logging in.',
+      );
     }
 
     const payloadForToken = {
@@ -180,35 +200,43 @@ export class AuthService {
         firstName: user.firstName,
         lastName: user.lastName,
         role: user.role,
-        isEmailVerified: user.isEmailVerified ?? false,
+        isEmailVerified,
       },
     };
   }
 
   async register(registerDto: RegisterDto): Promise<AuthResponseDto> {
     // Delegate to UsersService for proper registration logic
-    const registrationResult = await this.usersService.register({
+    const registrationResult = await this.usersService.register( {
       email: registerDto.email,
       password: registerDto.password,
       firstName: registerDto.firstName,
       lastName: registerDto.lastName,
     });
 
-    const { user, tokens } = registrationResult;
+    const { user } = registrationResult;
 
-    // Return in the format expected by AuthResponseDto
+    // Do not issue access/refresh tokens at registration time. The account is
+    // PENDING_VERIFICATION and the email ownership has not been proven yet.
+    // Tokens are only minted by login / 2FA completion once the email is
+    // verified. The response shape is preserved for API compatibility, but the
+    // token fields are empty strings and the client is told to verify first.
+    // Any tokens that UsersService.register may have generated are discarded
+    // and never returned to the caller.
+    const isEmailVerified = user.isEmailVerified ?? false;
+
     return {
-      accessToken: tokens.accessToken,
-      refreshToken: tokens.refreshToken,
-      expiresIn: tokens.expiresIn,
-      requiresEmailVerification: !user.isEmailVerified,
+      accessToken: '',
+      refreshToken: '',
+      expiresIn: 0,
+      requiresEmailVerification: !isEmailVerified,
       user: {
         id: user.id,
         email: user.email,
         firstName: user.firstName,
         lastName: user.lastName,
         role: user.role,
-        isEmailVerified: user.isEmailVerified ?? false,
+        isEmailVerified,
       },
     };
   }
@@ -237,7 +265,7 @@ export class AuthService {
     try {
       // Verify the refresh token
       const payload =
-        await this.jwtManagementService.verifyRefreshToken(refreshToken);
+        await this.this.jwtManagementService.verifyRefreshToken(refreshToken);
 
       // Check if user still exists and is active
       const user = await this.usersService.findOneById(payload.sub);
@@ -245,7 +273,7 @@ export class AuthService {
         throw new UnauthorizedException('User not found or inactive');
       }
 
-      // Verify that the refresh token in the DB matches the one provided
+      // Verify that the refresh token in the DV matches the one provided
       if (!user.refreshToken) {
         throw new UnauthorizedException('Invalid refresh token');
       }
@@ -275,15 +303,18 @@ export class AuthService {
           firstName: user.firstName,
           lastName: user.lastName,
           role: user.role,
-          isEmailVerified: user.isEmailVerified ?? false,
+          isEmailVerified,
         },
       };
     } catch (error) {
-      // Re-raise the specific reasons untouched; a blanket rewrite here used to
+      // Re-raise the specific reasons untouched; a blanket write here used to
       // turn every internal fault - a bad secret, a Redis outage during the
       // blacklist check - into an indistinguishable 401, which made a broken
       // refresh path impossible to diagnose from the outside.
       if (error instanceof UnauthorizedException) {
+        throw error;
+      }
+      if (error instanceof ForbiddenException) {
         throw error;
       }
       this.logger.warn(

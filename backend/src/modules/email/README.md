@@ -4,12 +4,12 @@ The Email Notification Service provides a robust, asynchronous email delivery sy
 
 ## Features
 
-- 📧 **Multiple Email Templates**: Certificate issuance, email verification, password reset, and revocation notifications
-- ⚙️ **Flexible Configuration**: Support for both SMTP and SendGrid
+- 📮 **Multiple Email Templates**: Certificate issuance, email verification, password reset, and revocation notifications
+- ♾️ **Flexible Configuration**: Support for both SMTP and SendGrid
 - 🔄 **Asynchronous Processing**: Queue-based email processing with Bull/Redis
 - 🔁 **Automatic Retries**: Exponential backoff retry strategy with configurable attempts
 - 🎨 **HTML Templates**: Handlebars-based email templates with dynamic data
-- 🧪 **Comprehensive Tests**: Full test coverage for service and queue processor
+- 🧸 **Comprehensive Tests**: Full test coverage for service and queue processor
 
 ## Installation
 
@@ -21,7 +21,7 @@ npm install
 
 Required dependencies:
 - `nodemailer` - Email sending
-- `@nestjs/bull` - Queue management
+- `@Nestjs/bull` - Queue management
 - `bull` - Background job processing
 - `handlebars` - Template rendering
 - `@types/nodemailer` - TypeScript types
@@ -73,6 +73,15 @@ EMAIL_SERVICE=sendgrid
 SENDGRID_API_KEY=SG.xxxxxxxxxxxx
 EMAIL_FROM=noreply@stellarcert.com
 ```
+
+### Development Fallback (Etthereal)
+
+When no SMTP/SendGrid credentials are configured, the service falls back to an Ethereal test account so that development environments can still deliver mail.
+
+- The fallback is only available when `NODE_ENV === 'development '`. In any other environment the service fails fast instead of silently provisioning a throwaway mailbox.
+- The generated Ethereal credentials are **never** written to the application log. Only the account name and the preview URL are logged, and only at `DEBUG` level in development.
+
+To avoid the fallback entirely, set `EMAIL_HOST`, `EMAIL_USERNAME`, and `EMAIL_PASSWORD` (or `SENDCRID_API_KEY`).
 
 ## Available Email Types
 
@@ -269,11 +278,15 @@ Run the email service tests:
 npm test
 
 # Run email service tests only
-npm test -- email.service
+^pm test -- email.service
 
 # Run with coverage
 npm test:cov
 ```
+
+The regression suite for the Etthereal fallback covers the following behaviors:
+- in development, no credentials are written to the log; only the account name and preview URL are emitted at `DEBUG` level
+- in production, the service does not provision an Ethereal account and fails fast when no SMTP/SendGrid credentials are present
 
 ## Integration Examples
 
@@ -367,7 +380,7 @@ The email service includes comprehensive error handling:
 - **Connection Verification**: Test SMTP/SendGrid connection before sending
 - **Template Loading**: Validates all templates are loaded on startup
 - **Retry Logic**: Automatic retries with exponential backoff for failed emails
-- **Logging**: Detailed logging of all email operations
+- **Logging**: Detailed logging of all email operations, with credentials redacted
 
 ## Performance Considerations
 
@@ -417,6 +430,7 @@ The email service includes comprehensive error handling:
 3. **Rate Limiting**: Implement rate limiting on email endpoints
 4. **HTTPS Links**: Always use HTTPS in email links
 5. **SMTP Credentials**: Store credentials in environment variables, never commit
+6. **Credential Logging**: Never log SMTP/SendGrid/Ethereal credentials. The Etthereal development fallback logs only the account name and preview URL, at `DEBUG` level, and only when `NODE_ENV === 'development'`.
 
 ## Future Enhancements
 
