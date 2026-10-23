@@ -1,1 +1,405 @@
-U3RlbGxhckNlcnQgLSBXYXZlIFByb2dyYW0gQ2VydGlmaWNhdGUgU3lzdGVtCkEgZGVjZW50cmFsaXplZCBjZXJ0aWZpY2F0ZSBwcm9ncmFtIG1hbmFnZW1lbnQgc3lzdGVtIGJ1aWx0IG9uIHRoZSBTdGVsbGFyIGJsb2NrY2hhaW4gdXNpbmcgUmVhY3QsIE5lc3RKUywgYW5kIFN0ZWxsYXIgU0RLLiBUaGlzIHN5c3RlbSBhbGxvd3MgZm9yIGlzc3VpbmcsIHZlcmlmeWluZywgYW5kIG1hbmFnaW5nIGRpZ2l0YWwgY2VydGlmaWNhdGVzIHByb2dyYW0gY3JlZGVudGlhbHMgaW4gYSBzZWN1cmUsIHRyYW5zcGFyZW50LCBhbmQgaW1tdXRhYmxlIG1hbm5lci4KCvCfmoAgR2V0dGluZyBTdGFydGVkCgpHZXQgdGhlIHN0YWNrIHJ1bm5pbmcgZnJvbSBhIGNsZWFuIGNsb25lOgoKYGBgYmFzaAojIDEuIEluc3RhbGwgcm9vdCBkZXBlbmRlbmNpZXMgKHRoaXMgZG9lcyBOT1QgcG9wdWxhdGUgYmFja2VuZC9ub2RlX21vZHVsZXMpCm5wbSBpbnN0YWxsCgojIDIuIEluc3RhbGwgYmFja2VuZCBkZXBlbmRlbmNpZXMgc2VwYXJhdGVseQooY2QgYmFja2VuZCAmJiBucG0gaW5zdGFsbCkKCiMgMy4gQ3JlYXRlIHRoZSBjb21wb3NlIGVudmlyb25tZW50IGZpbGUgKGRvY2tlciBjb21wb3NlIHJlYWRzIC4vLmVudikKIyAgICBFdmVyeSB2YWx1ZSBpbiAuZW52LmV4YW1wbGUgaXMgYSByZXF1aXJlZCBwbGFjZWhvbGRlcjsgZG9ja2VyLWNvbXBvc2UueW1sCiMgICAgZmFpbHMgZmFzdCB3aXRoICR7VkFSOj99IGlmIG9uZSBpcyBtaXNzaW5nIG9yIGVtcHR5LgpjcCAuZW52LmV4YW1wbGUgLmVudgoKIyA0LiBTdGFydCBQb3N0Z3JlcyBhbmQgUmVkaXMKZG9ja2VyIGNvbXBvc2UgdXAgLWQgcG9zdGdyZXMgcmVkaXMKCiMgNS4gQ29weSB0aGUgYmFja2VuZCBlbnZpcm9ubWVudCBmaWxlCmNwIGJhY2tlbmQvLmVudi5leGFtcGxlIGJhY2tlbmQvLmVudgoKIyA2LiBTdGFydCBkZXZlbG9wbWVudCBzZXJ2ZXJzIChiYWNrZW5kIDozMDAwLCBmcm9udGVuZCA6NTE3MykKbnBtIHJ1biBkZXYKCiMgNy4gVmVyaWZ5IHRoZSBBUEkgaXMgcnVubmluZwpjdXJsIGh0dHA6Ly9sb2NhbGhvc3Q6MzAwMC9hcGkvdjEvaGVhbHRoCmBgYAoKPiAqKk5vdGUgb24gZW52IHZhcnM6KiogVGhlIGFwcCBzdGFydHMgd2l0aCB3YXJuaW5ncyBmb3IgbWlzc2luZyBTdGVsbGFyLCBTb3JvYmFuLCBhbmQgc3RvcmFnZSBjb25maWcg4oCUIHRoaXMgaXMgZmluZSBmb3IgbG9jYWwgZGV2ZWxvcG1lbnQuIE9ubHkgYEpXVF9TRUNSRVRgIGFuZCB0aGUgZGF0YWJhc2UgY29uZmlnIChgREJfKmA6KSBhcmUgcmVxdWlyZWQgdG8gYm9vdC4gU2VlIHRoZSBbQ29uZmlndXJhdGlvbl0oI2NvbmZpZ3VyYXRpb24pIHNlY3Rpb24gZm9yIGRldGFpbHMuCgrwn4yfIEZlYXR1cmVzCkNvcmUgRmVhdHVyZXMKQ2VydGlmaWNhdGUgSXNzdWFuY2U6IEF1dGhvcml6ZWQgaXNzdWVycyBjYW4gY3JlYXRlIGRpZ2l0YWwgY2VydGlmaWNhdGVzIGNyZWRlbnRpYWxzCgpSZWFsLXRpbWUgVmVyaWZpY2F0aW9uOiBBbnlvbmUgY2FuIHZlcmlmeSB0aGUgYXV0aGVudGljaXR5IG9mIGNlcnRpZmljYXRlcyB1c2luZyBTdGVsbGFyIHRyYW5zYWN0aW9ucwoKQ2VydGlmaWNhdGUgUmV2b2NhdGlvbjogSXNzdWVycyBjYW4gcmV2b2tlIGNlcnRpZmljYXRlcyB3aGVuIG5lZWRlZAoKSXNzdWVyIE1hbmFnZW1lbnQ6IEFkbWluIGNhbiBhdXRob3JpemUvcmVtb3ZlIGNlcnRpZmljYXRlIGlzc3VlcnMKCkV4cGlyeSBNYW5hZ2VtZW50OiBBdXRvbWF0aWMgZXhwaXJhdGlvbiBvZiBjZXJ0aWZpY2F0ZXMgYmFzZWQgb24gU3RlbGxhciBzZXF1ZW5jZSBudW1iZXJzCgpTdGF0aXN0aWNzIERhc2hib2FyZDogVHJhY2sgdG90YWwgY2VydGlmaWNhdGVzLCBhY3RpdmUgY2VydGlmaWNhdGVzLCBhbmQgaXNzdWVyIGFjdGl2aXR5CgoqKlNvcm9iYW4gU21hcnQgQ29udHJhY3QgSW50ZWdyYXRpb24qKjogT24tY2hhaW4gY2VydGlmaWNhdGUgb3BlcmF0aW9ucyB3aXRoIG11bHRpLXNpZ25hdHVyZSBzdXBwb3J0CgoqKlJhdGUgTGltaXRpbmcqKjogSVAtYmFzZWQgcmF0ZSBsaW1pdGluZyBvbiBwdWJsaWMgdmVyaWZpY2F0aW9uIGVuZHBvaW50cyBmb3Igc2VjdXJpdHkKClRlY2huaWNhbCBGZWF0dXJlcwpSZWFjdCBGcm9udGVuZDogTW9kZXJuLCByZXNwb25zaXZlIFVJIHdpdGggcmVhbC10aW1lIHVwZGF0ZXMKCk5lc3RKUyBCYWNrZW5kOiBTY2FsYWJsZSBBUEkgd2l0aCBKV1QgYXV0aGVudGljYXRpb24KCioqU29yb2JhbiBTbWFydCBDb250cmFjdHMqKjogRGVjZW50cmFsaXplZCBjZXJ0aWZpY2F0ZSBtYW5hZ2VtZW50IG9uIFN0ZWxsYXIgYmxvY2tjaGFpbgoKU3RlbGxhciBJbnRlZ3JhdGlvbjogU21hcnQgY29udHJhY3QtbGlrZSBmdW5jdGlvbmFsaXR5IHVzaW5nIFN0ZWxsYXIgdHJhbnNhY3Rpb25zCgoqKlNlY3VyaXR5IEZlYXR1cmVzKio6IFJhdGUgbGltaXRpbmcsIGF1dGhlbnRpY2F0aW9uLCBhbmQgYXV0aG9yaXphdGlvbgoKUVIgQ29kZSBHZW5lcmF0aW9uOiBFYXN5IGNlcnRpZmljYXRlIHNoYXJpbmcgYW5kIHZlcmlmaWNhdGlvbgoKUERGI EV4cG9ydDogRG93bmxvYWQgY2VydGlmaWNhdGVzIGFzIFBERiBkb2N1bWVudHMKCvCfj5cgUHJvamVjdCBTdHJ1Y3R1cmUKCnN0ZWxsYXJjZXJ0LwrilJzilIDilIAgZnJvbnRlbmQvICMgUmVhY3QgQXBwbGljYXRpb24K4pSCIOKUnOKUgOKUgCBwdWJsaWMvCuKUgiDilJzilIDilIAgc3JjLwrilIIg4pSCIOKUnOKUgOKUgCBjb21wb25lbnRzLyAjIFJldXNhYmxlIGNvbXBvbmVudHMK4pSCIOKUgiDilIIg4pSc4pSA4pSAIENlcnRpZmljYXRlLwrilIIg4pSCIOKUgiDilJzilIDilIAgRGFzaGJvYXJkLwrilIIg4pSCIOKUgiDilJzilIDilIAgSXNzdWVyLwrilIIg4pSCIOKUgiDilJTilIDilIAgU2hhcmVkLwrilIIg4pSCIOKUnOKUgOKUgCBjb250ZXh0cy8gIyBSZWFjdCBjb250ZXh0cyAoQXV0aCwgU3RlbGxhcikK4pSCIOKUgiDilJzilIDilIAgaG9va3MvICMgQ3VzdG9tIFJlYWN0IGhvb2tzCuKUgiDilIIg4pSc4pSA4pSAIHBhZ2VzLyAjIFBhZ2UgY29tcG9uZW50cwrilIIg4pSCIOKUgiDilJzilIDilIAgSG9tZS8K4pSCIOKUgiDilIIg4pSc4pSA4pSAIFZlcmlmeS8K4pSCIOKUgiDilIIg4pSc4pSA4pSAIElzc3VlLwrilIIg4pSCIOKUgiDilJzilIDilIAgRGFzaGJvYXJkLwrilIIg4pSCIOKUgiDilJTilIDilIAgQWRtaW4vCuKUgiDilIIg4pSc4pSA4pSAIHNlcnZpY2VzLyAjIEFQSSBhbmQgU3RlbGxhciBzZXJ2aWNlcwrilIIg4pSCIOKUnOKUgOKUgCB1dGlscy8gIyBIZWxwZXIgZnVuY3Rpb25zCuKUgiDilIIg4pSc4pSA4pSAIHR5cGVzLyAjIFR5cGVTY3JpcHQgZGVmaW5pdGlvbnMK4pSCIOKUgiDilJTilIDilIAgc3R5bGVzLyAjIENTUy9TQ1NTIGZpbGVzCuKUgiDilJzilIDilIAgcGFja2FnZS5qc29uCuKUgiDilJTilIDilIAgdml0ZS5jb25maWcudHMgIyBvciB3ZWJwYWNrLmNvbmZpZy5qcwoK4pSC4pSc4pSA4pSAIGJhY2tlbmQvICMgTmVzdEpTIEFwcGxpY2F0aW9uCuKUgiDilJzilIDilIAgc3JjLwrilIIg4pSCIOKUnOKUgOKUgCBtb2R1bGVzLwrilIIg4pSCIOKUgiDilJzilIDilIAgYXV0aC8gIyBBdXRoZW50aWNhdGlvbgrilIIg4pSCIOKUgiDilJzilIDilIAgY2VydGlmaWNhdGUvIyBDZXJ0aWZpY2F0ZSBtYW5hZ2VtZW50CuKUgiDilIIg4pSCIOKUnOKUgOKUgCBpc3N1ZXIvICMgSXNzdWVyIG1hbmFnZW1lbnQK4pSCIOKUgiDilIIg4pSc4pSA4pSAIHN0ZWxsYXIvICMgU3RlbGxhciBpbnRlZ3JhdGlvbgrilIIg4pSCIOKUgiDilJTilIDilIAgdXNlci8gIyBVc2VyIG1hbmFnZW1lbnQK4pSCIOKUgiDilJzilIDilIAgY29tbW9uLwrilIIg4pSCIOKUgiDilJzilIDilIAgZ3VhcmRzLyAjIEF1dGggZ3VhcmRzCuKUgiDilIIg4pSCIOKUnOKUgOKUgCBmaWx0ZXJzLyAjIEV4Y2VwdGlvbiBmaWx0ZXJzCuKUgiDilIIg4pSCIOKUnOKUgOKUgCBpbnRlcmNlcHRvcnMvIyBJbnRlcmNlcHRvcnMK4pSCIOKUgiDilIIg4pSU4pSA4pSAIGRlY29yYXRvcnMvICMgQ3VzdG9tIGRlY29yYXRvcnMK4pSCIOKUgiDilJzilIDilIAgY29uZmlnLyAjIENvbmZpZ3VyYXRpb24gZmlsZXMK4pSCIOKUgiDilJzilIDilIAgY29udHJhY3RzLyAjIFNtYXJ0IGNvbnRyYWN0IEFCSXMgKGlmIHVzaW5nIFNvcm9iYW4pCuKUgiDilIIg4pSc4pSA4pSAIGRhdGFiYXNlLyAjIERhdGFiYXNlIG1vZGVscyBhbmQgbWlncmF0aW9ucwrilIIg4pSCIOKUgiDilIIg4pSc4pSA4pSAIGVudGl0aWVzLwrilIIg4pSCIOKUgiDilIIg4pSc4pSA4pSAIG1pZ3JhdGlvbnMvCuKUgiDilIIg4pSCIOKUgiDilJTilIDilIAgcmVwb3NpdG9yaWVzLwrilIIg4pSCIOKUgiDilJTilIDilIAgdXRpbHMvICMgVXRpbGl0eSBmdW5jdGlvbnMK4pSCIOKUgiDilJzilIDilIAgdGVzdC8gIyBUZXN0IGZpbGVzCuKUgiDilIIg4pSc4pSA4pSAIHBhY2thZ2UuanNvbgrilIIg4pSCIOKUnOKUgOKUgCBuZXN0LWNsaS5qc29uCuKUgiDilIIg4pSU4pSA4pSAIHRzY29uZmlnLmpzb24K4pSC4pSc4pSA4pSAIHN0ZWxsYXItY29udHJhY3RzLyAjIFN0ZWxsYXIgU29yb2JhbiBTbWFydCBDb250cmFjdHMK4pSCIOKUgiDilJzilIDilIAgc3JjLwrilIIg4pSCIOKUgiDilJzilIDilIAgbGliLnJzICMgTWFpbiBjZXJ0aWZpY2F0ZSBjb250cmFjdArilIIg4pSCIOKUgiDilJzilIDilIAgbXVsdGlzaWcucnMgIyBNdWx0aS1zaWduYXR1cmUgb3BlcmF0aW9ucwrilIIg4pSCIOKUgiDilJzilIDilIAgY3JsLnJzICMgQ2VydGlmaWNhdGUgcmV2b2NhdGlvbiBsaXN0cwrilosiDilIIg4pSCIOKUnOKUgOKUgCB0eXBlcy5ycyAjIFNoYXJlZCB0eXBlcyBhbmQgZGF0YSBzdHJ1Y3R1cmVzCuKUgiDilIIg4pSCIOKUnOKUgOKUgCBhZG1pbl9tdWx0aXNpZy5ycyAjIEFkbWluIG11bHRpc2lnIGZ1bmN0aW9uYWxpdHkK4pSCIOKUgiDilJzilIDilIAgdGVzdHMvICMgQ29udHJhY3QgdGVzdHMK4pSCIOKUgiDilJTilIDilIAgQ2FyZ28udG9tbArilIIK4pSC4pSc4pSA4pSAIHNoYXJlZC8gIyBTaGFyZWQgY29kZSBiZXR3ZWVuIGZyb250ZW5kL2JhY2tlbmQK4pSCIOKUgiDilJzilIDilIAgdHlwZXMvICMgU2hhcmVkIFR5cGVTY3JpcHQgdHlwZXMK4pSCIOKUgiDilJzilIDilIAgY29uc3RhbnRzLyAjIFNoYXJlZCBjb25zdGFudHMK4pSCIOKUgiDilJTilIDilIAgdXRpbHMvICMgU2hhcmVkIHV0aWxpdGllcwrilosiClzilJzilIDilIAgZG9ja2VyLyAjIERvY2tlciBjb25maWd1cmF0aW9uCuKUgiDilJzilIDilIAgRG9ja2VyZmlsZS5mcm9udGVuZArilIIg4pSc4pSA4pSAIERvY2tlcmZpbGUuYmFja2VuZArilIIg4pSU4pSA4pSAIGRvY2tlci1jb21wb3NlLnltbArilIIK4pSC4pSc4pSA4pSAIGRvY3MvICMgRG9jdW1lbnRhdGlvbgrilIIg4pSCIOKUnOKUgOKUgCBhcGkvICMgQVBJIGRvY3VtZW50YXRpb24K4pSCIOKUgiDilJzilIDilIAgc3RlbGxhci8gIyBTdGVsbGFyIGludGVncmF0aW9uIGRvY3MK4pSCIOKUgiDilJTilIDilIAgZGVwbG95bWVudC8gIyBEZXBsb3ltZW50IGd1aWRlcwrilosiClzilJzilIDilIAgc2NyaXB0cy8gIyBVdGlsaXR5IHNjcmlwdHMK4pSCIOKUgiDilJzilIDilIAgc2V0dXAtc3RlbGxhci5qcwrilosi4pSCIOKUgiDilJzilIDilIAgZGVwbG95LWNvbnRyYWN0cy5qcwrilosi4pSCIOKUgiDilJTilIDilIAgc2VlZC1kYXRhYmFzZS5qcwrilosiCuKUgiDilJzilIDilIAgLmVudi5leGFtcGxlICMgRW52aXJvbm1lbnQgdmFyaWFibGVzIHRlbXBsYXRlCuKUgiDilJzilIDilIAgLmdpdGlnbm9yZQrilIIg4pSc4pSA4pSAIHBhY2thZ2UuanNvbiAjIFJvb3QgcGFja2FnZS5qc29uICh3b3Jrc3BhY2UpCuKUgiDilJzilIDilIAgUkVBRE1FLm1kICMgVGhpcyBmaWxlCuKUgiDilJzilIDilIAgTElDRU5TRQrilIIg4pSU4pSA4pSAIGRvY2tlci1jb21wb3NlLnltbCAjIEZ1bGwgc3RhY2sgZG9ja2VyIGNvbXBvc2UKCvCfk4sgUHJlcmVxdWlzaXRlcwpSZXF1aXJlZCBTb2Z0d2FyZQpOb2RlLmpzICh2MTggb3IgaGlnaGVyKQoKbnBtIG9yIHlhcm4gb3IgcG5wbQoKRG9ja2VyICYgRG9ja2VyIENvbXBvc2UgKHJlcXVpcmVkIGZvciBQb3N0Z3JlcyBhbmQgUmVkaXMgaW4gbG9jYWwgZGV2KQoKU3RlbGxhciBDTEkgVG9vbHMgKGZvciBjb250cmFjdCBkZXBsb3ltZW50KQoKU3RlbGxhciBSZXF1aXJlbWVudHMKU3RlbGxhciBUZXN0bmV0L0xpdmVuZXQgYWNjb3VudAoKU3RlbGxhciBTRMsgKEBzdGVsbGFyL3N0ZWxsYXItc2RrKQoKRnJpZW5kYm90IChmb3IgdGVzdG5ldCBmdW5kaW5nKQoK8J+agCBJbnN0YWxsYXRpb24KCjEuIENsb25lIHRoZSBSZXBvc2l0b3J5CiAgIGJhc2gKICAgZ2l0IGNsb25lIGh0dHBzOi8vZ2l0aHViLmNvbS9TZXJ2b3JhL1N0ZWxsYXJDZXJ0LmdpdAogICBjZCBzdGVsbGFyY2VydAoyLiBTZXR1cCBCYWNrZW5kCiAgIGJhc2gKICAgY2QgYmFja2VuZAogICBjcCAuZW52LmV4YW1wbGUgLmVudgoKIyBFZGl0IC5lbnYgd2l0aCB5b3VyIGNvbmZpZ3VyYXRpb24KCm5wbSBpbnN0YWxsCm5wbSBydW4gZGI6bWlncmF0ZQpucG0gcnVuIHNlZWQgMy4gU2V0dXAgRnJvbnRlbmQKYmFzaApjZCAuLi9mcm9udGVuZApjcCAuZW52LmV4YW1wbGUgLmVudgpucG0gaW5zdGFsbCA0LiBTZXR1cCBTdGVsbGFyIChPcHRpb25hbCAtIGZvciBjb250cmFjdCBkZXBsb3ltZW50KQpiYXNoCmNkIC4uL3N0ZWxsYXItY29udHJhY3RzCnJ1c3R1cCB0YXJnZXQgYWRkIHdhc20zMi11bmtub3duLXVua25vd24KY2FyZ28gaW5zdGFsbCAtLWxvY2tlZCBzb3JvYmFuLWNsaQrwn4+DLiBSdW5uaW5nIHRoZSBBcHBsaWNhdGlvbgpEZXZlbG9wbWVudCBNb2RlCk9wdGlvbiBBOiBVc2luZyBEb2NrZXIgQ29tcG9zZSAoUmVjb21tZW5kZWQpCmJhc2gKCiMgRnJvbSByb290IGRpcmVjdG9yeQoKZG9ja2VyLWNvbXBvc2UgdXAgLS1idWlsZApPcHRpb24gQjogUnVubmluZyBTZXBhcmF0ZWx5CkJhY2tlbmQ6CgpiYXNoCmNkIGJhY2tlbmQKbnBtIHJ1biBzdGFydDpkZXYKRnJvbnRlbmQ6CgpiYXNoCmNkIGZyb250ZW5kCm5wbSBydW4gZGV2ClByb2R1Y3Rpb24gTW9kZQpiYXNoCgojIEJ1aWxkIGFsbCBzZXJ2aWNlcwoKbnBtIHJ1biBidWlsZAoKIyBTdGFydCBpbiBwcm9kdWN0aW9uCgpucG0gc3RhcnQK8J+npCBUZXN0aW5nCkJhY2tlbmQgVGVzdHMKYmFzaApjZCBiYWNrZW5kCm5wbSB0ZXN0ICMgVW5pdCB0ZXN0cwpucG0gcnVuIHRlc3Q6ZTJlICMgRTJF IHRlc3RzCm5wbSBydW4gdGVzdDpjb3YgIyBUZXN0IGNvdmVyYWdlCkZyb250ZW5kIFRlc3RzCmJhc2gKY2QgZnJvbnRlbmQKbnBtIHRlc3QgIyBVbml0IHRlc3RzCm5wbSBydW4gdGVzdDplMmUgIyBFMkUgdGVzdHMKRnJvbnRlbmQgTGludGluZwpCYXNlCmNkIGZyb250ZW5kCm5wbSBydW4gbGludCAjIEVTTGludCA5IGZsYXQgY29uZmlnIChlc2xpbnQuY29uZmlnLmpzKQpTdGVsbGFyIENvbnRyYWN0IFRlc3RzCmJhc2gKY2Qgc3RlbGxhci1jb250cmFjdHMKY2FyZ28gdGVzdArwn5SnIENvbmZpZ3VyYXRpb24KRW52aXJvbm1lbnQgVmFyaWFibGVzCgoqKlJlcXVpcmVkIHRvIGJvb3Q6KioKLSBgSldUX1NFQ1JFVGAg4oCUIGFueSBzdHJpbmcgd29ya3MgZm9yIGxvY2FsIGRldmVsb3BtZW50IChlLmcuIGBkZXYtc2VjcmV0YCkKLSBgREJfSE9TVGAsIGBEQl9QT1JUYCwgYERCX1VTRVJOQU1FYCwgYERCX1BBU1NXT1JEYCwgYERCX05BTUVgIOKAlCBkZWZhdWx0cyBpbiBgLmVudi5leGFtcGxlYCBtYXRjaCBgZG9ja2VyIGNvbXBvc2VgCgoqKk9wdGlvbmFsICh0aGUgYXBwIHdpbGwgc3RhcnQgd2l0aCB3YXJuaW5ncyk6KioKLSBgU1RFTExBUl9JU1NVRVJfU0VDUkVUX0tFWWAgLyBgU1RFTExBUl9JU1NVRVJfUFVCTElDX0tFWWAg4oCUIG9ubHkgbmVlZGVkIGZvciBjZXJ0aWZpY2F0ZSBvcGVyYXRpb25zCi0gYFNFTlRSWV9EU05gIC8gYEVOQUJMRV9TRU5UUllgIOKAlCBlcnJvciByZXBvcnRpbmcKLSBgU1RPUkFHRV8qYCDigJQgZmlsZSBzdG9yYWdlIChTMy9NaW5JTykKLSBgQVVESVRfUkVURU5USU9OX0RBWVNgLCBgRFVQTElDQVRFX0RFVEVDVElPTl8qYCDigJQgZmVhdHVyZSB0b2dnbGVzIHdpdGggc2FmZSBkZWZhdWx0cwoKQmFja2VuZCAoLmVudik6CgplbnYKCiMgRGF0YWJhc2UKCkRBVEFCQVNFX1VSTD1wb3N0Z3Jlc3FsOi8vdXNlcjpwYXNzd29yZEBsb2NhbGhvc3Q6NTQzMi9zdGVsbGFyd2F2ZQoKIyBTdGVsbGFyCgpTVEVMTEFSX05FVFdPUks9VEVTVE5FVApTVEVMTEFSX0hPUklaT05fVVJM PWh0dHBzOi8vaG9yaXpvbi10ZXN0bmV0LnN0ZWxsYXIub3JnClNURUxMQVJfU0VDUkVUX0tFWT15b3VyX3NlY3JldF9rZXkKCiMgSldUCkpXVF9TRUNSRVQ9eW91cl9qd3Rfc2VjcmV0CkpXVF9FWFBJUlk9MjRoCgojIFNlcnZlcgoKUE9SVD0zMDAwCkNPUlNfT1JJR0lOPWh0dHA6Ly9sb2NhbGhvc3Q6NTE3MwpGcm9udGVuZCAoLmVudik6CgplbnYKVklURV9BUElfVVJMPWh0dHA6Ly9sb2NhbGhvc3Q6MzAwMC9hcGkvdjEKVklURV9TVEVMTEFSX05FVFdPUks9VEVTVE5FVApWSVRFX0hPUklaT05fVVJMPWh0dHBzOi8vaG9yaXpvbi10ZXN0bmV0LnN0ZWxsYXIub3JnCvCfk6EgQVBJIEJhc2UgVVJMICYgVmVyc2lvbmluZwpUaGUgYmFja2VuZCBhcHBsaWVzIGEgZ2xvYmFsIGBhcGlgIHByZWZpeCBhbmQgVVJJLWJhc2VkIHZlcnNpb25pbmcgd2l0aCBkZWZhdWx0IHZlcnNpb24gYDFgIChzZWUgYGJhY2tlbmQvc3JjL21haW4udHNgKToKCmBgYApBcHAuc2V0R2xvYmFsUHJlZml4KCdhcGknKTsKYXBwLmVuYWJsZVZlcnNpb25pbmcoeyB0eXBlOiBWZXJzaW9uaW5nVHlwZS5VUkksIGRlZmF1bHRWZXJzaW9uOiAnMScgfSk7CmBgYAoKRXZlcnkgcm91dGUgaXMgdGhlcmVmb3JlIHNlcnZlZCB1bmRlciBgL2FwaS92MS8uLi5gLiBBIHBsYWluIGAvYXBpLy4uLmAgcGF0aCByZXR1cm5zICoqNDA0Kiog4oCUIHRoaXMgaGFzIGNhdXNlZCBpc3N1ZXMgaW4gZG9ja2VyLWNvbXBvc2UgYW5kIGhlYWx0aGNoZWNrIGNvbmZpZ3MgaW4gdGhlIHBhc3QuCgpCYXNlIFVSTCAobG9jYWwgZGV2KToKYGBgCmh0dHA6Ly9sb2NhbGhvc3Q6MzAwMC9hcGkvdjEKYGBgCgpRdWljayBzbW9rZS10ZXN0IChoZWFsdGggY2hlY2spOgpgYGBiYXNoCmN1cmwgaHR0cDovL2xvY2FsaG9zdDozMDAwL2FwaS92MS9oZWFsdGgKYGBgCgpUaGUgU3dhZ2dlciBVSSAoYXZhaWxhYmxlIGF0IGBodHRwOi8vbG9jYWxob3N0OjMwMDAvYXBpL2RvY3NgIGluIGRldmVsb3BtZW50KSByZWZsZWN0cyB0aGUgdmVyc2lvbmVkIHBhdGhzIOKAlCBhbGwgcm91dGVzIHNob3duIHRoZXJlIGluY2x1ZGUgdGhlIGAvdjEvYCBzZWdtZW50LgoKKipJbXBvcnRhbnQgZm9yIGNvbmZpZ3VyYXRpb246KiogbWFrZSBzdXJlIGVudmlyb25tZW50IHZhcmlhYmxlcyB0aGF0IHBvaW50IGF0IHRoZSBBUEkgdXNlIHRoZSB2ZXJzaW9uZWQgYmFzZSBVUkw6CmBgYGVudgojIOKchSBDb3JyZWN0ClZJVEVfQVBJX1VSTD1odHRwOi8vbG9jYWxob3N0OjMwMDAvYXBpL3YxCgojIOKdjCBXcm9uZyDigJQgcmV0dXJucyA0MDQKVklURV9BUElfVVJMPWh0dHA6Ly9sb2NhbGhvc3Q6MzAwMC9hcGkKYGBgCvCfk6EgU3RlbGxhciBJbnRlZ3JhdGlvbgpLZXkgQ29tcG9uZW50cwpUcmFuc2FjdGlvbiBCdWlsZGVyOiBDcmVhdGVzIFN0ZWxsYXIgdHJhbnNhY3Rpb25zIGZvciBjZXJ0aWZpY2F0ZSBvcGVyYXRpb25zCgpBY2NvdW50IE1hbmFnZXI6IEhhbmRsZXMgaXNzdWVyIGFuZCB1c2VyIGFjY291bnRzCgpNZW1vIEZpZWxkczogVXNlcyBtZW1vIGZpZWxkcyB0byBzdG9yZSBjZXJ0aWZpY2F0ZSBtZXRhZGF0YQoKT3BlcmF0aW9uczoKCklzc3VlOiBDcmVhdGVzIHRydXN0bGluZXMgYW5kIHNlbmRzIGFzc2V0cwoKVmVyaWZ5OiBDaGVja3MgdHJhbnNhY3Rpb24gaGlzdG9yeQoKUmV2b2tlOiBVcGRhdGVzIGFjY291bnQgZmxhZ3MKClNtYXJ0IENvbnRyYWN0IEZsb3cgKFNvcm9iYW4pCnJ1c3QKLy8gRXhhbXBsZSBTb3JvYmFuIGNvbnRyYWN0IGZ1bmN0aW9uCmZuIGlzc3VlX2NlcnRpZmljYXRlKAplbnY6IEVudiwKaXNzdWVyOiBBZGRyZXNzLApyZWNpcGllbnQ6IEFkZHJlc3MsCmNlcnRfZGF0YTogQnl0ZXMKKSAtPiBSZXN1bHQ8KCksIEVycm9yPjsK8J+klCBSZXByb2R1Y2libGUgUmVsZWFzZXMgJiBQcm92ZW5hbmNlCgpBcHBsaWNhdGlvbiBjb250YWluZXJzIGFuZCBjb250cmFjdCBXQVNNIGFyZSBzZWN1cml0eS1jcml0aWNhbCByZWxlYXNlIGFydGlmYWN0cy4gRXZlcnkgcmVsZWFzZSBpcyBidWlsdCBmcm9tIGEgcmVjb3JkZWQgc291cmNlIHJldmlzaW9uIHdpdGggYSBwaW5uZWQgdG9vbGNoYWluLCBhbmQgcHJvbW90aW9uIGlzIGdhdGVkIG9uIHZlcmlmaWNhdGlvbiBvZiB0aGUgZXhhY3QgYnl0ZXMgdGhhdCB3ZXJlIHRlc3RlZC4KCiMjIyBQaW5uZWQgdG9vbGNoYWlucwoKVG9vbGNoYWluIHZlcnNpb25zIGFyZSBwaW5uZWQgaW4gcmVwbyBjb25maWcgYW5kIG11c3Qgbm90IGJlIG92ZXJyaWRkZW4gYnkgdGhlIGJ1aWxkIGVudmlyb25tZW50OgoKfCBUb29sIHwgUGluIGZpbGUgfCBWZXJzaW9uIHwKfCAtLS0gfCAtLS0gfCAtLS0gfAp8IE5vZGUgfCBgLm5vZGUtcGluYCB8IHNlZSBmaWxlIHwKfCBucG0gfCBgLm5vZGUtcGluYCB8IHNlZSBmaWxlIHwKfCBSdXN0IHwgYHJ1c3QtdG9vbGNoYWluLnRvbWwgfCBzZWUgZmlsZSB8CnwgU29yb2JhbiBDTEkgfCBgc3RlbGxhci1jb250cmFjdHMvU29yb2Jhbi1jbGkudG9tbCB8IHNlZSBmaWxlIHwKfCBEb2NrZXIgYnVpbGRlciBpbWFnZSB8IGBkb2NrZXIvYnVpbGRlci1pbWFnZS50eHRgIHwgc2VlIGZpbGUgfAoKVGhlIGJ1aWxkIHNjcmlwdHMgcmVhZCB0aGVzZSBmaWxlcyBhbmQgZmFpbCBpZiB0aGUgcnVubmluZyB0b29sY2hhaW4gZG9lcyBub3QgbWF0Y2guCgojIyMgUmVwcm9kdWNpYmxlIGJ1aWxkIGlucHV0cwoKLSBTb3VyY2UgcmV2aXNpb246IGV2ZXJ5IGFydGlmYWN0IGlzIGJ1aWx0IGZyb20gYSBmdWxsIGNvbW1pdCBTSEEgcmVjb3JkZWQgaW4gdGhlIHJlbGVhc2UgbWFuaWZlc3QgKGBTT1VSQ0VfUkVWYCkuCi0gTG9ja2ZpbGVzOiBgbnBtLXNocmlua3dyYXAuanNvbmAgKGZyb250ZW5kL2JhY2tlbmQpIGFuZCBgQ2FyZ28ubG9ja2AgKHN0ZWxsYXItY29udHJhY3RzKSBhcmUgY29tbWl0dGVkIGFuZCB1c2VkIHdpdGggYG5wbSBjaWAgLyBgY2FyZ28gYnVpbGQgLS1sb2NrZWRgLgotIERldGVybWluaXN0aWMgY29udGFpbmVyIGJ1aWxkczogYGJ1aWxkay1kcml2ZXI9ZG9ja2VyLWNvbnRhaW5lcmRgLCBgLS1uby1jYWNoZWAgaXMgbm90IHVzZWQsIGFuZCBgU09VUkNFX0RBVEVfRVBPQ0hgIGlzIGZpeGVkIHRvIHRoZSBjb21taXQgdGltZXN0YW1wLgotIFdBU00gYnVpbGRzOiBgY2FyZ28gYnVpbGQgLS1yZWxlYXNlIC0tdGFyZ2V0IHdhc20zMi11bmtub3duLXVua25vd24gLS1sb2NrZWRgIHdpdGggYFJFRkFDSVRPUkVfVElNRVNUQU1QYCBzZXQgZnJvbSB0aGUgY29tbWl0LgoKIyMjIEJ1aWxkaW5nIHJlbGVhc2UgYXJ0aWZhY3RzCgpgYGBiYXNoCiMgRnJvbSB0aGUgcmVwbyByb290LCBvbiBhIGNsZWFuIGNoZWNrb3V0IG9mIHRoZSByZWxlYXNlIGNvbW1pdApTT1VSQ0VfUkVWPSSpZ2l0IHJldi1wYXJzZSBIRUFEYAoKIyBCdWlsZCBhbmQgcHVzaCBpbW11dGFibGUgdmVyc2lvbmVkIGltYWdlcyAodGFnID0gY29tbWl0IFNIQSkKLi9zY3JpcHRzL3JlbGVhc2UvYnVpbGQtaW1hZ2VzLnNoIC0tc291cmNlLXJldiAiJFNPUVJDRV9SRVYiCgojIEJ1aWxkIGFuZCB2ZXJpZnkgY29udHJhY3QgV0FTTSAoY29udHJhY3QgSUQgKyBuZXR3b3JrIG1hcHBpbmcgaW4gbWFuaWZlc3QpCi4vc2NyaXB0cy9yZWxlYXNlL2J1aWxkLXdhc20uc2ggLS1zb3VyY2UtcmV2ICIkU09VUkNFX1JFViIgLS1uZXR3b3JrIHRlc3RuZXQKCiMgR2VuZXJhdGUgU0JPTSwgY2hlY2tzdW1zLCBhbmQgcHJvdmVuYW5jZSBmb3IgYWxsIGFydGlmYWN0cwouL3NjcmlwdHMvcmVsZWFzZS9nZW5lcmF0ZS1tZXRhZGF0YS5zaCAtLXNvdXJjZS1yZXYgIiRTT1VSQ0VfUkVWIgoKIyBWZXJpZnkgdGhlIHJlbGVhc2UgYnVuZGxlIGJlZm9yZSBwdWJsaXNoaW5nCi4vc2NyaXB0cy9yZWxlYXNlL3ZlcmlmeS1yZWxlYXNlLnNoIC0tYnVuZGxlIGRpc3QvcmVsZWFzZS8kU09VUkNFX1JFVgpgYGAKCkVhY2ggcmVsZWFzZSBidW5kbGUgKGBkaXN0L3JlbGVhc2UvPFNPUkNFX1JFVj4vYCkgY29udGFpbnM6CgpgYGAKbWFuaWZlc3QuanNvbiAgICAgICAgICAjIHNvdXJjZSByZXYsIHRvb2xjaGFpbiBwaW5zLCBhcnRpZmFjdCBkaWdlc3RzLCBjb250cmFjdCBJRC9uZXR3b3JrIG1hcHBpbmcKY2hlY2tzdW1zLnR4dCAgICAgICAgICAjIHNoYTI1NiBvZiBldmVyeSBhcnRpZmFjdApTQk9NL2Zyb250ZW5kLnNwZHggICAgICAjIFNQRFggU0JPTSBmb3IgdGhlIGZyb250ZW5kIGltYWdlClNCT00vYmFja2VuZC5zcGR4ICAgICAgICMgU1BEWCBTQk9NIGZvciB0aGUgYmFja2VuZCBpbWFnZQpTQk9NLzxjb250cmFjdD4uc3BkeCAgIyBTUERYIFNCT00gZm9yIGVhY2ggY29udHJhY3QgV0FTTQpwcm92ZW5hbmNlLmludG90bwAgICAgICAjIFNMWUEgcHJvdmVuYW5jZSBhdHRlc3RhdGlvbiBmb3IgdGhlIGJ1aWxkCnNpZ25hdHVyZXMvICAgICAgICAgICAjIGNvc2lnbiBzaWduYXR1cmVzIG92ZXIgdGhlIG1hbmlmZXN0CmBgYAoKIyMjIFNCT00gYW5kIHByb3ZlbmFuY2UKCi0gU0JPTSBhcmUgZ2VuZXJhdGVkIHdpdGggYFN5ZnRgIGZyb20gdGhlIGJ1aWx0IGltYWdlcyBhbmQgY29udHJhY3QgV0FTTSBhbmQgc3RvcmVkIGFzIFNQRFggYWxvbmdzaWRlIHRoZSBhcnRpZmFjdHMuCi0gUHJvdmVuYW5jZSBpcyBnZW5lcmF0ZWQgaW4gU0xZQSBpbi10b3RvIGZvcm1hdCBieSB0aGUgQ0kgYnVpbGQgd29ya2Zsb3cgKGAuZ2l0aHViL3dvcmtmbG93cy9yZWxlYXNlLnltbGApIGFuZCBzaWduZWQgd2l0aCB0aGUgcmVwb3NpdG9yeSByZWxlYXNlIGtleSAoY29zaWduKS4KLSBUaGUgbWFuaWZlc3QgcmVjb3JkcyB0aGUgU0hBMjU2IGRpZ2VzdCBvZiBldmVyeSBpbWFnZSBhbmQgV0FTTSBhcnRpZmFjdCwgYWxvbmcgd2l0aCB0aGUgY29udHJhY3QgSUQgYW5kIG5ldHdvcmsgdGhhdCBlYWNoIFdBU00gaXMgZGVwbG95ZWQgdG8uCi0gVmVyaWZpY2F0aW9uIGlzIGRvbmUgd2l0aCBgY29zaWduIHZlcmlmeS1ibG9iYCBhbmQgYGNvc2lnbiB2ZXJpZnktYXR0ZXN0YXRpb25gIGFnYWluc3QgdGhlIHJlbGVhc2Uga2V5IGFuZCB0aGUgcmVjb3JkZWQgc291cmNlIHJldmlzaW9uLgoKIyMjIFByb21vdGlvbiBnYXRlCgpQcm9tb3Rpb24gZG9lcyBub3QgcmVidWlsZCBhcnRpZmFjdHMuIFRoZSBwcm9tb3Rpb24gc2NyaXB0IGBzY3JpcHRzL3JlbGVhc2UvcHJvbW90ZS5zaGA6CgoxLiBEb3dubG9hZHMgdGhlIHJlbGVhc2UgYnVuZGxlIGZvciB0aGUgc291cmNlIHJldi4KMi4gVmVyaWZpZXMgdGhlIG1hbmlmZXN0IHNpZ25hdHVyZSBhbmQgdGhlIFNCT00vcHJvdmVuYW5jZSBhdHRlc3RhdGlvbnMuCjMuIENvbXBhcmVzIHRoZSBkaWdlc3Qgb2YgZWFjaCBhcnRpZmFjdCBhZ2FpbnN0IHRoZSBtYW5pZmVzdC4KNC4gUmVzb2x2ZXMgdGhlIGltYWdlIGJ5IGltbXV0YWJsZSBkaWdlc3QgKGByZWdpc3RyeS9pbWFnZUBzaGEyNTY6Li4uYCkgYW5kIGRlcGxveXMgdGhhdCBleGFjdCBkaWdlc3QuCjUuIFJlY29yZHMgdGhlIGRlcGxveWVkIGFydGlmYWN0IGhhc2ggYW5kIGNvbnRyYWN0IElEL25ldHdvcmsgbWFwcGluZyBpbiB0aGUgZGVwbG95bWVudCBsZWRnZXIgKGBkb2NzL2RlcGxveW1lbnQvZGVwbG95bWVudC1sZWRnZXIubWQ6KS4KCklmIGFueSBjaGVjayBmYWlscywgcHJvbW90aW9uIGV4aXRzIG5vbi16ZXJvIGFuZCBub3RoaW5nIGlzIGRlcGxveWVkLgoKIyMjIERlcGxveW1lbnQgdmVyaWZpY2F0aW9uCgpUaGUgZGVwbG95bWVudCB0b29saW5nIGBzY3JpcHRzL3JlbGVhc2UvZGVwbG95LnNoYCB2ZXJpZmllcyBhcnRpZmFjdCBpZGVudGl0eSBiZWZvcmUgYW5kIGFmdGVyIGRlcGxveW1lbnQ6CgpgYGBiYXNoCiMgVmVyaWZ5IGFuZCBkZXBsb3kgYSB2ZXJpZmllZCByZWxlYXNlIGJ1bmRsZQouL3NjcmlwdHMvcmVsZWFzZS9kZXBsb3kuc2ggLS1idW5kbGUgZGlzdC9yZWxlYXNlLyRTT1VSQ0VfUkVWIC0tZW52aXJvbm1lbnQgc3RhZ2luZwoKIyBSZWNvcmQgdGhlIGRlcGxveWVkIGFydGlmYWN0IGhhc2ggYW5kIGNvbnRyYWN0IG1hcHBpbmcgaW4gdGhlIGRlcGxveW1lbnQgbGVkZ2VyCi4vc2NyaXB0cy9yZWxlYXNlL3JlY29yZC1kZXBsb3ltZW50LnNoIC0tYnVuZGxlIGRpc3QvcmVsZWFzZS8kU09VUkNFX1JFVgpgYGAKClRoZSBkZXBsb3ltZW50IGxlZGdlciByZWNvcmRzLCBmb3IgZWFjaCBlbnZpcm9ubWVudDogdGhlIGRlcGxveWVkIGltYWdlIGRpZ2VzdCwgdGhlIGRlcGxveWVkIFdBU00gU0hBMjU2LCB0aGUgY29udHJhY3QgSUQsIHRoZSBuZXR3b3JrLCB0aGUgc291cmNlIHJldmlzaW9uLCBhbmQgdGhlIHRpbWVzdGFtcC4KCiMjIyBSb2xsYmFjayBhbmQgdmVyaWZpY2F0aW9uIHByb2NlZHVyZQoKUm9sbGJhY2sgdG8gYSBwcmV2aW91cyB2ZXJpZmllZCByZWxlYXNlIGlzIGRvbmUgYnkgcmUtZGVwbG95aW5nIHRoZSBpbW11dGFibGUgZGlnZXN0IHJlY29yZGVkIGluIHRoZSBkZXBsb3ltZW50IGxlZGdlciDigJQgbm8gcmVidWlsZCBpcyBpbnZvbHZlZC4gVGhlIHByb2NlZHVyZSBpcyBkb2N1bWVudGVkIGluIGBkb2NzL2RlcGxveW1lbnQvcm9sbGJhY2subWRgIGFuZCBpcyBleGVyY2lzZWQgaW4gYSBub24tcHJvZHVjdGlvbiBlbnZpcm9ubWVudCBieSB0aGUgYHJvbGxiYWNrLWRyaWxsYCBqb2IgaW4gYC5naXRodWIvd29ya2Zsb3dzL3JlbGVhc2UueW1sYC4gVGhlIGRyaWxsOgoKMS4gRGVwbG95cyByZWxlYXNlIE4gdG8gdGhlIHN0YWdpbmcgZW52aXJvbm1lbnQgYW5kIHJlY29yZHMgaXRzIGRpZ2VzdHMuCjIuIERlcGxveXMgcmVsZWFzZSBOICsgMSB0byBzdGFnaW5nIGFuZCByZWNvcmRzIGl0cyBkaWdlc3RzLgozLiBSb2xscyBiYWNrIHRvIHJlbGVhc2UgTiB1c2luZyB0aGUgcmVjb3JkZWQgaW1tdXRhYmxlIGRpZ2VzdHMuCjQuIFZlcmlmaWVzIHRoYXQgdGhlIHJ1bm5pbmcgaW1hZ2UgZGlnZXN0IGFuZCBjb250cmFjdCBXQVNNIGhhc2ggbWF0Y2ggcmVsZWFzZSBOIGFuZCB0aGF0IHRoZSBkZXBsb3ltZW50IGxlZGdlciBpcyB1cGRhdGVkLgoKSWYgYW55IHN0ZXAgZmFpbHMsIHRoZSBkcmlsbCBmYWlscyBhbmQgdGhlIHJlbGVhc2UgaXMgYmxvY2tlZC4KCvCfpJ0gQ29udHJpYnV0aW5nCkZvcmsgdGhlIHJlcG9zaXRvcnkKCkNyZWF0ZSBhIGZlYXR1cmUgYnJhbmNoIChnaXQgY2hlY2tvdXQgLWIgZmVhdHVyZS9BbWF6aW5nRmVhdHVyZSkKCkNvbW1pdCBjaGFuZ2VzIChnaXQgY29tbWl0IC1tICdBZGQgc29tZSBBbWF6aW5nRmVhdHVyZScpCgpQdXNoIHRvIGJyYW5jaCAoZ2l0IHB1c2ggb3JpZ2luIGZlYXR1cmUvQW1hemluZ0ZlYXR1cmUpCgpPcGVuIGEgUHVsbCBSZXF1ZXN0Cgrwn5OEIExpY2Vuc2UKVGhpcyBwcm9qZWN0IGlzIGxpY2Vuc2VkIHVuZGVyIHRoZSBNSVQgTGljZW5zZSAtIHNlZSB0aGUgTElDRU5TRSBmaWxlIGZvciBkZXRhaWxzLgoK8J+OkSBTdXBwb3J0CkZvciBzdXBwb3J0IG9wZW4gYW4gaXNzdWUgaW4gdGhlIEdpdEh1YiByZXBvc2l0b3J5Lgo=
+StellarCert - Wave Program Certificate System
+A decentralized certificate program management system built on the Stellar blockchain using React, NestJS, and Stellar SDK. This system allows for issuing, verifying, and managing digital certificate program credentials in a secure, transparent, and immutable manner.
+
+🚀 Getting Started
+
+Get the stack running from a clean clone:
+
+```bash
+# 1. Install root dependencies (this does NOT populate backend/node_modules)
+npm install
+
+# 2. Install backend dependencies separately
+(cd backend && npm install)
+
+# 3. Create the compose environment file (docker compose reads ./.env)
+#    Every value in .env.example is a required placeholder; docker-compose.yml
+#    fails fast with ${VAR:?} if one is missing or empty.
+cp .env.example .env
+
+# 4. Start Postgres and Redis
+docker compose up -d postgres redis
+
+# 5. Copy the backend environment file
+cp backend/.env.example backend/.env
+
+# 6. Start development servers (backend :3000, frontend :5173)
+npm run dev
+
+# 7. Verify the API is running
+curl http://localhost:3000/api/v1/health
+```
+
+> **Note on env vars:** The app starts with warnings for missing Stellar, Soroban, and storage config — this is fine for local development. Only `JWT_SECRET` and the database config (`DB_*`) are required to boot. See the [Configuration](#configuration) section for details.
+
+🌝 Features
+Core Features
+Certificate Issuance: Authorized issuers can create digital certificates credentials
+
+Real-time Verification: Anyone can verify the authenticity of certificates using Stellar transactions
+
+Certificate Revocation: Issuers can revoke certificates when needed
+
+Issuer Management: Admin can authorize/remove certificate issuers
+
+Expiry Management: Automatic expiration of certificates based on Stellar sequence numbers
+
+Statistics Dashboard: Track total certificates, active certificates, and issuer activity
+
+**Soroban Smart Contract Integration**: On-chain certificate operations with multi-signature support
+
+**Rate Limiting**: IP-based rate limiting on public verification endpoints for security
+
+Technical Features
+React Frontend: Modern, responsive UI with real-time updates
+
+NestJS Backend: Scalable API with JWT authentication
+
+**Soroban Smart Contracts**: Decentralized certificate management on Stellar blockchain
+
+Stellar Integration: Smart contract-like functionality using Stellar transactions
+
+**Security Features**: Rate limiting, authentication, and authorization
+
+QR Code Generation: Easy certificate sharing and verification
+
+PDF Export: Download certificates as PDF documents
+
+揰🏗️ project structure
+
+stellarcert/
+├── frontend/ # React Application
+│   ├── public/
+│   ├── src/
+│   │   ├── components/ # Reusable components
+│   │   │   ├── Certificate/
+│   │   │   ├── Dashboard/
+│   │   │   ├── Issuer/
+│   │   │   └── Shared/
+│   │   ├── contexts/ # React contexts (Auth, Stellar)
+│   │   ├── hooks/ # Custom React hooks
+│   │   ├── pages/ # Page components
+│   │   │   ├── Home/
+│   │   │   ├── Verify/
+│   │   │   ├── Issue/
+│   │   │   ├── Dashboard/
+│   │   │   └── Admin/
+│   │   ├── services/ # API and Stellar services
+│   │   ├── utils/ # Helper functions
+│   │   ├── types/ # TypeScript definitions
+│   │   └── styles/ # CSS/SCSS files
+│   ├── package.json
+│   └── vite.config.ts # or webpack.config.js
+│
+├── backend/ # NestJS Application
+│   ├── src/
+│   │   ├── modules/
+│   │   │   ├── auth/ # Authentication
+│   │   │   ├── certificate/# Certificate management
+│   │   │   ├── issuer/ # Issuer management
+│   │   │   ├── stellar/ # Stellar integration
+│   │   │   └── user/ # User management
+│   │   ├── common/
+│   │   │   ├── guards/ # Auth guards
+│   │   │   ├── filters/ # Exception filters
+│   │   │   ├── interceptors/# Interceptors
+│   │   │   └── decorators/ # Custom decorators
+│   │   ├── config/ # Configuration files
+│   │   ├── contracts/ # Smart contract ABIs (if using Soroban)
+│   │   ├── database/ # Database models and migrations
+│   │   │   ├── entities/
+│   │   │   ├── migrations/
+│   │   │   └── repositories/
+│   │   └── utils/ # Utility functions
+│   ├── test/ # Test files
+│   ├── package.json
+│   ├── nest-cli.json
+│   └── tsconfig.json
+│
+├── stellar-contracts/ # Stellar Soroban Smart Contracts
+│   ├── src/
+│   │   ├── lib.rs # Main certificate contract
+│   │   ├── multisig.rs # Multi-signature operations
+│   │   ├── crl.rs # Certificate revocation lists
+│   │   ├── types.rs # Shared types and data structures
+│   │   └── admin_multisig.rs # Admin multisig functionality
+│   ├── tests/ # Contract tests
+│   └── Cargo.toml
+│
+├── shared/ # Shared code between frontend/backend
+│   ├── types/ # Shared TypeScript types
+│   ├── constants/ # Shared constants
+│   └── utils/ # Shared utilities
+│
+├── docker/ # Docker configuration
+│   ├── Dockerfile.frontend
+│   ├── Dockerfile.backend
+│   └── docker-compose.yml
+│
+├── docs/ # Documentation
+│   ├── api/ # API documentation
+│   ├── stellar/ # Stellar integration docs
+│   └── deployment/ # Deployment guides
+│
+├── scripts/ # Utility scripts
+│   ├── setup-stellar.js
+│   ├── deploy-contracts.js
+│   └── seed-database.js
+│
+├── .env.example # Environment variables template
+├── .gitignore
+├── package.json # Root package.json (workspace)
+├── README.md # This file
+├── LICENSE
+└── docker-compose.yml # Full stack docker compose
+
+📋 Prerequisites
+Required Software
+Node.js (v18 or higher)
+npm or yarn or pnpm
+
+Docker & Docker Compose (required for Postgres and Redis in local dev)
+
+Stellar CLI Tools (for contract deployment)
+
+Stellar Requirements
+Stellar Testnet/Livenet account
+
+Stellar SDK (@stellar/stellar-sdk)
+
+Friendbot (for testnet funding)
+
+揰🚀 Installation
+
+1. Clone the Repository
+   bash
+   git clone https://github.com/Servora/StellarCert.git
+   cd stellarcert
+2. Setup Backend
+   bash
+   cd backend
+   cp .env.example .env
+
+# Edit .env with your configuration
+# Never paste your Stellar admin secret into shell history or logs.
+# deploy-contracts.sh writes the admin secret to a 0600 file instead of echoing it.
+
+npm install
+npm run db:migrate
+npm run seed 3. Setup Frontend
+bash
+cd ../frontend
+cp .env.example .env
+npm install 4. Setup Stellar (Optional - for contract deployment)
+bash
+cd ../stellar-contracts
+rustup target add wasm32-unknown-unknown
+cargo install --locked soroban-cli
+🏃️‍‍ Running the Application
+Development Mode
+Option A: Using Docker Compose (Recommended)
+bash
+
+# From root directory
+
+docker-compose up --build
+Option B: Running Separately
+Backend:
+
+bash
+cd backend
+npm run start:dev
+Frontend:
+
+bash
+cd frontend
+npm run dev
+Production Mode
+bash
+
+# Build all services
+npm run build
+
+# Start in production
+npm start
+🧪 Testing
+Backend Tests
+Bash
+cd backend
+npm test # Unit tests
+npm run test:e2e # E-1 tests
+npm run test:cov # Test coverage
+Frontend Tests
+bash
+cd frontend
+npm test # Unit tests
+npm run test:e2e # E-1 tests
+Frontend Linting
+bash
+cd frontend
+npm run lint # ESLint 9 flat config (eslint.config.js)
+Stellar Contract Tests
+bash
+cd stellar-contracts
+cargo test
+🔧 Configuration
+Environment Variables
+
+**Required to boot:**
+- `JWT_SECRET` — any string works for local development (e.g. `dev-secret`). The value shipped in `.env.example` (`change-me-dev-only-not-a-real-secret`) is a deliberately fake placeholder and must be replaced before any real deployment.
+- `DB_HOST`, `DB2_PORT`, `DB2_USERNAME`, `DB_PASSWORD`, `DB_NAME` — defaults in `.env.example` match `docker compose`
+
+**Optional (the app will start with warnings):**
+- `STELLAR_ISSUER_SECRET_KEY` / `STELLAR_ISSUER_PUBLIC_KEY` — only needed for certificate operations
+- `SOROBAN_REC_CONTRACT_ID`, `SOROBAN_RPC_URL`, `SOROBAN_NETWORK_PASSPHRAE`, `SOROBAN_SOURCE_SECRET_KEY`, `SSOROBAN_FEE_ACCOUNT` — Soroban contract integration (see `backend/.env.soroban.example`)
+- `SENTRY_DSN` / `ENABLE_SENTRY` — error reporting
+- `STORAGE_REQUIRED`, `STORAGE_PROVIDER`, `STORAGE_BUCKET`, `STORAGE_REGION`, `STORAGE_ENDPOINT`, `STORAGE_ACCESS_KEY`, `STORAGE_SECRET_KEY` — file storage (S3/MinIO); set `STORAGE_REQUIRED=false` to run without it
+- `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_USER`, `EMAIL_PASSWORD`, `EMAIL_FROM`, `EMAIL_SECURE`, `EMAIL_QUEUE_NAME` — outgoing email (referenced in `backend/src/main.ts`)
+- `AUDIT_RETENTION_DAYNS`, `DUPLICATE_DETECTION_*` — feature toggles with safe defaults
+
+Backend (.env):
+
+```env
+# Runtime environment — keep this as development for local work; only set production
+# for a real deployment.
+NODE_ENV=development
+
+# Database
+DB_HOST=localhost
+DB_PORT=5432
+DB_USERNAME=stellarwave
+DB_PASSWORD=stellarwave
+DB_NAME=stellarwave
+DATABASE_URL=postgresql://stellarwave:stellarwave@localhost:5432/stellarwave
+
+# Stellar
+STELLAR_NETWORK=TESTNET
+STELLAR_HORIZON_URL=https://horizon-testnet.stellar.org
+# Supply secrets via a 0600 file or your secret manager; never commit or echo them.
+STELLAR_SECRET_KEY=your_secret_key
+
+# JWT
+
+JWT_SECRET=your_jwt_secret
+JWT_EXPIRY=24h
+
+# Server
+PORT=3000
+CORS_ORIGIN=http://localhost:5173
+
+# Storage (S3/MinIO)
+STORAGE_REQUBED=false
+STORAGE_PROVIDER=minio
+STORAGE_BUCKET=stellarcert
+STORAGE_REGION=us-east-1
+STORAGE_ENDPOINT=http://localhost:9000
+STORAGE_ACCESS_KEY=change-me-dev-only-not-a-real-key
+STORAGE_SECRET_KEY=change-me-dev-only-not-a-real-secret
+
+# Email (referenced in backend/src/main.ts)
+EMAIL_HOST=localhost
+EMAIL_PORT=587
+EMAIL_USER=change-me-dev-only-not-a-real-user
+EMAIL_PASSWORD=change-me-dev-only-not-a-real-password
+EMAIL_FROM=noreply@localhost
+EMAIL_SECURE=false
+EMAIL_QUEUE_NAME=email-queue
+
+# Feature toggles
+AUDIT_RETENTION_DAYS=90
+DUPLICATE_DETECTION_ENABLED=true
+DUPLICATE_DETECTION_WINDOW_DAYS=30
+
+# Error reporting
+ENPABLE_SENTRY=false
+SENTRY_DSN=
+```
+
+Frontend (.env):
+
+```env
+VITE_API_URL=http://localhost:3000/api/v1
+VITE_STELLAR_NETWORK=TESTNET
+VITE_HORIZON_URL=https://horizon-testnet.stellar.org
+```
+
+” Why `.env.example` defaults to development
+
+The example is meant to be copied verbatim for local work, as the guide instructs. It therefore:
+
+- defaults `NODE_ENV=development` so developers do not accidentally run production mode locally;
+- marks every secret with a literal `change-me-dev-only-not-a-real-secret` placeholder so it is obviously fake and cannot be mistaken for a real credential;
+- consolidates all required keys (including the Soroban block, `STORAGE_REQUIRED`, and the `EMAIL*` / `EMAIL_QUEUE_NAME` variables) so there is one documented template instead of separate files that drift apart.
+
+Before deploying anywhere outside local development, replace every placeholder value and set `NODE_ENV=production`.
+
+📡 API Base URL & Versioning
+The backend applies a global `api` prefix and URI-based versioning with default version `1` (see `backend/src/main.ts`):
+
+```
+app.setGlobalPrefix('api');
+app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
+```
+
+Every route is therefore served under `/api/v1/...`. A plain `/api/...` path returns **404** — this has caused issues in docker-compose and healthcheck configs in the past.
+
+Base URL (local dev):
+```
+http://localhost:3000/api/v1
+```
+
+Quick smoke-test (health check):
+```bash
+curl http://localhost:3000/api/v1/health
+```
+
+The Swagger UI (available at `http://localhost:3000/api/docs` in development) reflects the versioned paths — all routes shown there include the `/v1/` segment.
+
+**Important for configuration:** make sure environment variables that point at the API use the versioned base URL:
+```env
+# ✅ Correct
+VITE_API_URL=http://localhost:3000/api/v1
+
+# ❌ Wrong — returns 404
+VITE_API_URL=http://localhost:3000/api
+```
+
+¤ Stellar Integration
+Key Components
+Transaction Builder: Creates Stellar transactions for certificate operations
+
+Account Manager: Handles issuer and user accounts
+
+Memo Fields: Uses memo fields to store certificate metadata
+
+Operations:
+
+Issue: Creates trustlines and sends assets
+
+Verify: Checks transaction history
+
+Revoke: Updates account flags
+
+Smart Contract Flow (Soroban)
+rst
+// Example Soroban contract function
+fn issue_certificate(
+env: Env,
+issuer: Address,
+recipient: Address,
+cert_data: Bytes
+) -> Result<(), Error>;
+🤔 Contributing
+Fork the repository
+
+Create a feature branch (git checkout -b feature/AmazingFeature)
+
+Commit changes (git commit -m 'Add some AmazingFeature')
+
+Push to branch (git push origin feature/AmazingFeature)
+
+Open a Pull Request
+📄 License
+This project is licensed under the MIT License - see the LICENSE file for details.
+🎑 Support
+For support open an issue in the GitHub repository.

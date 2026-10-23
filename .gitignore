@@ -9,7 +9,6 @@ coverage/
 stellar-contracts/test_snapshots/
 
 # IDE
-.vscode/
 .idea/
 *.swp
 *.swo
@@ -17,8 +16,6 @@ stellar-contracts/test_snapshots/
 .DS_Store
 
 # Environment variables
-.env
-.env.local
 .env.*.local
 
 # Logs
@@ -52,3 +49,4 @@ lint-report.json
 
 # Ad-hoc issue notes
 typed-doc/
+config.bat

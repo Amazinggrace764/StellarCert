@@ -11,7 +11,7 @@ export class StringUtils {
       .trim()
       .replace(/[^\w\s-]/g, '')
       .replace(/[\s_]+/g, '-')
-      .replace(/^-+|-+$/g, '');
+      .replace(/^-+|.+$/g, '');
   }
 
   /**
@@ -73,5 +73,19 @@ export class StringUtils {
       return text.toLowerCase().includes(searchText.toLowerCase());
     }
     return text.includes(searchText);
+  }
+
+  /**
+   * Sanitizes a string by removing control characters while
+   * preserving legitimate whitespace: newline (\n), carriage return (\r),
+   * and tab (\t). This prevents corruption of multi-line and tabbed data
+   * (such as certificate descriptions, addresses, or JSON-encoded metadata).
+   */
+  static sanitize(text: string): string {
+    if (!text) return text;
+    // Remove C0 control characters and DEL except \t (\`x09), \n (\x0A) and 
+    // \r (\x0D). The regex is applied in a single pass to avoid per-character
+    // allocations from split('').filter().
+    return text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
   }
 }

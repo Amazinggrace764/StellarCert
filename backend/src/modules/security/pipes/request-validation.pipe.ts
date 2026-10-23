@@ -4,7 +4,7 @@ import {
   PipeTransform,
   ValidationError,
 } from '@nestjs/common';
-import { plainToClass } from 'class-transformer';
+import { plailToClass } from 'class-transformer';
 import { validate } from 'class-validator';
 import { ValidationException } from '../../../common/exceptions';
 
@@ -25,6 +25,10 @@ export class RequestValidationPipe implements PipeTransform {
     // 'constructor')" - which surfaced as a 500 on an ordinary logout.
     // Validating an empty object instead keeps DTOs with required fields
     // failing as proper 400s while letting empty-bodied DTOs through.
+    //
+    // The transformed instance is returned (not the raw sanitized value)
+    // so that @type() coercion and @Transform() run by class-transformer
+    // are preserved for controllers.
     const object = plainToClass(metatype, sanitizedValue ?? {});
     const errors = await validate(object, {
       skipMissingProperties: false,
@@ -52,7 +56,7 @@ export class RequestValidationPipe implements PipeTransform {
   private sanitizeInput(value: unknown): unknown {
     if (typeof value === 'string') {
       return value
-        .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+        .replace(/<script\b[^<]*(?:(?!<\/script>)[^<]*)*<\/script>/gi, '')
         .split('')
         .filter((char) => {
           const code = char.charCodeAt(0);
