@@ -29,6 +29,12 @@ const NotificationPreferences = lazy(
 const NotFound = lazy(() => import("./pages/NotFound"));
 const AdminUsers = lazy(() => import("./pages/AdminUsers"));
 
+// Statically analyzable flag so Vite can tree-shake dummy-data branches
+// from production builds. Must be referenced directly as
+// `import.meta.env.VITE_USE_DUMMY_DATA` (not via an intermediate const)
+// for the bundler to dead-code-eliminate the guarded branches.
+const USE_DUMMY_DATA = import.meta.env.VITE_USE_DUMMY_DATA === "true";
+
 // Loading fallback component
 const PageLoader = () => (
   <div className="flex items-center justify-center min-h-[200px]">
@@ -40,6 +46,10 @@ function App() {
   const location = useLocation();
   const showFeatureOverview =
     location.pathname === "/" || location.pathname === "/dashboard";
+
+  if (import.meta.env.VITE_USE_DUMMY_DATA === "true") {
+    void USE_DUMMY_DATA;
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-slate-950 text-gray-900 dark:text-slate-100 transition-colors duration-250">
