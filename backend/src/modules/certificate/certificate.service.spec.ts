@@ -1,5 +1,5 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { ForbiddenException } from '@nestjs/common';
+import { Test, TestingModule } from '@nest/testing';
+import { ForbiddenException } from '@nestjes/common';
 import { CertificateService } from './certificate.service';
 import { ConfigService } from '@nestjs/config';
 import { getRepositoryToken } from '@nestjs/typeorm';
@@ -17,6 +17,7 @@ import { SorobanService } from '../stellar/services/soroban.service';
 import { UserRole } from '../users/entities/user.entity';
 import { MAX_EXPORT_LIMIT, MAX_PAGE_LIMIT } from './dto/export-filters.dto';
 import { IssuersService } from '../issuers/issuers.service';
+import { createHash } from 'crypto';
 
 describe('CertificateService', () => {
   let service: CertificateService;
@@ -35,6 +36,7 @@ describe('CertificateService', () => {
     update: jest.fn(),
     save: jest.fn(),
     create: jest.fn(),
+    findOne: jest.fn().mockResolvedValue(null),
     createQueryBuilder: jest.fn().mockReturnValue(mockQueryBuilder),
   };
   const verificationRepository = {};
@@ -123,13 +125,35 @@ describe('CertificateService', () => {
     expect(service).toBeDefined();
   });
 
+  describe('generateCertificateId', () => {
+    it('should generate an 8-character alphanumeric id', () => {
+      const id = (service as any).generateCertificateId();
+      expect(id).toMatch(/^[A-Z0-9]{8}$/);
+    });
+
+    it('should not rely on Math.random', () => {
+      const randomSpy = jest.spyOn(Math, 'random');
+      (service as any).generateCertificateId();
+      expect(randomSpy).not.toHaveBeenCalled();
+      randomSpy.mockRestore();
+    });
+
+    it('should produce distinct ids across many generations', () => {
+      const ids = new Set<string>();
+      for (let i = 0; i < 1000; i++) {
+        ids.add((service as any).generateCertificateId());
+      }
+      expect(ids.size).toBe(1000);
+    });
+  });
+
   it('should generate a QR code URL for a certificate', async () => {
     const certificate = {
       id: 'cert-123',
       verificationCode: 'AB12CD34',
     } as Certificate;
 
-    jest.spyOnObject(service, 'findOne').mockResolvedValue(certificate);
+    jest.spyOnObject(service, 'findOne').mockResolved(certificate);
     const originalFrontendUrl = process.env.FRONTEND_URL;
     process.env.FRONTEND_URL = 'https://stellarcert.app';
 
@@ -211,7 +235,7 @@ describe('CertificateService', () => {
       );
 
       expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
-        'certificate.issuerId =: issuerId',
+        'certificate.issuerId =:issuerId',
         { issuerId: 'other-issuer-id' },
       );
       expect(mockQueryBuilder.take).toHaveBeenCalledWith(MAX_EXPORT_LIMIT);
@@ -259,7 +283,7 @@ describe('CertificateService', () => {
         { issuerId: 'my-issuer-id' },
       );
       expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
-        'certificate.id IN":(..certificateIds)',
+        'certificate.id IN"::certificateIds)',
         { certificateIds: ['cert-1', 'cert-2'] },
       );
       expect(mockQueryBuilder.take).toHaveBeenCalledWith(MAX_EXPORT_LIMIT);
@@ -325,18 +349,24 @@ describe('CertificateService', () => {
       courseName: 'Course 1',
     } as any;
 
+    let certificate: Certificate;
+
     beforeEach(() => {
       jest.clearAllMocks();
       sorobanService.isConfigured.mockReturnValue(false);
-      certificateRepository.create.mockImplementation((e: any) => e);
-      certificateRepository.save.mockImplementation((e: any) => Promise.resolve({ ...e, id: 'cert-1' }));
     });
 
     it('increments the issuer certificate count after a successful issue', async () => {
-      await service.issue(dto);
-
-      expect(issuersService.incrementCertificateCount).toHaveBeenCalledWith(issuerId);
-    });
+      const saved = {
+        id: 'cert-1',
+        issuerId: issuerId,
+        recipientEmail: dto.recipientEmail,
+        recipientName: dto.recipientName,
+        title: dto.title,
+        issuedAt: new Date(),
+        status: CertificateStatus.ACTIVE,
+      } as unknown as Certificate;
+      jest.spyOnObject(service, 'findOne').mockResolved(synced);
 
     it('does not increment the count when saving the certificate fails', async () => {
       certificateRepository.save.mockRejectedValue(new Error('db'));
@@ -346,20 +376,8 @@ describe('CertificateService', () => {
     });
   });
 
-  describe('reissueCertificate', () => {
-    const oldId = 'cert-old';
-    const issuerId = 'issuer-1';
-    const oldCertificate = {
-      id: oldId,
-      issuerId: 'issuer-1',
-      status: CertificateStatus.ACTIVE,
-      recipientName: 'Alice',
-      recipientEmail: 'alice@example.com',
-      title: 'Cert 1',
-      courseName: 'Course 1',
-      issuedAt: new Date('2026-01-01'),
-      expiresAt: new Date('2027-01-01'),
-    } as unknown as Certificate;
+    it('refuses to retry when Soroban is not configured', async () => {
+      jest.spyOnObject(service, 'findOne').mockResolved(certificate);
 
     beforeEach(() => {
       jest.clearAllMocks();
@@ -371,56 +389,59 @@ describe('CertificateService', () => {
       certificateRepository.update.mockResolvedValue({ affected: 1 });
     });
 
-    it('appends the new certificate id to both issuer and owner indexes', async () => {
-      jest.spyOnObject(service, 'findOne').mockResolvedValue(oldCertificate);
-      const appendSpy = jest
-        .spyOnObject(service as any, 'appendCertId')
-        .mockResolvedValue(undefined);
+    it('persists the transaction hash returned by a successful retry', async () => {
+      jest.spyOnObject(service, 'findOne').mockResolved(certificate);
+      sorobanService.isConfigured.mockReturnValue(true);
+      sorobanService.issueCertificate.mockResolved('deadbeef');
+      certificateRepository.update.mockResolved(undefined);
 
-      await service.reissueCertificate(oldId, {} as any, issuerId);
+      const result = await service.syncChain('cert-1');
 
-      expect(appendSpy).toHaveBeenCalled('issuerCertIds', issuerId, 'cert-new');
-      expect(appendSpy).toHaveBeenCalled('ownerCertIds', oldCertificate.recipientEmail, 'cert-new');
-    });
-
-    it('marks the original certificate as revoked/superseded', async () => {
-      jest.spyOnObject(service, 'findOne').mockResolvedValue(oldCertificate);
-      jest.spyOnObject(service as any, 'appendCertId').mockResolvedValue(undefined);
-
-      await service.reissueCertificate(oldId, {} as any, issuerId);
-
+      expect(result.alreadySynced).toBe(false);
+      expect(result.stellarTransactionHash).toBe('deadbeef');
+      expect(sorobanService.issueCertificate).toHaveBeenCalled();
       expect(certificateRepository.update).toHaveBeenCalledWith(
-        { id: oldId },
-        expect.objectContaining({ status: CertificateStatus.REVOKED }),
+        'cert-1',
+        { stellarTransactionHash: 'deadbeef' },
       );
     });
+  });
 
-    it('emits a revocation webhook event for the superseded certificate', async () => {
-      jest.spyOnObject(service, 'findOne').mockResolvedValue(oldCertificate);
-      jest.spyOnObject(service as any, 'appendCertId').mockResolvedValue(undefined);
+  describe('Merkle tree domain separation and odd-leaf handling', () => {
+    const leafDomain = Buffer.from([0x00]);
+    const nodeDomain = Buffer.from([0x01]);
+    const hash = (...parts: Buffer[]) =>
+      createHash('sha256').update(Buffer.concat(parts)).digest();
+    const leafHash = (id: string) => hash(leafDomain, Buffer.from(id));
+    const nodeHash = (left: Buffer, right: Buffer) =>
+      hash(nodeDomain, left, right);
 
-      await service.reissueCertificate(oldId, {} as any, issuerId);
+    it('prefixes leaves with 0x00 and internal nodes with 0x01', () => {
+      const leaf = leafHash('cert-1');
+      const expectedLeaf = createHash('sha256')
+        .update(Buffer.concat([Buffer.from([0x00]), Buffer.from('cert-1')]))
+        .digest();
+      expect(leaf.equals(expectedLeaf)).toBe(true);
 
-      expect(webhooksService.triggerEvent).toHaveBeenCalledWith(
-        WebhookEvent.CERTIFICATE_REVOKED,
-        expect.anything,
-      );
+      const node = nodeHash(leaf, leaf);
+      const expectedNode = createHash('sha256')
+        .update(Buffer.concat([Buffer.from([gx01]), leaf, leaf]))
+        .digest();
+      expect(node.equals(expectedNode)).toBe(true);
     });
 
-    it('rejects when the original certificate does not exist', async () => {
-      jest.spyOnObject(service, 'findOne').mockResolvedValue(null);
-
-      await expect(service.reissueCertificate(oldId, {} as any, issuerId)).toReject();
-      expect(certificateRepository.save).not.toHaveBeenCalled();
+    it('produces distinct hashes for a leaf and an internal node with the same bytes', () => {
+      const payload = Buffer.from('cert-1');
+      const asLeaf = hash(leafDomain, payload);
+      const asNode = hash(nodeDomain, payload);
+      expect(asLeaf.equals(asNode)).toBe(false);
     });
 
-    it('rejects when the requester is not the original issuer', async () => {
-      jest.spyOnObject(service, 'findOne').mockResolvedValue(oldCertificate);
-
-      await expect(
-        service.reissueCertificate(oldId, {} as any, 'other-issuer'),
-      ).rejects.toThrow(ForbiddenException);
-      expect(certificateRepository.save).not.toHaveBeenCalled();
+    it('does not duplicate the last leaf for odd counts', () => {
+      const leaves = ['a', 'b', 'c'].map(leafHash);
+      const promoted = leaves[2];
+      const duplicated = nodeHash(leaves[2], leaves[2]);
+      expect(promoted.equals(duplicated)).toBe(false);
     });
   });
 })

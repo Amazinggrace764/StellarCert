@@ -1,4 +1,9 @@
-import { Injectable, ConflictException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  ConflictException,
+  Logger,
+  Optional,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Certificate } from '../entities/certificate.entity';
@@ -8,6 +13,23 @@ import { UserRole } from '../../users/entities/user.entity';
 import { CertificateStatus } from '../constants/certificate-status.enum';
 import { CertificateIndexService } from './certificate-index.service';
 
+/**
+ * Boundary contract for synchronizing revocations with the CRL.
+ *
+ * The CRL is the authoritative source for revocation checks, so the main
+ * contract status must only be flipped once the CRL entry has been written.
+ * Implementations are expected to be idempotent: revoking an already-revoked
+ * certificate must succeed without creating duplicate CRL entries.
+ */
+export interface CrlRevocationSync {
+  revokeCertificate(
+    certificateId: string,
+    issuerId: string,
+    reason?: string,
+    revokedAt?: Date,
+  ): Promise<void>;
+}
+
 @Injectable()
 export class CertificateRevocationService {
   private readonly logger = new Logger(CertificateRevocationService.name);
@@ -16,7 +38,8 @@ export class CertificateRevocationService {
     @InjectRepository(Certificate)
     private readonly certificateRepository: Repository<Certificate>,
     private readonly webhooksService: WebhooksService,
-    private readonly certificateIndexService: CertificateIndexService,
+    @Optional()
+    private readonly crlRevocationSync?: CrlRevocationSync,
   ) {}
 
   async revoke(id: string, reason?: string): Promise<Certificate> {
@@ -29,14 +52,29 @@ export class CertificateRevocationService {
     }
 
     const revokedAt = new Date();
-    certificate.status = CertificateStatus.REVOKED;
-    if (reason) {
-      certificate.metadata = {
-        ...certificate.metadata,
-        revocationReason: reason,
+
+    // Synchronize the CRL first so a certificate can never be revoked in the
+    // main contract while still passing CRL checks. The CRL write is
+    // idempotent, so re-revoking an already-revoked certificate is safe.
+    if (this.crlRevocationSync) {
+      await this.crlRevocationSync.revokeCertificate(
+        certificate.id,
+        certificate.issuerId,
+        reason,
         revokedAt,
-      };
+      );
+    } else {
+      this.logger.warn(
+        `CRL revocation sync is not configured; certificate ${id} was revoked in the main contract only`,
+      );
     }
+
+    certificate.status = CertificateStatus.REVOKED;
+    certificate.metadata = {
+      ...certificate.metadata,
+      ...(reason ? { revocationReason: reason } : {}),
+      revokedAt,
+    };
 
     const savedCertificate = await this.certificateRepository.save(certificate);
 

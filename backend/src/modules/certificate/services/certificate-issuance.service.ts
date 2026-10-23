@@ -228,6 +228,10 @@ export class CertificateIssuanceService {
     return expiry;
   }
 
+  /**
+   * Generates a cryptographically secure 8-character verification code
+   * and retries on collision against the unique DB constraint.
+   */
   private async generateVerificationCode(): Promise<string> {
     const maxRetries = 10;
     for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -243,6 +247,10 @@ export class CertificateIssuanceService {
     );
   }
 
+  /**
+   * Generates a cryptographically secure certificate ID (`CERT-<YEAR>-<8 chars>`)
+   * and retries on collision against the unique DB constraint.
+   */
   private async generateCertificateId(): Promise<string> {
     // Use the UTC year so certificate IDs are stable across timezones.
     const year = new Date().getUTCFullYear();
