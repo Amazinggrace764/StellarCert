@@ -182,6 +182,8 @@ Friendbot (for testnet funding)
    cp .env.example .env
 
 # Edit .env with your configuration
+# Never paste your Stellar admin secret into shell history or logs.
+# deploy-contracts.sh writes the admin secret to a 0600 file instead of echoing it.
 
 npm install
 npm run db:migrate
@@ -268,6 +270,7 @@ DATABASE_URL=postgresql://user:password@localhost:5432/stellarwave
 
 STELLAR_NETWORK=TESTNET
 STELLAR_HORIZON_URL=https://horizon-testnet.stellar.org
+# Supply secrets via a 0600 file or your secret manager; never commit or echo them.
 STELLAR_SECRET_KEY=your_secret_key
 
 # JWT

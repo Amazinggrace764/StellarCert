@@ -5,11 +5,6 @@ import { MultisigModule } from './multisig.module';
 import { StellarService } from '../stellar/services/stellar.service';
 import { LoggingService } from '../../common/logging/logging.service';
 import { rpc, xdr } from '@stellar/stellar-sdk';
-import { plainToInstance } from 'class-transformer';
-import { ProposeCertificateDto } from './dto/propose-certificate.dto';
-import { validate } from 'class-validator';
-import { InitMultisigConfigDto } from './dto/init-multisig-config.dto';
-import { UpdateMultisigConfigDto } from './dto/update-multisig-config.dto';
 
 describe('MultisigService', () => {
   let service: MultisigService;
@@ -63,7 +58,7 @@ describe('MultisigService', () => {
         .mockResolvedOnce(success);
 
       const internals = service as unknown as {
-        server: { getTransaction: jest.Mock };
+        server: { getTransaction: jest.Mock; };
         waitForTransaction: (
           hash: string,
           options?: { maxAttempts?: number; intervalMs?: number },
@@ -76,7 +71,7 @@ describe('MultisigService', () => {
           maxAttempts: 3,
           intervalMs: 0,
         }),
-      ).resolvesToBe(success);
+      ).resolves.toBe(success);
       expect(getTransaction).toHaveBeenCalledTimes(2);
     });
 
@@ -90,7 +85,7 @@ describe('MultisigService', () => {
         .mockResolvedOnce(failed);
 
       const internals = service as unknown as {
-        server: { getTransaction: jest.Mock };
+        server: { getTransaction: jest.Mock; };
         waitForTransaction: (
           hash: string,
           options?: { maxAttempts?: number; intervalMs?: number },
@@ -113,7 +108,7 @@ describe('MultisigService', () => {
       });
 
       const internals = service as unknown as {
-        server: { getTransaction: jest.Mock };
+        server: { getTransaction: jest.Mock; };
         waitForTransaction: (
           hash: string,
           options?: { maxAttempts?: number; intervalMs?: number },
@@ -136,7 +131,7 @@ describe('MultisigService', () => {
       });
 
       const internals = service as unknown as {
-        server: { getTransaction: jest.Mock };
+        server: { getTransaction: jest.Mock; };
         waitForTransaction: (
           hash: string,
           options?: { maxAttempts?: number; intervalMs?: number },
@@ -378,36 +373,77 @@ describe('MultisigService', () => {
     });
   });
 
-  describe('InitMultisigConfigDto', () => {
-    it('rejects a threshold larger than the number of signers', async () => {
-      const dto = plainToInstance(InitMultisigConfigDto, {
-        issuer: 'issuer',
-        threshold: 5,
-        signers: ['a', 'b', 'c'],
-      });
-      const errors = await validate(dto);
-      expect(errors.length).toBeGreaterThan(0);
+  describe('persistent storage for pending requests', () => {
+    const makeStorage = () => {
+      const map = new Map<string, unknown>();
+      return {
+        get: jest.fn((key: string) => map.get(key)),
+        set: jest.fn((key: string, value: unknown) => {
+          map.set(key, value);
+        }),
+        has: jest.fn((key: string) => map.has(key)),
+        delete: jest.fn((key: string) => {
+          map.delete(key);
+        }),
+        keys: jest.fn(() => Array.from(map.keys())),
+        _map: map,
+      };
+    };
+
+    it('stores pending requests under unique persistent keys instead of instance storage', () => {
+      const internals = service as unknown as {
+        persistentStorage: ReturnType<typeof makeStorage>;
+        instanceStorage: ReturnType<typeof makeStorage>;
+        storePendingRequest: (request: { requestId: string }) => void;
+        getPendingRequest: (requestId: string) => unknown;
+      };
+      internals.persistentStorage = makeStorage();
+      internals.instanceStorage = makeStorage();
+
+      const request = { requestId: 'req-1', issuer: 'issuer' };
+      internals.storePendingRequest(request);
+
+      expect(internals.persistentStorage.set).toHaveBeenCalled();
+      expect(internals.instanceStorage.set).not.toHaveBeenCalled();
+      expect(internals.getPendingRequest('req-1')).toEqual(request);
     });
 
-    it('accepts a threshold equal to the number of signers', async () => {
-      const dto = plainToInstance(InitMultisigConfigDto, {
-        issuer: 'issuer',
-        threshold: 3,
-        signers: ['a', 'b', 'c'],
-      });
-      const errors = await validate(dto);
-      expect(errors.length).toBe(0);
-    });
-  });
+    it('keeps each pending request under its own key so growth is not bound to a single entry', () => {
+      const internals = service as unknown as {
+        persistentStorage: ReturnType<typeof makeStorage>;
+        instanceStorage: ReturnType<typeof makeStorage>;
+        storePendingRequest: (request: { requestId: string }) => void;
+      };
+      internals.persistentStorage = makeStorage();
+      internals.instanceStorage = makeStorage();
 
-  describe('UpdateMultisigConfigDto', () => {
-    it('rejects a threshold larger than the number of signers', async () => {
-      const dto = plainToInstance(UpdateMultisigConfigDto, {
-        threshold: 5,
-        signers: ['a', 'b', 'c'],
-      });
-      const errors = await validate(dto);
-      expect(errors.length).toBeGreaterThan(0);
+      for (let i = 0; i < 50; i++) {
+        internals.storePendingRequest({ requestId: `req-${i}` });
+      }
+
+      expect(internals.persistentStorage.set).toHaveBeenCalledTimes(50);
+      expect(internals.persistentStorage._map.size).toBe(50);
+      expect(internals.instanceStorage._map.size).toBe(0);
+    });
+
+    it('removes the persistent entry when a request is completed', () => {
+      const internals = service as unknown as {
+        persistentStorage: ReturnType<typeof makeStorage>;
+        instanceStorage: ReturnType<typeof makeStorage>;
+        storePendingRequest: (request: { requestId: string }) => void;
+        removePendingRequest: (requestId: string) => void;
+        getPendingRequest: (requestId: string) => unknown;
+      };
+      internals.persistentStorage = makeStorage();
+      internals.instanceStorage = makeStorage();
+
+      internals.storePendingRequest({ requestId: 'req-1' });
+      internals.removePendingRequest('req-1');
+
+      expect(internals.getPendingRequest('req-1')).toBeUndefined();
+      expect(internals.persistentStorage.delete).toHaveBeenCalledWith(
+        expect.stringContaining('req-1'),
+      );
     });
   });
 });

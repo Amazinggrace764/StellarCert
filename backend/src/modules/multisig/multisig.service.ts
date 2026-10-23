@@ -10,6 +10,7 @@ import {
   Account,
   scValToNative,
 } from '@stellar/stellar-sdk';
+import { scVal } from '@stellar/stellar-sdk';
 import { StellarService } from '../stellar/services/stellar.service';
 import { LoggingService } from '../../common/logging/logging.service';
 
@@ -695,7 +696,7 @@ export class MultisigService implements OnModuleInit {
         const txResponse = await this.waitForTransaction(response.hash);
         if (txResponse.status === rpc.Api.GetTransactionStatus.SUCCESS) {
           this.logger.log(`Certificate issued for request ${requestId}`);
-          return true;
+          return { issued: true };
         }
       }
 
@@ -747,7 +748,7 @@ export class MultisigService implements OnModuleInit {
         const txResponse = await this.waitForTransaction(response.hash);
         if (txResponse.status === rpc.Api.GetTransactionStatus.SUCCESS) {
           this.logger.log(`Request ${requestId} cancelled`);
-          return true;
+          return { cancelled: true };
         }
       }
 
@@ -833,7 +834,8 @@ export class MultisigService implements OnModuleInit {
 
       const native = scValToNative(result.result.retval) as Record<string, unknown>;
       return {
-        id: String(native.id),
+        request: {
+          id: String(native.id),
         issuer: String(native.issuer),
         recipient: String(native.recipient),
         metadata: String(native.metadata),
@@ -844,6 +846,7 @@ export class MultisigService implements OnModuleInit {
         created_at: Number(native.created_at),
         expires_at: Number(native.expires_at),
         status: Number(native.status) as RequestStatus,
+        },
       };
     } catch (error) {
       this.logger.error(`Failed to get pending request ${requestId}`, error);
