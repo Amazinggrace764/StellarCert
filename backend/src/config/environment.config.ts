@@ -8,6 +8,9 @@ import {
   IsBoolean,
   MinLength,
   ValidateIf,
+  Min,
+  In,
+  IsInt,
 } from 'class-validator';
 
 export const CERTIFICATE_EXPIRY_WINDOW_DAYS =
@@ -317,6 +320,72 @@ class EnvironmentVariables {
   @IsOptional()
   @IsNumber()
   DUPLICATE_DETECTION_TIME_WINDOW_DAYS?: number;
+
+  // Disaster Recovery Objectives and Backup Configuration
+  /**
+   * Maximum tolerated data loss in minutes (Recovery Point Objective).
+   * Approved production objective: 60 minutes.
+   */
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  RPO_MINUTES?: number;
+
+  /**
+   * Maximum tolerated outage in minutes (Recovery Time Objective).
+   * Approved production objective: 240 minutes (4 hours).
+   */
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  RTO_MINUTES?: number;
+
+  /**
+   * Owner accountable for the backup/restore process. Required in production.
+   */
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  DR_OWNER?: string;
+
+  /**
+   * Storage location for encrypted backup artifacts. Required in production.
+   */
+  @IsOptional()
+  @IsString()
+  BACKUP_STORAGE_URL?: string;
+
+  /**
+   * Key management reference (key ID/ARN) for the backup encryption key.
+   * Required in production.
+   */
+  @IsOptional()
+  @IsString()
+  BACKUP_ENCRYPTION_KEY_ID?: string;
+
+  /**
+   * Number of days backups are retained. Defaults to 35 days.
+   */
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  BACKUP_RETENTION_DAYS?: number;
+
+  /**
+   * Interval in days between required isolated restore drills. Defaults to 30.
+   */
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  RESTORE_DRILL_INTERVAL_DAYS?: number;
+
+  /**
+   * Alert webhook URL for backup failure / integrity / restore drill alerts.
+   * Required in production.
+   */
+  @IsOptional()
+  @IsString()
+  BACKUP_ALERT_WEBHOOK?: string;
 }
 
 export function validateEnv(
@@ -434,6 +503,25 @@ export function validateEnv(
       DUFLICATE_DETECTION_TIME_WINDOW_DAYS: e('DUPLICATE_DETECTION_TIME_WINDOW_DAYS')
         ? parseInt(e('DUPLICATE_DETECTION_TIME_WINDOW_DAYS') as string, 10)
         : undefined,
+      // Disaster Recovery configuration
+      RPO_MINUTES: e('RPO_MINUTES')
+        ? parseInt(e('RPO_MINUTES') as string, 10)
+        : DEFAULT_RPO_MINUTES,
+      RTO_MINUTES: e('RTO_MINUTES')
+        ? parseInt(e('RTO_MINUTES') as string, 10)
+        : DEFAULT_RTO_MINUTES,
+      DR_OWNER: e('DR_OWNER'),
+      BACKUP_STORAGE_URL: e('BACKUP_STORAGE_URL'),
+      BACKUP_ENCRYPTION_KEY_ID: e('BACKUP_ENCRYPTION_KEY_ID'),
+      BACKUP_RETENTION_DAYS: e('BACKUP_RETENTION_DAYS')
+        ? parseInt(e('BACKUP_RETENTION_DAYS') as string, 10)
+        : DEFAULT_BACKUP_REGION_RETENTION_DAYS
+,
+      RESTORE_DRILL_INTERVAL_DAYS: e('RESTORE_DRILL_INTERVAL_DAYS')
+        ? parseInt(e('RESTORE_DRILL_INTERVAL_DAYS') as string, 10)
+        : DEFAULT_RESTORE_DRILL_INTERVAL_DAYS
+,
+      BACKUP_ALERT_WEBHOOK: e('BACKUP_ALERT_WEBHOOK'),
     },
     { enableImplicitConversion: true },
   );
