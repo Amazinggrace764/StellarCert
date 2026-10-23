@@ -38,11 +38,7 @@ export class CryptoUtils {
   static generateToken(length: number = 32): string {
     const chars =
       'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    let token = '';
-    for (let i = 0; i < length; i++) {
-      token += chars.charAt(crypto.randomInt(chars.length));
-    }
-    return token;
+    return this.randomFromCharset(chars, length);
   }
 
   /**
@@ -53,11 +49,7 @@ export class CryptoUtils {
    */
   static generateAlphanumericCode(length: number = 8): string {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    let code = '';
-    for (let i = 0; i < length; i++) {
-      code += chars.charAt(crypto.randomInt(chars.length));
-    }
-    return code;
+    return this.randomFromCharset(chars, length);
   }
 
   /**
@@ -66,12 +58,53 @@ export class CryptoUtils {
    * @param length - Length of the code (default: 6)
    */
   static generateNumericCode(length: number = 6): string {
-    let code = '';
-    for (let i = 0; i < length; i++) {
-      code += crypto.randomInt(0, 10).toString();
-    }
-    return code;
+    const chars = '0123456789';
+    return this.randomFromCharset(chars, length);
   }
+
+  /**
+   * Generates a string by drawing each character uniformly from the
+   * supplied charset using cryptographically secure random bytes.
+   * This avoids modulo bias by rejecting bytes that fall outside the
+   * largest multiple of the charset size.
+   * @param charset - Characters to draw from
+   * @param length - Number of characters to generate
+   */
+  private static randomFromCharset(charset: string, length: number): string {
+    if (!Number.isInteger(length) || length < 0) {
+      throw new Error('Length must be a non-negative integer');
+    }
+    if (charset.length === 0) {
+      throw new Error('Charset must not be empty');
+    }
+    if (length === 0) {
+      return '';
+    }
+
+    const charsetLength = charset.length;
+    // Largest multiple of charsetLength that fits in a byte (0-255).
+    const maxUnbiased = 256 - (256 % charsetLength);
+    const result: string[] = [];
+    let remaining = length;
+
+    while (remaining > 0) {
+      // Over-allocate a bit to reduce the number of randomBytes calls.
+      const bytes = crypto.randomBytes(remaining + 8);
+      for (const byte of bytes) {
+        if (byte >= maxUnbiased) {
+          continue;
+        }
+        result.push(charset.charAt(byte % charsetLength));
+        remaining--;
+        if (remaining === 0) {
+          break;
+        }
+      }
+    }
+
+    return result.join('');
+  }
+
 
   /**
    * Hashes data using SHA256
@@ -89,9 +122,15 @@ export class CryptoUtils {
 
   /**
    * Verifies an HMAC signature
+   * Uses a timing-safe comparison to prevent signature forgery via timing analysis.
    */
   static verifyHMAC(data: string, signature: string, secret: string): boolean {
     const expectedSignature = this.createHMAC(data, secret);
-    return expectedSignature === signature;
+    const expectedBuffer = Buffer.from(expectedSignature, 'utf8');
+    const actualBuffer = Buffer.from(signature || '', 'utf8');
+    if (expectedBuffer.length !== actualBuffer.length) {
+      return false;
+    }
+    return crypto.timingSafeEqual(expectedBuffer, actualBuffer);
   }
 }

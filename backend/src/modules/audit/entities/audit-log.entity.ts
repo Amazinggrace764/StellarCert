@@ -22,7 +22,7 @@ import { AuditAction, AuditResourceType } from '../constants';
 @Index(['action'])
 @Index(['resourceType'])
 // @Index(['resourceId']) // Keep commented for now
-@Index(['createdAt'])
+@Index(['timestamp'])
 @Index(['correlationId'])
 @Index(['ipAddress'])
 @Index(['status'])
@@ -135,51 +135,9 @@ export class AuditLog {
   })
   timestamp: number;
 
-  /**
-   * Retention deadline computed at write time from the applicable retention
-   * policy for this audit record. Once reached (and no legal hold is active)
-   * the record becomes eligible for PII anonymization.
-   */
-  @Column({
-    name: 'retention_expires_at',
-    type: 'timestamp with time zone',
-    nullable: true,
-  })
-  retentionExpiresAt: Date | null;
-
-  /**
-   * Identifier of the active legal hold blocking deletion/anonymization.
-   * Null means no hold is applied.
-   */
-  @Column({
-    name: 'legal_hold_id',
-    type: 'varchar',
-    nullable: true,
-  })
-  legalHoldId: string | null;
-
-  /**
-   * Timestamp of the most recent successful PII anonymization. Serves as the
-   * idompotency marker for the deletion/anonymization workflow.
-   */
-  @Column({
-    name: 'anonymized_at',
-    type: 'timestamp with time zone',
-    nullable: true,
-  })
-  anonymizedAt: Date | null;
-
-  /**
-   * Audit trail of anonymization activity (reason, actor, correlation id).
-   * Must not contain restored PII and is retained with the record.
-   */
-  @Column({
-    name: 'anonymization_audit',
-    type: 'jsonb',
-    nullable: true,
-  })
-  anonymizationAudit: Record<string, any> | null;
-
+  // Note: `timestamp` is the hot column for search/sort/purge and is
+  // indexed at the entity level above. `createdAt` is kept for data
+  // compatibility but is no longer indexed.
   @CreateDateColumn()
   createdAt: Date;
 }
