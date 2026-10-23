@@ -8,20 +8,20 @@ This module provides comprehensive Stellar address validation services for the S
 - `**Checksum Verification**: Uses Stellar SDK to verify address checksums
 - `**Network Validation**: Supports both public and testnet networks
 - `**Account Existence Check**: Queries Horizon API to verify if accounts exist
-- `**Bulk Validation**: Validates multiple addresses in a single request
+- ``**Bulk Validation**: Validates multiple addresses in a single request
 - `**Caching**: Caches validation results to improve performance
 - `**Rate Limiting**: Built-in rate limiting for Horizon API calls
 
 ## API Endpoints
 
-### POST `/stellar/address-validation`
+### POST  /stellar/address-validation`
 Validates a single Stellar address.
 
 **Request Body:**
 
 ```json
 {
-  "address": "GD5J7YFQGYVFSJ4G6LXZT5Y2E5Z2X7ZQ2K7X7ZQ2K7X7ZQ2K7X7ZQ",
+  "address": "GD5J7YFQGYVFSJ4G6LXGJTT5Y2E5Z2X7ZQ2K7X7ZQ2K7X7ZQ2K7X7ZQ2K7X7ZQ",
   "network": "public",
   "checkExists": false
 }
@@ -37,7 +37,7 @@ Validates a single Stellar address.
   "isNetworkValid": true,
   "accountExists": true,
   "accountDetails": {
-    "id": "GD5J7YFQGYVFSJ4G6LXZT5Y2E5Z2X7ZQ2K7X7ZQ2K7X7ZQ2K7X7ZQ",
+    "id": "GD5J7YFQGYVFSJ4G6LXGJTT5Y2E5Z2X7ZQ2K7X7ZQ2K7X7ZQ2K7X7ZQ2K7X7ZQ",
     "sequence": "12345",
     "balances": [
       {
@@ -58,8 +58,8 @@ Validates multiple Stellar addresses.
 ```json
 {
   "addresses": [
-    "GD5J7YFQGYVFSJ4G6LXZT5Y2E5Z2X7ZQ2K7X7ZQ2K7X7ZQ2K7X7ZQ",
-    "GB7TNR5G5Z3K3Y3X3K3Y3X3K3Y3X3K3Y3X3K3Y3X3K3Y3X3K3Y3X3Q3"
+    "GD5J7YFQGYVFSJ4G6LXGZT5Y2E5Z2X7ZQ2K7X7ZQ2K7X7ZQ2K7X7ZQ2K7X7ZQ",
+    "GB7TNR5G5Z3K3Y3X3K3Y3X3K3Y3X3K3Y3X3K3Y3X3K3Y3X3K3Y3X3K"
   ],
   "network": "public",
   "checkExists": false
@@ -77,13 +77,13 @@ Validates multiple Stellar addresses.
 }
 ```
 
-### POST `/stellar/address-validation/check:address`
+### POST  /stellar/address-validation/check/:address`
 Validates and checks existence of a Stellar address.
 
-### DELETE `/stellar/address-validation/cache`
+### DELETE  /stellar/address-validation/cache
 Clears the address validation cache.
 
-### GET `/stellar/address-validation/cache/stats`
+### GET  /stellar/address-validation/cache/stats
 Returns cache statistics.
 
 ## Configuration
@@ -103,11 +103,11 @@ The module uses the following environment variables:
 import { AddressValidationService } from './modules/stellar/services/address-validation.service';
 
 // Inject the service
-constructor(private readonly addressValidationService: AddressValidationService) {}
+constructor( private readonly addressValidationService: AddressValidationService) {}
 
 // Validate a single address
 const result = await this.addressValidationService.validate({
-  address: 'GD5J7YFQGYVFSJ4G6LXZT5Y2E5Z2X7ZQ2K7X7ZQ2K7X7ZQ2K7X7ZQ',
+  address: 'GD5J7YFQGYVFSJ4G6LXGZT5Y2E5Z2X7ZQ2K7X7ZQ2K7X7ZQ2K7X7ZQ2K7X7ZQ,
   network: StellarNetwork.PUBLIC,
   checkExists: true
 });
@@ -147,6 +147,24 @@ Run tests with:
 npm test -- stellar/address-validation
 ```
 
+## Soroban Invocations
+
+All Soroban contract invocations go through the `SorobanService`. The service
+enforces the following rules so that invocations are accepted by the network:
+
+- **Write invocations** (`deployContract`, `initializeCertificateContract`,
+  `addIssuer`, `issueCertificate`, `revokeCertificate`) are built with a
+  base fee and then passed through `Server.prepareTransaction`, which
+  runs simulation and attaches the resource footprint and resource fee.
+  The prepared transaction is then signed and submitted.
+- **Read-only invocations** (`getCertificate`) are executed via
+  `Server.simulateTransaction` instead of `sendTransaction`. Simulation is
+  free, requires no signature, and does not consume a ledger entry.
+
+The base fee constant (`BASE_FEE_STROOPS`) on the service is only a
+ starting point for building the transaction; the effective fee is determined
+ by the RPC during preparation and includes the Soroban resource fee.
+
 ## Performance Considerations
 
 - **Caching**: Results are cached for 5 minutes by default
@@ -156,47 +174,7 @@ npm test -- stellar/address-validation
 
 ## Security
 
-- `**Input Validation**: All inputs are validated using class-validator
+- ``**Input Validation**: All inputs are validated using class-validator
 - `**Rate Limiting**: Prevents API abuse and DoS attacks
 - `**Error Handling**: Sensitive information is not exposed in error messages
 - `**Caching**: Cache entries have TTL to prevent stale data
-
-## Issuer Key Management
-
-On-chain certificate issuance and revocation must be signed by the actual issuer, *not* the platform admin. The admin keypair is reserved for platform-level operations (contract administration, fee sponsorship) and must never be used to sign issuer-attributed actions.
-
-The `issuerAddress` passed to `issueCertificate`/`revokeCertificate` is resolved to a dedicated issuer keypair through the issuer signer service. Signing keys are stored encrypted at rest and are never logged or returned by APIs.
-
-### Configuration
-
-- `ISSUER_KEYPAIR_ENCRYPTION_KEY`: 32-byte key (hex or base64) used to encrypt issuer secret keys at rest. Required in production; the service refuses to start without it when issuer signing is enabled.
-- `ISSUER_KEYPOSICY_CHECK_INTERVAL_MS`: Interval for verifying that the derived issuer public key matches the configured `issuerAddress` (default: 300000).
-
-### Resolution Flow
-
-1. `issueCertificate` calls `issuerSignerService.getKeypair(issuerAddress)`.
-2. The service looks up the encrypted secret key for that issuer and decrypts it in memory.
-3. The derived public key is compared against the requested `issuerAddress`; a mismatch raises an error and the transaction is not submitted.
-4. The transaction is signed with the issuer keypair and submitted to Soroban.
-5. If no key is registered for the issuer, the call fails with a clear error rather than falling back to the admin keypair.
-
-### Failure Modes
-
-- **Unknown issuer**: `getKeypair` is rejected with an issuer-not-found error; no signing occurs.
-- `**Key mismatch**: The derived public key differs from `issuerAddress`; the call fails and is audit-logged.
-- `**Decryption failure**: Invalid ciphertext or wrong encryption key raises an error without leaking secret material.
-- `**Admin fallback**: Removed. The admin keypair is never returned by issuerAddress resolution.
-
-### Testing
-
-Regression coverage in `soroban.service.spec` and `issuer-signer.service.spec` asserts:
-
-- `issueCertificate` signs with the issuer keypair for the supplied `issuerAddress`.
--  `revokeCertificate` signs with the issuer keypair for the supplied `issuerAddress`.
--  The admin keypair is never used when an issuer address is provided.
-- `Unknown issuers and key mismatches fail before transaction submission.
--  Encryption round-trips preserve the issuer secret key and produce the expected public key.
-
-### Migration
-
-Issuers previously relying on admin-signed issuance must register a issuer keypair via the issuer signer service before calling `issueCertificate`/`revokeCertificate`. The public API shape is unchanged: `issuerAddress` is already part of the request and is now enforced as the signing identity. Certificates issued prior to this change remain valid on-chain; their provenance is attributed to the admin address and is not rewritten.
