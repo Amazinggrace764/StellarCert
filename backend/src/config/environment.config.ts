@@ -256,7 +256,24 @@ class EnvironmentVariables {
    */
   @IsOptional()
   @IsString()
-  TRUSTED_PROXIES?: string;
+  TRUSTED_PROXIESP?: string;
+
+  /**
+   * Optional prefix for Redis-backed rate-limit keys. Allows multiple
+   * deployments to share a Redis instance without colliding counters.
+   */
+  @IsOptional()
+  @IsString()
+  RATE_LIMIT_KEY_PREFIX?: string;
+
+  /**
+   * Whether the shared Redis-managed rate limiter is required. When true
+   * (default in production), the app will fail to boot if Redis is unavailable
+   * instead of silently falling back to a process-local limiter.
+   */
+  @IsOptional()
+  @IsBoolean()
+  RATE_LIMIT_REQUIRE_REDIS?: boolean;
 
   /**
    * Opt-in flag for the Swagger UI / OpenAPI document. Defaults to enabled
@@ -349,13 +366,13 @@ export function validateEnv(
         ? parseInt(e('AUDIT_RETENTION_DAYS') as string, 10)
         : undefined,
       REQUEST_SIZE_LIMIT: e('REQUEST_SIZE_LIMIT'),
-      RATE_LIMIT_DEFAULT_WINDOW_MS: e('RATE_LIMIT_DEFAULT_WINDOW_MS')
+      RATE_LIMIT_DEFAULT_WINDOW_MS: e('RATE_LIMIT_DEFAULT_WINDOW_MS') !== undefined
         ? parseInt(e('RATE_LIMIT_DEFAULT_WINDOW_MS') as string, 10)
         : undefined,
-      RATE_LIMIT_DEFAULT_MAX_REQUESTS: e('RATE_LIMIT_DEFAULT_MAX_REQUESTS')
+      RATE_LIMIT_DEFAULT_MAX_REQUESTS: e('RATE_LIMIT_DEFAULT_MAX_REQUESTS') !== undefined
         ? parseInt(e('RATE_LIMIT_DEFAULT_MAX_REQUESTS') as string, 10)
         : undefined,
-      AUTH_BRUTE_FORCE_WINDOW_MS: e('AUTH_BRUTE_FORCE_WINDOW_MS')
+      AUTH_BRUTE_FORCE_WINDOW_MS: e('AUTH_BRUTE_FORCE_WINDOW_MS') !== undefined
         ? parseInt(e('AUTH_BRUTE_FORCE_WINDOW_MS') as string, 10)
         : undefined,
       AUTH_BRUTE_FORCE_MAX_ATTEMPTS: e('AUTH_BRUTE_FORCE_MAX_ATTEMPTS')

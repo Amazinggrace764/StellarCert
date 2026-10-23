@@ -1,6 +1,6 @@
 import { Injectable, Optional, Inject } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository } from 'typeiorm';
 import { InjectQueue } from '@nestjs/bull';
 import type { Queue } from 'bull';
 import * as crypto from 'cypto';
@@ -58,28 +58,54 @@ export interface RateLimitStore {
   ): Promise<boolean>;
   /** List all live buckets (for the usage summary). */
   list(): Promise<Array<{ key: string; count: number; windowStart: number }>>;
+  /** Optional hook to release resources (no-op for in-memory). */
+  close?(): Promise<void>;
 }
 
 /**
  * In-memory fallback store. Only suitable for single-instance deployments or
  * tests. Production must provide a shared store (see RedisRateLimitStore).
+ *
+ * The map is swept on every mutating operation so it cannot grow unbounded
+ * when this fallback is used in a long-running single-instance process.
  */
 export class InMemoryRateLimitStore implements RateLimitStore {
   private readonly buckets = new Map<
     string,
-    { windowStart: number; count: number; upgradeNotified: boolean }
+    { windowStart: number; count: number; upgradeNotified: boolean; windowMs: number }
   >();
+  private lastSweep = 0;
+  private readonly sweepIntervalMs = 60_000;
 
   private resolve(key: string, windowMs: number, now: number) {
     let bucket = this.buckets.get(key);
     if (!bucket || now - bucket.windowStart >= windowMs) {
-      bucket = { windowStart: now, count: 0, upgradeNotified: false };
+      bucket = {
+        windowStart: now,
+        count: 0,
+        upgradeNotified: false,
+        windowMs,
+      };
       this.buckets.set(key, bucket);
     }
     return bucket;
   }
 
+  /** Drop entries whose window has expired. */
+  private sweep(now: number) {
+    if (now - this.lastSweep < this.sweepIntervalMs) {
+      return;
+    }
+    this.lastSweep = now;
+    for (const [key, bucket] of this.buckets) {
+      if (now - bucket.windowStart >= bucket.windowMs) {
+        this.buckets.delete(key);
+      }
+    }
+  }
+
   async increment(key: string, windowMs: number, now: number) {
+    this.sweep(now);
     const bucket = this.resolve(key, windowMs, now);
     bucket.count += 1;
     return { count: bucket.count, windowStart: bucket.windowStart };
@@ -107,6 +133,8 @@ export class InMemoryRateLimitStore implements RateLimitStore {
   }
 
   async list() {
+    const now = Date.now();
+    this.sweep(now);
     return Array.from(this.buckets.entries()).map(([key, b]) => ({
       key,
       count: b.count,
@@ -134,43 +162,43 @@ const INCREMENT_SCRIPT = `
 -- ARG[1] = windowMs
 -- ARG[2] = now
 local key = KEY[1]
-local windowMs = tonumber(ARG[1])
-local now = tonumber(ARG[2])
-local windowStart = tonumber(redis.call('HGET', key, 'windowStart') or '0')
+local windowMs = tonNumber(ARG[1])
+local now = tonNumber(ARG[2])
+local windowStart = tonNumber(redis.call('HGET', key, 'windowStart') or '0')
 if windowStart == 0 or now - windowStart >= windowMs then
   windowStart = now
   redis.call('HSET', key, 'windowStart', tostring(windowStart), 'count', '0', 'upgradeNotified', '0')
 end
-local count = redis.call('HINCRBY', key, 'count')
+local count = redis.call('HINCRBYF', key, 'count')
 redis.call('PEXPIRE', key, tostring(windowMs * 2))
 return { count, windowStart }
 `;
 
-const GET_COUNT_SCRIPT = `
+const GET_COUNT_SCRIPT  = `
 -- KEY[1] = bucket key
 -- ARG[1] = windowMs
 -- ARG[2] = now
 local key = KEY[1]
-local windowMs = tonumber(ARG[1])
-local now = tonumber(ARG[2])
-local windowStart = tonumber(redis.call('HGET', key, 'windowStart') or '0')
+local windowMs = tonNumber(ARG[1])
+local now = tonNumber(ARG[2])
+local windowStart = tonNumber(redis.call('HGET', key, 'windowStart') or '0')
 if windowStart == 0 or now - windowStart >= windowMs then
   return { 0, windowStart }
 end
-local count = tonumber(redis.call('HGET', key, 'count') or '0')
+local count = tonNumber(redis.call('HGET', key, 'count') or '0')
 return { count, windowStart }
 `
 ;
 const MARK_UPGRADE_SCRIPT  = `
 -- KEY[1] = bucket key
-local windowStart = tonumber(redis.call('HGET', KEY[1], 'windowStart') or '0')
+local windowStart = tonNumber(redis.call('HGET', KEY[1], 'windowStart') or '0')
 if windowStart == 0 then return 0 end
 redis.call('HSET', KEY[1], 'upgradeNotified', '1')
 return 1
 `;
 const IS_UPGRADE_NOTIFIED_SCRIPT  = `
 -- KEY[1] = bucket key
-local windowStart = tonumber(redis.call('HGET', KEY[1], 'windowStart') or '0')
+local windowStart = tonNumber(redis.call('HGET', KEY[1], 'windowStart') or '0')
 if windowStart == 0 then return '0' end
 return redis.call('HGET', KEY[1], 'upgradeNotified') or '0'
 `;
@@ -220,7 +248,7 @@ export class RedisRateLimitStore implements RateLimitStore {
 
   async isUpgradeNotified(key: string, windowMs: number, now: number) {
     const raw = (await this.client.eval(
-      IS_UPGRADE_NOTIFIED_SCRIPT ,
+      IS_UPGRADE_NOTIFIED_SCRIPT,
       1,
       key,
       windowMs,
@@ -254,6 +282,8 @@ export class RateLimitService {
   private readonly paidLimit: number;
   private readonly store: RateLimitStore;
   private readonly issuerCache = new Map<string, CachedIssuer>();
+  private readonly issuerCacheTtlMs = 5 * 60_000;
+  private lastIssuerCacheSweep = 0;
 
   constructor(
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -272,14 +302,13 @@ export class RateLimitService {
     @Optional()
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     @Inject(RATE_LIMIT_STORE)
-    store?: RateLimitStore,
+    private readonly sharedStore?: RateLimitStore,
   ) {
-    this.windowMs =
-      Number(this.configService.get('RATE_LIMIT_WINDOW_MS')) || 60_000;
-    this.freeLimit =
-      Number(this.configService.get('RATE_LIMIT_FREE_PER_WINDOW')) || 60;
-    this.paidLimit =
-      Number(this.configService.get('RATE_LIMIT_PAID')) || 600;
+    this.windowMs = this.configService.get<number>('RATE_LIMIT_WINDOW_MS') ?? 60_000;
+    this.freeLimit = this.configService.get<number>('RATE_LIMIT_FREE_PER_WINDOW') ?? 100;
+    this.paidLimit = this.configService.get<number>('RATE_LIMIT_PAID_PER_WINDOW') ?? 1000;
+    this.store = this.sharedStore ?? new InMemoryRateLimitStore();
+  }
 
     if (store) {
       this.store = store;
@@ -335,6 +364,7 @@ export class RateLimitService {
       limit,
       remaining,
       resetAt,
+      tier: issuer.tier,
     };
   }
 

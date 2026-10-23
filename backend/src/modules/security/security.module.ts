@@ -11,9 +11,10 @@ import { RateLimitGuard } from './guards/rate-limit.guard';
 import { CorsMiddleware } from './middleware/cors.middleware';
 import { InputSanitizationMiddleware } from './middleware/input-sanitization.middleware';
 import { SecurityHeadersInterceptor } from './interceptor';
+import { RateLimitStorageModule } from './rate-limit-storage.module';
 
 @Module({
-  imports: [ConfigModule, CommonModule],
+  imports: [ConfigModule, CommonModule, RateLimitStorageModule],
   providers: [
     {
       provide: APP_GUARD,
