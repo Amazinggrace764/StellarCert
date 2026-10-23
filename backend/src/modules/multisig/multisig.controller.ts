@@ -46,6 +46,19 @@ export class MultisigController {
     private readonly logger: LoggingService,
   ) {}
 
+  private validateThresholdAgainstSigners(
+    threshold: number,
+    signers: string[],
+  ): void {
+    const signerCount = Array.isArray(signers) ? signers.length : 0;
+    if (threshold > signerCount) {
+      throw new HttpException(
+        `Threshold (${threshold}) cannot exceed the number of registered signers (${signerCount})`,
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
   @Post('config/init')
   @Roles(UserRole.ADMIN, UserRole.ISSUER)
   async initMultisigConfig(
@@ -53,6 +66,10 @@ export class MultisigController {
     @Body() configDto: InitMultisigConfigDto,
   ): Promise<TransactionHashResponse> {
     try {
+      this.validateThresholdAgainstSigners(
+        configDto.threshold,
+        configDto.signers,
+      );
       const transactionHash = await this.multisigService.initMultisigConfig(
         user.stellarPublicKey,
         configDto.issuer,
@@ -62,6 +79,9 @@ export class MultisigController {
       );
       return { transactionHash };
     } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
       this.logger.error('Failed to initialize multisig config', error);
       throw new HttpException(
         'Failed to initialize multisig configuration',
@@ -78,6 +98,10 @@ export class MultisigController {
     @Body() configDto: UpdateMultisigConfigDto,
   ): Promise<TransactionHashResponse> {
     try {
+      this.validateThresholdAgainstSigners(
+        configDto.threshold,
+        configDto.signers,
+      );
       const transactionHash = await this.multisigService.updateMultisigConfig(
         user.stellarPublicKey,
         issuer,
@@ -87,6 +111,9 @@ export class MultisigController {
       );
       return { transactionHash };
     } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
       this.logger.error(
         `Failed to update multisig config for issuer ${issuer}`,
         error,

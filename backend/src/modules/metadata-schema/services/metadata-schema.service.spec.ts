@@ -450,16 +450,51 @@ describe('MetadataSchemaService', () => {
             properties: [
               { name: 'street', type: FieldType.STRING, required: true },
               { name: 'city', type: FieldType.STRING, required: true },
+              {
+                name: 'zip',
+                type: FieldType.STRING,
+                required: true,
+              },
             ],
           },
         ],
-        requiredFields: [],
       };
 
-      const errors = service.validateAgainstSchema(nestedSchema, {
-        address: { street: 'Main St' },
+      const result = service.validateAgainstSchema(nestedSchema, {
+        address: {
+          street: '123 Main St',
+          city: 'St. Louis',
+          zip: '63101',
+        },
       });
-      expect(errors.some((e) => e.field === 'address.city')).toBe(true);
+      expect(result.valid).toBe(true);
+    });
+
+    it('should fail on missing nested required field', () => {
+      const nestedSchema: MetadataSchema = {
+        ...savedSchema,
+        fields: [
+          {
+            name: 'address',
+            type: FieldType.OBJECT,
+            required: true,
+            properties: [
+              { name: 'street', type: FieldType.STRING, required: true },
+              { name: 'city', type: FieldType.STRING, required: true },
+            ],
+          },
+        ],
+      };
+
+      const result = service.validateAgainstSchema(nestedSchema, {
+        address: { street: '123 Main St' },
+      });
+      expect(result.valid).toBe(false);
+      expect(
+        result.errors.some(
+          (e) => e.field === 'address.city' && e.constraint === 'required',
+        ),
+      ).toBe(true);
     });
   });
 });
