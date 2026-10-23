@@ -1,5 +1,6 @@
 export * from './types';
 export * from './tokens';
+export * from './socket';
 export * from './endpoints';
 
 // `VITE_USE_DUMMY_DATA` must be referenced directly as `import.meta.env.*`
