@@ -82,7 +82,7 @@ export class JwtManagementService {
   /**
    * Blacklist a token
    */
-  async blacklistToken(token: string, expiresIn?: number): Promise<void> {
+  async blacklistToken(token: string, expiresIn: number): Promise<void> {
     // Get token expiration time to set appropriate cache expiration
     let tokenExp: number;
     try {

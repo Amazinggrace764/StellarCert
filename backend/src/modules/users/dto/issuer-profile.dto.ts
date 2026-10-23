@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsEnum, IsDateString } from 'class-validator';
+import { IsOptional, IsString, IsEnum, IsDateString, IsNumber } from 'class-validator';
 import { ApiPropertyOptional, ApiProperty } from '@nestjs/swagger';
 
 export class IssuerProfileStatsDto {
@@ -6,36 +6,42 @@ export class IssuerProfileStatsDto {
     description: 'Total number of certificates issued',
     example: 125,
   })
+  @IsNumber()
   totalCertificates: number;
 
   @ApiProperty({
     description: 'Active certificates count',
     example: 118,
   })
+  @IsNumber()
   activeCertificates: number;
 
   @ApiProperty({
     description: 'Revoked certificates count',
     example: 7,
   })
+  @IsNumber()
   revokedCertificates: number;
 
   @ApiProperty({
     description: 'Expired certificates count',
     example: 0,
   })
+  @IsNumber()
   expiredCertificates: number;
 
   @ApiProperty({
     description: 'Total verifications performed',
     example: 2847,
   })
+  @IsNumber()
   totalVerifications: number;
 
   @ApiPropertyOptional({
     description: 'Last login timestamp',
     example: '2024-01-15T10:30:00Z',
   })
+  @IsOptional()
   lastLogin?: Date;
 }
 
@@ -44,6 +50,7 @@ export class IssuerActivityItemDto {
     description: 'Activity ID',
     example: 'uuid-123',
   })
+  @IsString()
   id: string;
 
   @ApiProperty({
@@ -90,6 +97,7 @@ export class IssuerActivityItemDto {
     description: 'Activity timestamp',
     example: '2024-01-15T10:30:00Z',
   })
+  @IsOptional()
   @IsDateString()
   timestamp: Date;
 }
@@ -99,6 +107,7 @@ export class IssuerActivityResponseDto {
     description: 'List of recent activities',
     type: [IssuerActivityItemDto],
   })
+  @IsOptional()
   activities: IssuerActivityItemDto[];
 
   @ApiProperty({
@@ -110,6 +119,7 @@ export class IssuerActivityResponseDto {
       totalPages: 5,
     },
   })
+  @IsOptional()
   meta: {
     total: number;
     page: number;
@@ -124,6 +134,7 @@ export class UpdateIssuerProfileDto {
     example: 'John',
   })
   @IsOptional()
+  @IsOptional()
   @IsString()
   firstName?: string;
 
@@ -131,6 +142,7 @@ export class UpdateIssuerProfileDto {
     description: 'Last name',
     example: 'Doe',
   })
+  @IsOptional()
   @IsOptional()
   @IsString()
   lastName?: string;
@@ -140,6 +152,7 @@ export class UpdateIssuerProfileDto {
     example: 'johndoe',
   })
   @IsOptional()
+  @IsOptional()
   @IsString()
   username?: string;
 
@@ -147,6 +160,7 @@ export class UpdateIssuerProfileDto {
     description: 'Phone number',
     example: '+1234567890',
   })
+  @IsOptional()
   @IsOptional()
   @IsString()
   phone?: string;
@@ -156,6 +170,7 @@ export class UpdateIssuerProfileDto {
     example: 'https://example.com/profile.jpg',
   })
   @IsOptional()
+  @IsOptional()
   @IsString()
   profilePicture?: string;
 
@@ -164,6 +179,7 @@ export class UpdateIssuerProfileDto {
     example: 'GBXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX',
   })
   @IsOptional()
+  @IsOptional()
   @IsString()
   stellarPublicKey?: string;
 
@@ -171,6 +187,7 @@ export class UpdateIssuerProfileDto {
     description: 'Organization name',
     example: 'StellarCert Academy',
   })
+  @IsOptional()
   @IsOptional()
   @IsString()
   organization?: string;

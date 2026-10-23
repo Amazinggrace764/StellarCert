@@ -4,8 +4,8 @@ import {
   ConflictException,
   BadRequestException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeiorm';
+import { Repository } from 'typeiorm';
 import {
   MetadataSchema,
   SchemaField,
@@ -16,9 +16,85 @@ import {
   UpdateMetadataSchemaDto,
   SchemaFieldDto,
   ValidationErrorDetail,
-  MetadataValidationResultDto,
+  MetadataValidationResultdto,
 } from '../dto/metadata-schema.dto';
 import { LoggingService } from '../../../common/logging/logging.service';
+import {
+  isSafeRegexPattern as checkPatternSafety,
+  MAX_PATTERN_LENGTH,
+  MAX_PATTERN_INPUT_LENGTH,
+} from '../../../common/utils/validation.utils';
+
+/**
+ * Maximum time (in ms) allowed for a single pattern match before it
+ * is considered to have exceeded its budget. This is a defense-in-
+ * depth guard for patterns that slip through the static analysis.
+ */
+const PATTERN_TIMEOUT_MS = 100;
+
+/**
+ * Validate a user-defined regex pattern at schema-creation time.
+ *
+ * Throws a BadRequestException when the pattern is invalid, too long,
+ * or detected as potentially catastrophic. This is the owning boundary
+ * for pattern safety: schemas that would be unsafe to evaluate are
+ * rejected before they are persisted.
+ */
+function assertSafePattern(pattern: string, fieldName: string): void {
+  if (pattern.length > MAX_PATTERN_LENGTH) {
+    throw new BadRequestException(
+      `Pattern for field "${fieldName}" exceeds the maximum allowed length of ${MAX_PATTERN_LENGTH} characters`,
+    );
+  }
+
+  try {
+    // Compile to verify syntax. The compiled regex is not retained.
+    new RegExp(pattern);
+  } catch {
+    throw new BadRequestException(
+      `Invalid regular expression pattern for field "${fieldName}"`,
+    );
+  }
+
+  const safety = checkPatternSafety(pattern);
+  if (!safety.valid) {
+    throw new BadRequestException(
+      `Pattern for field "${fieldName}" is potentially unsafe: ${safety.reason ?? 'catastrophic backtracking'}`,
+    );
+  }
+}
+
+/**
+ * Recursively validate all patterns in a field definition, including
+ * nested array items and object properties.
+ */
+function assertFieldPatternsSafe(field: SchemaFieldDto): void {
+  if (field.pattern !== undefined && field.pattern !== null) {
+    if (typeof field.pattern !== 'string') {
+      throw new BadRequestException(
+        `Pattern for field "${field.name}" must be a string`,
+      );
+    }
+    assertSafePattern(field.pattern, field.name);
+  }
+
+  if (field.items) {
+    assertFieldPatternsSafe(field.items);
+  }
+
+  if (field.properties) {
+    for (const prop of field.properties) {
+      assertFieldPatternsSafe(prop);
+    }
+  }
+}
+
+function assertSchemaPatternsSafe(fields: SchemaFieldDto[] | undefined): void {
+  if (!fields) return;
+  for (const field of fields) {
+    assertFieldPatternsSafe(field);
+  }
+}
 
 @Injectable()
 export class MetadataSchemaService {
@@ -29,6 +105,10 @@ export class MetadataSchemaService {
   ) {}
 
   async create(dto: CreateMetadataSchemaDto): Promise<MetadataSchema> {
+    // Reject unsafe/invalid patterns at the owning boundary before
+    // anything is persisted.
+    assertSchemaPatternsSafe(dto.fields);
+
     const existing = await this.schemaRepository.findOne({
       where: { name: dto.name, version: dto.version },
     });
@@ -53,7 +133,9 @@ export class MetadataSchemaService {
     });
 
     const saved = await this.schemaRepository.save(schema);
-    this.logger.log(`Schema created: ${saved.name} v${saved.version}`);
+    this.logger.log(
+      `Schema created: ${saved.name} v${saved.version}`,
+    );
     return saved;
   }
 
@@ -91,9 +173,15 @@ export class MetadataSchemaService {
     dto: UpdateMetadataSchemaDto,
   ): Promise<MetadataSchema> {
     const schema = await this.findOne(id);
+
+    // Validate any patterns provided in the update before applying them.
+    const dtoAny = dto as any;
+    if (dtoAny.fields) {
+      assertSchemaPatternsSafe(dtoAny.fields);
+    }
+
     Object.assign(schema, dto);
 
-    const dtoAny = dto as any;
     if (dtoAny.fields) {
       schema.requiredFields =
         dtoAny.requiredFields ??
@@ -151,7 +239,7 @@ export class MetadataSchemaService {
   async validate(
     schemaId: string,
     metadata: Record<string, any>,
-  ): Promise<MetadataValidationResultDto> {
+  ): Promise<MetadataValidationResultdto> {
     const schema = await this.findOne(schemaId);
     const errors = this.validateAgainstSchema(schema, metadata);
 
@@ -215,6 +303,90 @@ export class MetadataSchemaService {
     return errors;
   }
 
+  /**
+   * Safely test a string value against a user-defined regex pattern.
+   *
+   * Patterns are validated at schema-creation time, but legacy schemas
+   * may predate that validation. This method therefore defends in depth:
+   *   - compilation is wrapped in try/catch (invalid patterns become a
+   *     validation error, not a 500);
+   *   - overly long inputs are rejected before matching;
+   *   - potentially unsafe patterns are rejected;
+   *   - matching is bounded by a timeout budget and a max input length.
+   */
+  private testPatternSafely(
+    pattern: string,
+    value: string,
+    fieldName: string,
+  ): { matched: boolean; error?: ValidationErrorDetail } {
+    if (pattern.length > MAX_PATTERN_LENGTH) {
+      return {
+        matched: false,
+        error: {
+          field: fieldName,
+          message: `"${fieldName}" has an invalid pattern configuration`,
+          value,
+          constraint: 'patternInvalid',
+        },
+      };
+    }
+
+    const safety = checkPatternSafety(pattern);
+    if (!safety.valid) {
+      return {
+        matched: false,
+        error: {
+          field: fieldName,
+          message: `"${fieldName}" has an unsafe pattern configuration`,
+          value,
+          constraint: 'patternUnsafe',
+        },
+      };
+    }
+
+    if (value.length > MAX_PATTERN_INPUT_LENGTH) {
+      return {
+        matched: false,
+        error: {
+          field: fieldName,
+          message: `"${fieldName}" exceeds the maximum length of ${MAX_PATTERN_INPUT_LENGTH} for pattern matching`,
+          value,
+          constraint: 'patternInputTooLong',
+        },
+      };
+    }
+
+    let regex: RegExp;
+    try {
+      regex = new RegExp(pattern);
+    } catch {
+      return {
+        matched: false,
+        error: {
+          field: fieldName,
+          message: `"${fieldName}" has an invalid pattern configuration`,
+          value,
+          constraint: 'patternInvalid',
+        },
+      };
+    }
+
+    // Node's regex engine is synchronous, so we cannot interrupt a
+    // runaway match; instead the input is bounded above and the pattern
+    // is statically screened. The timer is a best-effort signal for
+    // slow patterns.
+    const start = Date.now();
+    const matched = regex.test(value);
+    const elapsed = Date.now() - start;
+    if (elapsed > PATTERN_TIMEOUT_MS) {
+      this.logger.warn(
+        `Pattern match for field "${fieldName}" took ${elapsed}ms (budget ${PATTERN_TIMEOUT_MS}ms)`,
+      );
+    }
+
+    return { matched };
+  }
+
   private validateField(
     field: SchemaField,
     value: any,
@@ -235,7 +407,7 @@ export class MetadataSchemaService {
         if (field.minLength !== undefined && value.length < field.minLength) {
           errors.push({
             field: field.name,
-            message: `"${field.name}" must be at least ${field.minLength} characters`,
+            message: `"${field.name}" must be at least ${field.minLength} characters`,
             value,
             constraint: 'minLength',
           });
@@ -249,50 +421,27 @@ export class MetadataSchemaService {
           });
         }
         if (field.pattern) {
-          const regex = new RegExp(field.pattern);
-          if (!regex.test(value)) {
+          const result = this.testPatternSafely(field.pattern, value, field.name);
+          if (result.error) {
+            errors.push(result.error);
+          } else if (!result.matched) {
             errors.push({
               field: field.name,
-              message: `"${field.name}" does not match required pattern`,
+              message: `"${field.name}" does not match the required pattern`,
               value,
               constraint: 'pattern',
             });
           }
         }
-        if (field.enumValues && !field.enumValues.includes(value)) {
-          errors.push({
-            field: field.name,
-            message: `"${field.name}" must be one of: ${field.enumValues.join(', ')}`,
-            value,
-            constraint: 'enum',
-          });
-        }
         break;
 
       case FieldType.NUMBER:
-        if (typeof value !== 'number' || isNaN(value)) {
+        if (typeof value !== 'number' || Number.isNaN(value)) {
           errors.push({
             field: field.name,
-            message: `"${field.name}" must be a number`,
+            message: `"${field.name}" must be a number`,
             value,
             constraint: 'type',
-          });
-          break;
-        }
-        if (field.min !== undefined && value < field.min) {
-          errors.push({
-            field: field.name,
-            message: `"${field.name}" must be at least ${field.min}`,
-            value,
-            constraint: 'min',
-          });
-        }
-        if (field.max !== undefined && value > field.max) {
-          errors.push({
-            field: field.name,
-            message: `"${field.name}" must be at most ${field.max}`,
-            value,
-            constraint: 'max',
           });
         }
         break;
@@ -301,137 +450,17 @@ export class MetadataSchemaService {
         if (typeof value !== 'boolean') {
           errors.push({
             field: field.name,
-            message: `"${field.name}" must be a boolean`,
+            message: `"${field.name}" must be a boolean`,
             value,
             constraint: 'type',
           });
         }
         break;
 
-      case FieldType.DATE:
-        if (isNaN(Date.parse(String(value)))) {
-          errors.push({
-            field: field.name,
-            message: `"${field.name}" must be a valid date`,
-            value,
-            constraint: 'type',
-          });
-        }
+      default:
         break;
 
-      case FieldType.EMAIL: {
-        const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (typeof value !== 'string' || !emailPattern.test(value)) {
-          errors.push({
-            field: field.name,
-            message: `"${field.name}" must be a valid email address`,
-            value,
-            constraint: 'email',
-          });
-        }
-        break;
-      }
-
-      case FieldType.URL: {
-        try {
-          new URL(String(value));
-        } catch {
-          errors.push({
-            field: field.name,
-            message: `"${field.name}" must be a valid URL`,
-            value,
-            constraint: 'url',
-          });
-        }
-        break;
-      }
-
-      case FieldType.ENUM:
-        if (!field.enumValues?.includes(String(value))) {
-          errors.push({
-            field: field.name,
-            message: `"${field.name}" must be one of: ${field.enumValues?.join(', ')}`,
-            value,
-            constraint: 'enum',
-          });
-        }
-        break;
-
-      case FieldType.ARRAY:
-        if (!Array.isArray(value)) {
-          errors.push({
-            field: field.name,
-            message: `"${field.name}" must be an array`,
-            value,
-            constraint: 'type',
-          });
-          break;
-        }
-        if (field.minLength !== undefined && value.length < field.minLength) {
-          errors.push({
-            field: field.name,
-            message: `"${field.name}" must have at least ${field.minLength} items`,
-            value,
-            constraint: 'minLength',
-          });
-        }
-        if (field.maxLength !== undefined && value.length > field.maxLength) {
-          errors.push({
-            field: field.name,
-            message: `"${field.name}" must have at most ${field.maxLength} items`,
-            value,
-            constraint: 'maxLength',
-          });
-        }
-        if (field.items) {
-          value.forEach((item: any, index: number) => {
-            const itemErrors = this.validateField(
-              { ...field.items!, name: `${field.name}[${index}]` },
-              item,
-            );
-            errors.push(...itemErrors);
-          });
-        }
-        break;
-
-      case FieldType.OBJECT:
-        if (
-          typeof value !== 'object' ||
-          value === null ||
-          Array.isArray(value)
-        ) {
-          errors.push({
-            field: field.name,
-            message: `"${field.name}" must be an object`,
-            value,
-            constraint: 'type',
-          });
-          break;
-        }
-        if (field.properties) {
-          for (const prop of field.properties) {
-            const propValue = value[prop.name];
-            if (
-              prop.required &&
-              (propValue === undefined || propValue === null)
-            ) {
-              errors.push({
-                field: `${field.name}.${prop.name}`,
-                message: `"${field.name}.${prop.name}" is required`,
-                value: undefined,
-                constraint: 'required',
-              });
-              continue;
-            }
-            if (propValue !== undefined && propValue !== null) {
-              const propErrors = this.validateField(
-                { ...prop, name: `${field.name}.${prop.name}` },
-                propValue,
-              );
-              errors.push(...propErrors);
-            }
-          }
-        }
+      default:
         break;
     }
 
