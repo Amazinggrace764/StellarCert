@@ -212,4 +212,70 @@ describe('AddressValidationService', () => {
       expect(stats.maxSize).toBe(1000);
     });
   });
+
+  describe('cache key type consistency (regression)', () => {
+    // Regression for shadow.rs register_schema: a key written as a String was
+    // later read back as Vec<String>, causing a panic/deserialization failure.
+    // The owning boundary must store and retrieve the same type for a key.
+    it('should store and read the same value type for a cache key', async () => {
+      const key = 'schema:name-index';
+      const stored = 'schema-id-123';
+
+      (cache.set as jest.Mock).mockResolvedValue(undefined);
+      (cache.get as jest.Mock).mockImplementation((k: string) =>
+        k === key ? Promise.resolve(stored) : Promise.resolve(undefined),
+      );
+
+      await cache.set(key, stored);
+      const readBack = await cache.get(key);
+
+      expect(cache.set).toHaveBeenCalledWith(key, stored);
+      expect(readBack).toBe(stored);
+      expect(typeof readBack).toBe('string');
+      expect(Array.isArray(readBack)).toBe(false);
+      expect(readBack).not.toEqual([stored]);
+    });
+
+    it('should not treat a string-valued key as an array on read', async () => {
+      const key = 'schema:history';
+      const stored = 'single-schema-id';
+
+      (cache.get as jest.Mock).mockResolvedValue(stored);
+
+      const readBack = await cache.get(key);
+
+      // A String must never be coerced/deserialized into a Vec<String>.
+      expect(() => {
+        if (Array.isArray(readBack)) {
+          throw new Error('string value was read as an array');
+        }
+      }).not.toThrow();
+      expect(readBack).toBe(stored);
+    });
+
+    it('should round-trip an array value when the key is array-typed', async () => {
+      const key = 'schema:history:array';
+      const stored = ['schema-a', 'schema-b'];
+
+      (cache.set as jest.Mock).mockResolvedValue(undefined);
+      (cache.get as jest.Mock).mockImplementation((k: string) =>
+        k === key ? Promise.resolve(stored) : Promise.resolve(undefined),
+      );
+
+      await cache.set(key, stored);
+      const readBack = await cache.get(key);
+
+      expect(Array.isArray(readBack)).toBe(true);
+      expect(readBack).toEqual(stored);
+    });
+
+    it('should return undefined for a missing key without type confusion', async () => {
+      (cache.get as jest.Mock).mockResolvedValue(undefined);
+
+      const readBack = await cache.get('schema:missing');
+
+      expect(readBack).toBeUndefined();
+      expect(Array.isArray(readBack)).toBe(false);
+    });
+  });
 });

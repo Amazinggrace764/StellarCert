@@ -1,24 +1,21 @@
 {
   "default_branch": "main",
   "branches": [
-    "feat/issue-140-define-end-to-end-data-retention-and-deletion",
-    "fix/issue-141-establish-tested-disaster-recovery-objectives",
+    "fix/issue-54-issuecertificate-tsx-component-has-a-broken",
+    "fix/issue-56-socket-token-rotation-relies-on-a-same-tab",
     "main",
-    "origin",
-    "security/issue-142-produce-reproducible-attributable-releases-for"
+    "origin"
   ],
   "parent": {
-    "feat/issue-140-define-end-to-end-data-retention-and-deletion": "main",
-    "fix/issue-141-establish-tested-disaster-recovery-objectives": "main",
+    "fix/issue-54-issuecertificate-tsx-component-has-a-broken": "main",
+    "fix/issue-56-socket-token-rotation-relies-on-a-same-tab": "main",
     "main": null,
-    "origin": "main",
-    "security/issue-142-produce-reproducible-attributable-releases-for": "main"
+    "origin": "main"
   },
   "order": [
     "main",
-    "feat/issue-140-define-end-to-end-data-retention-and-deletion",
-    "fix/issue-141-establish-tested-disaster-recovery-objectives",
-    "origin",
-    "security/issue-142-produce-reproducible-attributable-releases-for"
+    "fix/issue-54-issuecertificate-tsx-component-has-a-broken",
+    "fix/issue-56-socket-token-rotation-relies-on-a-same-tab",
+    "origin"
   ]
 }

@@ -4,8 +4,24 @@ import {
   MaxLength,
   IsOptional,
   IsUUID,
+  ValidatorConstraintInterface,
+  ValidatorConstraint,
 } from 'class-validator';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiPropertyOptional } from '@nestjs/swagger';
+
+/**
+ * Custom constraint: at least one verification identifier must be provided.
+ */
+@ValidatorConstraint({ name: 'AtLeastOneVerificationIdentifier', async: false })
+export class AtLeastOneVerificationIdentifier implements ValidatorConstraintInterface {
+  validate(object: VerifyCertificateDto): boolean {
+    return Boolean(object.verificationCode || object.stellarTransactionHash || object.certificateId);
+  }
+
+  defaultMessage(): string {
+    return 'One of verificationCode, stellarTransactionHash, or certificateId must be provided';
+  }
+}
 
 export class VerifyCertificateDto {
   @ApiPropertyOptional({
