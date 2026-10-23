@@ -27,9 +27,9 @@ export interface TransactionResult {
 
 @Injectable()
 export class StellarService implements OnModuleInit {
-  private server: Horizon.Server;
-  private networkPassphrase: string;
-  private issuerKeypair: Keypair;
+  private server?: Horizon.Server;
+  private networkPassphrase?: string;
+  private issuerKeypair?: Keypair;
 
   constructor(
     private readonly configService: ConfigService,
@@ -62,7 +62,7 @@ export class StellarService implements OnModuleInit {
 
     try {
       this.issuerKeypair = Keypair.fromSecret(issuerSecret);
-    } catch (e) {
+    } catch {
       this.logger.error('Invalid Stellar Issuer Secret Key provided.');
     }
 
@@ -99,7 +99,7 @@ export class StellarService implements OnModuleInit {
    */
   async getAccountInfo(publicKey: string) {
     try {
-      return await this.server.loadAccount(publicKey);
+      return await this.requireServer().loadAccount(publicKey);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(`Failed to load account ${publicKey}: ${message}`);
@@ -123,19 +123,20 @@ export class StellarService implements OnModuleInit {
         throw new Error('Issuer keypair not configured.');
       }
 
-      const sourceAccount = await this.server.loadAccount(
+      const server = this.requireServer();
+      const sourceAccount = await server.loadAccount(
         this.issuerKeypair.publicKey(),
       );
 
       const transaction = new TransactionBuilder(sourceAccount, {
-        fee: (await this.server.fetchBaseFee()).toString(),
-        networkPassphrase: this.networkPassphrase,
+        fee: (await server.fetchBaseFee()).toString(),
+        networkPassphrase: this.requireNetworkPassphrase(),
       })
         .addOperation(
           Operation.payment({
-            destination: destination,
-            asset: Asset.native(), // Could be custom asset if assetCode provided
-            amount: '1', // Nominal amount
+            destination,
+            asset: Asset.native(),
+            amount: '1',
           }),
         )
         .addMemo(Memo.text(memoText))
@@ -144,7 +145,7 @@ export class StellarService implements OnModuleInit {
 
       transaction.sign(this.issuerKeypair);
 
-      const result = await this.server.submitTransaction(transaction);
+      const result = await server.submitTransaction(transaction);
 
       this.logger.log(`Transaction submitted with hash: ${result.hash}`);
 
@@ -153,9 +154,10 @@ export class StellarService implements OnModuleInit {
         successful: true,
         ledger: result.ledger,
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Transaction failed: ${message}`, error.response?.data);
+      const responseData = this.getResponseData(error);
+      this.logger.error(`Transaction failed: ${message}`, responseData);
       return {
         hash: '',
         successful: false,
@@ -169,11 +171,11 @@ export class StellarService implements OnModuleInit {
    */
   async verifyTransaction(hash: string): Promise<TransactionResult> {
     try {
-      const tx = await this.server.transactions().transaction(hash).call();
+      const tx = await this.requireServer().transactions().transaction(hash).call();
       return {
         hash: tx.hash,
-        successful: true, // If it exists in Horizon, it was successful
-        ledger: tx.ledger_attr,
+        successful: true,
+        ledger: tx.ledge_attr,
       };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
@@ -188,5 +190,27 @@ export class StellarService implements OnModuleInit {
 
   getKeypairFromPublicKey(publicKey: string): Keypair {
     return Keypair.fromPublicKey(publicKey);
+  }
+
+  private requireServer(): Horizon.Server {
+    if (!this.server) {
+      throw new Error('Stellar server not configured.');
+    }
+    return this.server;
+  }
+
+  private requireNetworkPassphrase(): string {
+    if (!this.networkPassphrase) {
+      throw new Error('Stellar network passphrase not configured.');
+    }
+    return this.networkPassphrase;
+  }
+
+  private getResponseData(error: unknown): unknown {
+    if (typeof error === 'object' && error !== null && 'response' in error) {
+      const response = (error as { response?: { data?: unknown } }).response;
+      return response?.data;
+    }
+    return undefined;
   }
 }
