@@ -127,6 +127,18 @@ export interface PendingRequestsResponseDto {
   has_next: boolean;
 }
 
+/**
+ * Raised when a governance action reaches execution but the service has no
+ * implementation for it. Mirrors the smart-contract `AdminAction::Other(_)`
+ * case: an approved action must never silently no-op.
+ */
+export class UnsupportedActionError extends Error {
+  constructor(action: string) {
+    super(`Unsupported action type: ${action}`);
+    this.name = 'UnsupportedActionError';
+  }
+}
+
 @Injectable()
 export class MultisigService implements OnModuleInit {
   private contractId: string;
@@ -649,6 +661,14 @@ export class MultisigService implements OnModuleInit {
     requestId: string,
     expectedTerminal: RequestStatus,
   ): Promise<RequestStatus> {
+    if (
+      expectedTerminal !== RequestStatus.Approved &&
+      expectedTerminal !== RequestStatus.Rejected &&
+      expectedTerminal !== RequestStatus.Issued &&
+      expectedTerminal !== RequestStatus.Expired
+    ) {
+      throw new UnsupportedActionError(String(expectedTerminal));
+    }
     try {
       const pending = await this.getPendingRequest(requestId);
       return pending.status;

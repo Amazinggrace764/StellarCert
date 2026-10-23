@@ -367,7 +367,7 @@ describe('MultisigService', () => {
   });
 
   describe('getMultisigConfig', () => {
-    it('should get multisig configuration for an issuer', () => {
+    it('should retrieve the multisig configuration', () => {
       expect(typeof service.getMultisigConfig).toBe('function');
     });
   });
