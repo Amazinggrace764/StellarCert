@@ -352,6 +352,46 @@ describe('MultisigService', () => {
     it('should reject a pending certificate request', () => {
       expect(typeof service.rejectRequest).toBe('function');
     });
+
+    it('returns the contract boolean result', async () => {
+      const internals = service as unknown as {
+        buildAndSubmitTransaction: jest.Mock;
+      };
+      internals.buildAndSubmitTransaction = jest
+        .fn()
+        .mockResolved(xdr.ScVal.scvBool(true));
+
+      await expect(
+        service.rejectRequest({ requestId: 'req-1', rejector: 'signer-1' } as never),
+      ).resolves.toBe(true);
+      expect(internals.buildAndSubmitTransaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects when the contract returns a non-boolean result', async () => {
+      const internals = service as unknown as {
+        buildAndSubmitTransaction: jest.Mock;
+      };
+      internals.buildAndSubmitTransaction = jest
+        .fn()
+        .mockResolved(xdr.ScVal.scvU32(1));
+
+      await expect(
+        service.rejectRequest({ requestId: 'req-1', rejector: 'signer-1' } as never),
+      ).rejects.toThrow('Invalid boolean response from contract');
+    });
+
+    it('propagates contract failures', async () => {
+      const internals = service as unknown as {
+        buildAndSubmitTransaction: jest.Mock;
+      };
+      internals.buildAndSubmitTransaction = jest
+        .fn()
+        .mockRejectedValue(new Error('rejector is not an authorized signer'));
+
+      await expect(
+        service.rejectRequest({ requestId: 'req-1', rejector: 'outsider' } as never),
+      ).rejects.toThrow('rejector is not an authorized signer');
+    });
   });
 
   describe('issueApprovedCertificate', () => {
