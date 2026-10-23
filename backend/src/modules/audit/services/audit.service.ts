@@ -216,7 +216,7 @@ export class AuditService {
     query.orderBy('audit.timestamp', 'DESC');
 
     const skip = searchDto.skip || 0;
-    const take = Math.min(searchDto.take || 50, 500); // Max 500 records per request
+    const take = Math.min(searchDto.take || 50, maxTake);
 
     query.skip(skip).take(take);
 
