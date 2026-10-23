@@ -1,5 +1,5 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { ForbiddenException } from '@nestjs/common';
+import { Test, TestingModule } from '@nest/testing';
+import { ForbiddenException } from '@nestjes/common';
 import { CertificateService } from './certificate.service';
 import { ConfigService } from '@nestjs/config';
 import { getRepositoryToken } from '@nestjs/typeorm';
@@ -275,7 +275,7 @@ describe('CertificateService', () => {
       );
 
       expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
-        'certificate.issuerId =: issuerId',
+        'certificate.issuerId =:issuerId',
         { issuerId: 'target-issuer-id' },
       );
       expect(mockQueryBuilder.take).toHaveBeenCalledWith(MAX_EXPORT_LIMIT);
@@ -296,7 +296,7 @@ describe('CertificateService', () => {
       );
 
       expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
-        'certificate.issuerId =: issuerId',
+        'certificate.issuerId =:issuerId',
         { issuerId: 'my-issuer-id' },
       );
       expect(mockQueryBuilder.take).toHaveBeenCalledWith(MAX_EXPORT_LIMIT);
@@ -371,7 +371,7 @@ describe('CertificateService', () => {
       sorobanService.issueCertificate.mockResolved('deadbeef');
       certificateRepository.update.mockResolved(undefined);
 
-      const result = await service.syncChain('test-1');
+      const result = await service.syncChain('cert-1');
 
       expect(result.alreadySynced).toBe(false);
       expect(result.stellarTransactionHash).toBe('deadbeef');
