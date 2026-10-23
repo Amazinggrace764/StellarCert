@@ -75,7 +75,7 @@ const setUser = (user: User | null) =>
 
 const renderAt = (path: string) =>
   render(
-    <MemoryRouter initialEntries={[path]}>
+    <MemoryRouter initialEntries={[[path]]}>
       <App />
     </MemoryRouter>,
   );
