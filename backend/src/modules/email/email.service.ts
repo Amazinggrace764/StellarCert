@@ -92,10 +92,12 @@ export class EmailService {
         secure: false,
         auth: { user: testAccount.user, pass: testAccount.pass },
       });
-      // Log only the inbox address, never the password
-      this.logger.log(
-        `Ethereal test account created: ${testAccount.user} — visit https://ethereal.email to read sent mail`,
-      );
+      // Log only the account name (never the password), and only in development
+      if (process.env.NODE_ENV === 'development') {
+        this.logger.log(
+          `Ethereal test account created: ${testAccount.user} — visit https://ethereal.email to read sent mail`,
+        );
+      }
     } catch (err) {
       this.logger.error(
         `Failed to create Ethereal test account: ${err.message}`,

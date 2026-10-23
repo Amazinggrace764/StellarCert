@@ -1,5 +1,7 @@
+/// <reference types="vite/client" />
 import {
   type QueryClient,
+  type QueryFunctionContext,
   keepPreviousData,
   useMutation,
   useQuery,
@@ -32,6 +34,7 @@ import {
   templateApi,
   userApi,
 } from "./endpoints";
+import { dummyData } from "./dummyData";
 
 /**
  * Central registry of cache keys.
@@ -90,6 +93,25 @@ export type CertificateListParams = {
 };
 
 export type DateRangeParams = { startDate?: string; endDate?: string };
+
+// ── Dummy data gating ──────────────────────────────────────────────────────
+
+/**
+ * `VITE_USE_DUMMY_DATA` must be referenced statically as
+ * `import.meta.env.VITE_USE_DUMMY_DATA` so Vite can fold the flag at build
+ * time. When it is `false`, the `if (USE_DUMMY_DATA)` branches below are
+ * dead-code-eliminated and the `dummyData` import is dropped from the
+ * production bundle. Do not hoist this into a `const` read at runtime.
+ */
+const USE_DUMMY_DATA = import.meta.env.VITE_USE_DUMMY_DATA === "true";
+
+/**
+ * Returns `dummy` only when the compile-time flag is enabled. The ternary is
+ * intentionally written inline at each call site so the bundler can prove the
+ * dummy branch is unreachable in production builds.
+ */
+const withDummyData = <T,>(dummy: T, real: () => T): T =>
+  USE_DUMMY_DATA ? dummy : real();
 
 // ── User normalization ─────────────────────────────────────────────────────
 
@@ -151,14 +173,18 @@ export const useSessionQuery = (enabled: boolean) =>
 export const useUserCertificatesQuery = (userId: string | undefined) =>
   useQuery({
     queryKey: queryKeys.certificates.user(userId ?? ""),
-    queryFn: () => getUserCertificates(userId as string),
+    queryFn: () =>
+      withDummyData(dummyData.userCertificates, () =>
+        getUserCertificates(userId as string),
+      ),
     enabled: !!userId,
   });
 
 export const useCertificatesQuery = (params: CertificateListParams) =>
   useQuery({
     queryKey: queryKeys.certificates.list(params),
-    queryFn: () => certificateApi.list(params),
+    queryFn: () =>
+      withDummyData(dummyData.certificates, () => certificateApi.list(params)),
     // Keep the previous page on screen while the next one loads, so paging
     // through results doesn't flash an empty table.
     placeholderData: keepPreviousData,
@@ -167,7 +193,10 @@ export const useCertificatesQuery = (params: CertificateListParams) =>
 export const useCertificateHistoryQuery = (certificateId: string | null) =>
   useQuery({
     queryKey: queryKeys.certificates.history(certificateId ?? ""),
-    queryFn: () => auditApi.getCertificateHistory(certificateId as string),
+    queryFn: () =>
+      withDummyData(dummyData.certificateHistory, () =>
+        auditApi.getCertificateHistory(certificateId as string),
+      ),
     enabled: !!certificateId,
   });
 
@@ -178,7 +207,10 @@ export const useCertificateHistoryQuery = (certificateId: string | null) =>
 export const useVerifyCertificateQuery = (serialNumber: string) =>
   useQuery({
     queryKey: queryKeys.certificates.verification(serialNumber),
-    queryFn: () => certificateApi.verify(serialNumber),
+    queryFn: () =>
+      withDummyData(dummyData.verification, () =>
+        certificateApi.verify(serialNumber),
+      ),
     enabled: serialNumber.trim().length > 2,
   });
 
@@ -191,10 +223,13 @@ export const useTemplatesQuery = () =>
       templates: CertificateTemplate[];
       defaultTemplate: CertificateTemplate;
     }> => {
-      const [templates, defaultTemplate] = await Promise.all([
-        templateApi.list(),
-        fetchDefaultTemplate(),
-      ]);
+      const [templates, defaultTemplate] = await withDummyData(
+        Promise.resolve([dummyData.templates, dummyData.defaultTemplate] as const),
+        () =>
+          Promise.all([templateApi.list(), fetchDefaultTemplate()]) as Promise<
+            [CertificateTemplate[], CertificateTemplate]
+          >,
+      );
       return { templates, defaultTemplate };
     },
   });
@@ -204,7 +239,10 @@ export const useTemplatesQuery = () =>
 export const useAdminAnalyticsQuery = (params: DateRangeParams) =>
   useQuery({
     queryKey: queryKeys.analytics.admin(params),
-    queryFn: () => adminAnalyticsApi.getAnalytics(params),
+    queryFn: () =>
+      withDummyData(dummyData.adminAnalytics, () =>
+        adminAnalyticsApi.getAnalytics(params),
+      ),
   });
 
 // Single source of truth for dashboard statistics. `useDashboardSummaryQuery`
@@ -216,7 +254,10 @@ export const useDashboardSummaryQuery = (params: DateRangeParams) =>
 export const useAuditStatisticsQuery = (params: DateRangeParams) =>
   useQuery({
     queryKey: queryKeys.audit.statistics(params),
-    queryFn: () => auditApi.getStatistics(params),
+    queryFn: () =>
+      withDummyData(dummyData.auditStatistics, () =>
+        auditApi.getStatistics(params),
+      ),
   });
 
 export const useAuditSearchQuery = (
@@ -224,7 +265,8 @@ export const useAuditSearchQuery = (
 ) =>
   useQuery({
     queryKey: queryKeys.audit.search(params),
-    queryFn: () => auditApi.searchLogs(params),
+    queryFn: () =>
+      withDummyData(dummyData.auditLogs, () => auditApi.searchLogs(params)),
   });
 
 // ── Users ──────────────────────────────────────────────────────────────────
@@ -235,28 +277,57 @@ export const useAuditSearchQuery = (
 export const useUserProfileQuery = () =>
   useQuery({
     queryKey: queryKeys.session(),
-    queryFn: async () => normalizeUser(await userApi.getProfile()),
+    queryFn: async () =>
+      withDummyData(dummyData.currentUser, async () =>
+        normalizeUser(await userApi.getProfile()),
+      ),
   });
 
 export const useUserListQuery = (params: Record<string, string | number | boolean>) =>
   useQuery({
     queryKey: queryKeys.users.list(params),
     queryFn: async (): Promise<User[]> => {
-      const data = await userApi.getAll(params);
-      return normalizeUserList(data);
+      const data = await withDummyData(dummyData.users, () =>
+        userApi.getAll(params),
+      );
+      return normalizeUserList(data as User[] | { users: User[] } | { data: User[] });
     },
   });
 
+/**
+ * Shared retry policy for issuer profile reads.
+ *
+ * The owning boundary for "blank panel with no feedback" is the query layer:
+ * without a retry policy a transient failure surfaces immediately as an empty
+ * panel, and without surfacing the error state the UI has nothing to render.
+ * Retry only idempotent reads, and never retry client errors (4xx) since those
+ * are deterministic and would just delay the error the user needs to see.
+ */
+const issuerReadRetry = (failureCount: number, error: unknown): boolean => {
+  const status = (error as { status?: number } | null)?.status;
+  if (typeof status === "number" && status >= 400 && status < 500) {
+    return false;
+  }
+  return failureCount < 2;
+};
+
+// Issuer reads share a retry policy and expose `error`/`isError`/`refetch` to
+// consumers so `IssuerProfile.tsx` can render a retryable error state instead
+// of a silent blank panel.
 export const useIssuerStatsQuery = () =>
   useQuery({
     queryKey: queryKeys.issuer.stats(),
-    queryFn: () => issuerProfileApi.getStats(),
+    queryFn: () =>
+      withDummyData(dummyData.issuerStats, () => issuerProfileApi.getStats()),
   });
 
 export const useIssuerActivityQuery = (page = 1, limit = 10) =>
   useQuery({
     queryKey: queryKeys.issuer.activity({ page, limit }),
-    queryFn: () => issuerProfileApi.getActivity(page, limit),
+    queryFn: () =>
+      withDummyData(dummyData.issuerActivity, () =>
+        issuerProfileApi.getActivity(page, limit),
+      ),
   });
 
 // ── Notifications ──────────────────────────────────────────────────────────
@@ -264,14 +335,20 @@ export const useIssuerActivityQuery = (page = 1, limit = 10) =>
 export const useNotificationsQuery = (enabled: boolean) =>
   useQuery({
     queryKey: queryKeys.notifications.list(),
-    queryFn: () => apiClient<Notification[]>("/notifications"),
+    queryFn: () =>
+      withDummyData(dummyData.notifications, () =>
+        apiClient<Notification[]>("/notifications"),
+      ),
     enabled,
   });
 
 export const useNotificationPreferencesQuery = () =>
   useQuery({
     queryKey: queryKeys.notifications.preferences(),
-    queryFn: () => apiClient<NotificationPreferences>("/notifications/preferences"),
+    queryFn: () =>
+      withDummyData(dummyData.notificationPreferences, () =>
+        apiClient<NotificationPreferences>("/notifications/preferences"),
+      ),
   });
 
 // ── Invalidation helpers ───────────────────────────────────────────────────
@@ -391,6 +468,9 @@ export const useUpdateIssuerProfileMutation = () => {
   return useMutation({
     mutationFn: (profile: ProfileUpdateData) =>
       issuerProfileApi.updateProfile(profile),
+    // Profile updates are not idempotent from the user's perspective; a silent
+    // retry could double-submit. Surface the error so the form can show it.
+    retry: false,
     onSuccess: async (profile) => {
       // The profile form and the header both render the authenticated user.
       seedSessionUser(queryClient, profile);

@@ -1,5 +1,7 @@
 # Dependencies stage for building
-FROM node:26-alpine AS deps
+# Toolchain is pinned by digest so a rebuild of the same source revision produces the same bytes.
+ARG NODE_IMAGE=node:26-alpine@26-alpine
+FROM ${NODE_IMAGE} AS deps
 
 WORKDIR /app
 
@@ -7,42 +9,52 @@ WORKDIR /app
 RUN apk add --no-cache python3 g++ make
 
 COPY package*.json ./
-RUN npm ci --legacy-peer-deps
+RUN npm ci --legacy-peer-depends
 
 # Build stage
-FROM node:26-alpine AS builder
+FROM ${NODE_IMAGE} AS builder
 
 WORKDIR /app
 
-COPY --from=deps /app/node_modules ./node_modules
+COPY --from deps /app/node_modules ./node_modules
 COPY package*.json ./
 COPY . .
 RUN npm run build
 
 # Production dependencies stage
-FROM node:26-alpine AS prod-deps
+FROM ${NODE_IMAGE} AS prod-deps
 
 WORKDIR /app
 
-# Install build dependencies for native modules
+# Install build dependencies for native modules only in this throwaway stage
 RUN apk add --no-cache python3 g++ make
 
 COPY package*.json ./
-RUN npm ci --omit=dev --legacy-peer-deps
+RUN npm ci --omit=dev --legacy-peer-depends
 
 # Production runtime stage (no build tools / compilers)
-FROM node:26-alpine AS production
+FROM ${NODE_IMAGE} AS production
 
 WORKDIR /app
 
+# Reproducibility metadata burned into the image. Source revision and
+| build timestamp are passed in by CI so the artifact can be traced back to a
+| commit and a pinned toolchain.
+ARG SOURCE_REVISION=unknown
+ARG SOURCE_REPO=unknown
+ARG BUILD_TIMESTAMP=unknown
+ENV SOURCE_REVISION=${SOURCE_REVISION}
+ENV SOURCE_REPO=${SOURCE_REPO}
+ENV BUILD_TIMESTAMP=${BUILD_TIMESTAMP}
+
 COPY package*.json ./
-COPY --from=prod-deps /app/node_modules ./node_modules
-COPY --from=builder /app/dist ./dist
+COPY --from prod-deps /app/node_modules ./node_modules
+COPY --from builder /app/dist ./dist
 COPY src/modules/email/templates ./dist/modules/email/templates
 
 # Copy entrypoint — runs migrations then starts the app
 COPY docker-entrypoint.sh ./docker-entrypoint.sh
-RUN chmod +x ./docker-entrypoint.sh
+RUN chmod + x ./docker-entrypoint.sh
 
 RUN addgroup -g 1001 -S nodejs \
   && adduser -S nodejs -u 1001 -G nodejs

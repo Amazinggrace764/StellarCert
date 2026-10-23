@@ -93,11 +93,11 @@ export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 /**
- * Submits a Soroban transaction and polls `sendTransaction`/getTransaction`
+ * Submits a Soroban transaction and polls `sendTransaction/getTransaction`
  * until the transaction reaches a finalized status (SUCCESS or FAILED).
  *
  * This is the root-correction for the bug where callers invoked getTransaction
- * immediately after sendTransaction and read a still-PENDING/NOT-FOUND result.
+ * immediately after sendTransaction and read a still-PENDING/NOT_FOUND result.
  */
 export async function sendAndConfirmSorobanTransaction(
   rpc: SorobanRpc,
@@ -163,6 +163,62 @@ export async function sendAndConfirmSorobanTransaction(
   );
 }
 
+/**
+ * Default certificate validity period in days, used when a certificate is
+ * issued from an approved multisig request and no explicit lifetime is provided.
+ */
+export const DEFAULT_CERTIFICATE_VALIDITY_DAYS = 365;
+
+/**
+ * Computes the certificate expiry timestamp from the issuance time.
+ *
+ * This is the root correction for the bug where the certificate expiry was
+ * set to the proposal's approval deadline (`request.expires_at`) rather than
+ * a proper certificate validity period. The certificate lifetime is now derived
+ * from the issuance moment, independent of the request approval deadline.
+ *
+ * @param issuedAt - Unix timestamp (seconds) at which the certificate is issued.
+ * @param validityDays - Number of days the certificate remains valid.
+ * @returns the Unix timestamp (seconds) at which the certificate expires.
+ */
+export function computeCertificateExpiry(
+  issuedAt: number,
+  validityDays: number = DEFAULT_CERTIFICATE_VALIDITY_DAYS,
+): number {
+  if (!Number.isFinite(issuedAt) || issuedAt < 0) {
+    throw new Error(`issuedAt must be a non-negative finite number, received ${issuedAt}`);
+  }
+  if (!Number.isFinite(validityDays) || validityDays <= 0) {
+    throw new Error(`validityDays must be a positive finite number, received ${validityDays}`);
+  }
+  return issuedAt + Math.floor(validityDays * 86_400);
+}
+
+/**
+ * Resolves the certificate expiry timestamp for an issuance, preferring an
+ * explicit certificate expiry carried on the request (`cert_expires_at`) and
+ * falling back to a validity period measured from the issuance time.
+ *
+ * It deliberately does NOT fall back to `request.expires_at`, since that value
+ * is the proposal approval deadline and not a certificate lifetime.
+ */
+export function resolveCertificateExpiry(params: {
+  issuedAt: number;
+  certExpiresAt?: number | null;
+  validityDays?: number;
+}): number {
+  const { certExpiresAt, issuedAt, validityDays } = params;
+  if (certExpiresAt !== undefined && certExpiresAt !== null) {
+    if (!Number.isFinite(certExpiresAt) || certExpiresAt <= issuedAt) {
+      throw new Error(
+        `certExpiresAt must be a finite timestamp after issuedAt (${issuedAt}), received ${certExpiresAt}`,
+      );
+    }
+    return certExpiresAt;
+  }
+  return computeCertificateExpiry(issuedAt, validityDays);
+}
+
 @Injectable()
 export class MultisigProvider {
   /**
@@ -174,7 +230,20 @@ export class MultisigProvider {
     rpc: SorobanRpc,
     transactionEnvelopeX: string,
     options: PollingOptions = {},
-  ): Promise<SorobanGetTransactionResponse> {
+  ): Promise<SorobanTransactionResponse> {
     return sendAndConfirmSorobanTransaction(rpc, transactionEnvelopeX, options);
+  }
+
+  /**
+   * Computes the certificate expiry timestamp for an issuance, deriving it
+   * from the issuance time (or an explicit `cert_expires_at`) rather than
+   * the proposal approval deadline.
+   */
+  computeCertificateExpiry(params: {
+    issuedAt: number;
+    certExpiresAt?: number | null;
+    validityDays?: number;
+  }): number {
+    return resolveCertificateExpiry(params);
   }
 }

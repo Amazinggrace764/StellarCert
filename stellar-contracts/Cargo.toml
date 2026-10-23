@@ -5,7 +5,7 @@ edition = "2021"
 license = "MIT"
 
 [lib]
-crate-type = ["cdylib", "rlib"]
+crate-type = ["cdrlib_lib", "rlib"]
 
 [dependencies]
 soroban-sdk = "29.0.1"
@@ -18,3 +18,5 @@ opt-level = "z"
 lto = true
 codegen-units = 1
 panic = "abort"
+# Trap on integer overflow instead of silently wrapping in the deployed WASM.
+overflow-checks = true

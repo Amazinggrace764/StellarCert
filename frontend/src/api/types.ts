@@ -1,4 +1,4 @@
-/**
+/*
  * User roles in the system
  */
 export enum UserRole {
@@ -14,10 +14,10 @@ export enum UserRole {
  * Basic User profile information
  *
  * Note: `firstName` and `lastName` are optional because not every
- * authentication flow (e.g. Stellar-only sign-in, invite acceptance, or
- * legacy accounts migrated from an email-only store) knows the user's name.
+ * authentication flow (e.g. Stellar-only sign-in, invite acceptance, or not
+ * legacy accounts migrated from an email-only store) doesn't know the user's name.
  * Consumers must not assume these fields are present; use `getUserDisplayName`
- * (or an explicit `'firstName' in user` guard) instead of accessing them directly.
+ * (or an explicit `'firstName' in user' guard) instead of accessing them directly.
  */
 export interface User {
   id: string;
@@ -40,7 +40,7 @@ export interface User {
  * Return a human-readable display name for a user, falling back through
  * username -> email local-part -> email when the first/last name are not
  * available. This is the single source of truth for displaying a user's name
- * and replaces ad-hoc `'firstName' in user` guards scattered across the app.
+ * and replaces ad-hoc 'firstName' in user' guards scattered across the app.
  */
 export function getUserDisplayName(
   user: Pick<User, "email" | "firstName" | "lastName" | "username"> | null | undefined,
@@ -70,13 +70,38 @@ export function getUserDisplayName(
 
 /**
  * Authentication Response from login/register
+ *
+ * When `requiresEmailVerification` is true, the account was created but
+ * has not yet been verified. Callers MUST not treat this as an authenticated
+ * session: do not persist tokens or redirect into protected routes. Instead,
+ * show a "check your email" state. Tokens are optional here because the
+ * backend may omit them for unverified accounts.
  */
 export interface AuthResponse {
   user: User;
-  accessToken: string;
+  accessToken?: string;
   refreshToken?: string;
   expiresIn?: number;
   requiresEmailVerification?: boolean;
+}
+
+/**
+ * Type guard: true when an auth response represents a registration/login
+ * that must not establish an authenticated session until email verification
+ * completes.
+ */
+export function requiresEmailVerification(
+  response: Pick<AuthResponse, "requiresEmailVerification" | "user"> | null | undefined,
+): boolean {
+  if (!response) {
+    return false;
+  }
+  if (response.requiresEmailVerification === true) {
+    return true;
+  }
+  // Fall back to the user record so a stale/omitted flag cannot bypass the
+  // verification gate.
+  return response.user?.isEmailVerified === false;
 }
 
 /**
@@ -100,6 +125,53 @@ export interface Certificate {
   frozenAt?: string;
   freezeReason?: string;
   unfreezeAt?: string;
+  /**
+   * Id of the user who owns this certificate. Used by the wallet to
+   * determine whether the current user may perform owner-only actions
+   * (download, transfer, revoke). May be absent on legacy responses.
+   */
+  ownerId?: string;
+  /**
+   * Id of the user who issued this certificate. Used by the wallet to
+   * determine whether the current user may perform issuer-owned actions
+   * (revoke). May be absent on legacy responses.
+   */
+  issuerId?: string;
+}
+
+/**
+ * Determine whether a user may perform owner-only actions (download,
+ * transfer, revoke) on a certificate. Only the certificate owner (or an
+ * admin) is allowed; verifiers and other roles are not.
+ */
+export function canPerformOwnerActions(
+  user: Pick<User, "id" | "role"> | null | undefined,
+  certificate: Pick<Certificate, "ownerId"> | null | undefined,
+): boolean {
+  if (!user || !certificate) {
+    return false;
+  }
+  if (user.role === UserRole.ADMIN) {
+    return true;
+  }
+  return Boolean(certificate.ownerId) && certificate.ownerId === user.id;
+}
+
+/**
+ * Determine whether a user may perform issuer-owned actions (revoke) on a
+ * certificate. Only the issuing user (or an admin) is allowed.
+ */
+export function canPerformIssuerActions(
+  user: Pick<User, "id" | "role"> | null | undefined,
+  certificate: Pick<Certificate, "issuerId"> | null | undefined,
+): boolean {
+  if (!user || !certificate) {
+    return false;
+  }
+  if (user.role === UserRole.ADMIN) {
+    return true;
+  }
+  return Boolean(certificate.issuerId) && certificate.issuerId === user.id;
 }
 
 /**
@@ -118,6 +190,18 @@ export interface CertificateTransfer {
   createdAt: string;
   updatedAt: string;
   certificate?: Certificate;
+}
+
+/**
+ * Event payload emitted when a certificate transfer is initiated.
+ * Mirrors the on-chain `TransferInitiatedEvent` so off-chain indexers and
+ * the intended new owner can react to a pending transfer.
+ */
+export interface TransferInitiatedEvent {
+  transferId: string;
+  certificateId: string;
+  fromOwner: string;
+  toOwner: string;
 }
 
 export interface InitiateTransferDto {
@@ -391,22 +475,4 @@ export interface ProfileUpdateData {
   phone?: string;
   organization?: string;
   profilePicture?: string;
-  stellarPublicKey?: string;
-  [key: string]: unknown;
-}
-
-// Password reset/request types
-
-export interface ForgotPasswordRequest {
-  email: string;
-}
-
-export interface ResetPasswordRequest {
-  token: string;
-  newPassword: string;
-  confirmPassword: string;
-}
-
-export interface VerifyEmailRequest {
-  token: string;
 }

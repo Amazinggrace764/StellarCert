@@ -199,6 +199,86 @@ describe('CertificateManager Integration Tests', () => {
     });
   });
 
+  describe('Certificate Expiry Validation', () => {
+    it('should reject setting expiry to a past timestamp', async () => {
+      const createDto = {
+        issuerId: TEST_ISSUER_ID,
+        recipientEmail: 'expiry-past@example.com',
+        recipientName: 'Expiry Past User',
+        title: 'Expiry Past Certificate',
+        status: 'active',
+      };
+
+      const created = await certificateService.create(createDto);
+
+      await expect(
+        certificateService.setCertificateExpiry(
+          created.id,
+          Math.floor(Date.now() / 1000) - 60,
+        ),
+      ).rejects.toThrow();
+    });
+
+    it('should reject setting expiry to the current timestamp', async () => {
+      const createDto = {
+        issuerId: TEST_ISSUER_ID,
+        recipientEmail: 'expiry-now@example.com',
+        recipientName: 'Expiry Now User',
+        title: 'Expiry Now Certificate',
+        status: 'active',
+      };
+
+      const created = await certificateService.create(createDto);
+
+      await expect(
+        certificateService.setCertificateExpiry(
+          created.id,
+          Math.floor(Date.now() / 1000),
+        ),
+      ).rejects.toThrow();
+    });
+
+    it('should reject setting expiry on a non-active certificate', async () => {
+      const createDto = {
+        issuerId: TEST_ISSUER_ID,
+        recipientEmail: 'expiry-revoked@example.com',
+        recipientName: 'Expiry Revoked User',
+        title: 'Expiry Revoked Certificate',
+        status: 'active',
+      };
+
+      const created = await certificateService.create(createDto);
+      await certificateService.revoke(created.id, 'Test revocation reason');
+
+      await expect(
+        certificateService.setCertificateExpiry(
+          created.id,
+          Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60,
+        ),
+      ).rejects.toThrow();
+    });
+
+    it('should allow setting a future expiry on an active certificate', async () => {
+      const createDto = {
+        issuerId: TEST_ISSUER_ID,
+        recipientEmail: 'expiry-future@example.com',
+        recipientName: 'Expiry Future User',
+        title: 'Expiry Future Certificate',
+        status: 'active',
+      };
+
+      const created = await certificateService.create(createDto);
+      const futureExpiry = Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60;
+
+      const updated = await certificateService.setCertificateExpiry(
+        created.id,
+        futureExpiry,
+      );
+
+      expect(updated).toBeDefined();
+    });
+  });
+
   describe('Certificate Revocation Flow', () => {
     it('should revoke an active certificate', async () => {
       // Create a certificate first
