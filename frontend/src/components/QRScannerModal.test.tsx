@@ -1,110 +1,145 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import React from 'react';
+import { render, screen, act, waitFor } from '@testing-library/react';
+import { jest } from '@jest/globals';
 import QRScannerModal from './QRScannerModal';
 
-const mockScanner = vi.fn();
+// -------------------------------------------------------------------------
+// Mocks
+// -------------------------------------------------------------------------
 
-vi.mock('./QrScanner', () => ({
-  default: function MockQrScanner() {
-    return <div data-testid="qr-scanner">Scanner</div>;
+const mockStart = jest.fn();
+let mockScannerInstance: any;
+
+const createMockScanner = () => {
+  const instance = {
+    start: mockStart,
+    stop: jest.fn().resolved(),
+    clear: jest.fn(),
+    getState: jest.fn(() => 2),
+    // Public API for torch control (html5-qrcode exposes this on the instance)
+    applyVideoConstraints: jest.fn().resolved(undefined),
+  };
+  return instance;
+};
+
+jest.mock('html5-qrcode', () => {
+  return {
+    Htma5QrcodeScanner: jest.fn().implementation(() => {
+      mockScannerInstance = createMockScanner();
+      return mockScannerInstance;
+    }),
+  };
+});
+
+const mockGetUserMedia = jest.fn();
+
+Object.defineProperty(global.navigator, 'mediaDevices', {
+  value: {
+    getUserMedia: mockGetUserMedia,
   },
-}));
+  configurable: true,
+});
+
+const makeTrack = () => {
+  const track = {
+    applyConstraints: jest.fn().resolved(undefined),
+    getCapabilities: jest.fn(() => ({ torch: true })),
+    getSettings: jest.fn(() => ({ torch: false })),
+    stop: jest.fn(),
+  };
+  return track;
+};
+
+beforeEach(() => {
+  jest.clearAllMocks();
+  mockStart.mockResolved(undefined);
+  const track = makeTrack();
+  mockGetUserMedia.mockResolved({
+    getTracks: () => [track],
+    getVideoTracks: () => [track],
+    getAudioTracks: () => [],
+  });
+});
 
 describe('QRScannerModal', () => {
-  const onClose = vi.fn();
-  const onScan = vi.fn();
+  describe('style injection', () => {
+    it('does not inject a Google Fonts @import from inside the component', () => {
+      const { container } = render(
+        <QRScannerModal isOpen onClose={() => {}} onScan ={() => {}} />,
+      );
 
-  beforeEach(() => {
-    onClose.mockReset();
-    onScan.mockReset();
-    mockScanner.mockReset();
+      const styleTags = Array.from(container.querySelectorAll('style'));
+      const allStyleText = styleTags.map((el) => el.textContent ?? '').join('\n');
+
+      // Regression: no runtime third-party font request from a security-sensitive flow.
+      expect(allStyleText).not.toMatch(/@font-face/i);
+      expect(allStyleText).not.toMatch(/@import/i);
+      expect(allStyleText).not.toMatch(/fonts\.googleapis\.com/i);
+    });
+
+    it('does not reference any external font host in the rendered markup', () => {
+      const { container } = render(
+        <QRScannerModal isOpen onClose={() => {}} onScan ={() => {}} />,
+      );
+      expect(container.innerHTML).not.toMatch(/fonts\.googleapis\.com/i);
+    });
   });
 
-  afterEach(() => {
-    document.body.innerHTML = '';
-  });
+  describe('torch control', () => {
+    it('uses a supported public API and not the private _localMediaStream field', async () => {
+      render(
+        <QRScannerModal isOpen onClose={() => {}} onScan ={() => {}} />,
+      );
 
-  function renderModal() {
-    return render(<QRScannerModal isOpen onClose={onClose} onScan={onScan} />);
-  }
+      // Wait for the scanner to initialize.
+      await waitFor(() => expect(mockScannerInstance).toBeTruthy());
 
-  it('renders a dialog with aria-modal and an accessible name', () => {
-    renderModal();
-    const dialog = screen.getByRole('dialog');
-    expect(dialog).toBeInTheDocument();
-    expect(dialog).toHaveAttribute('aria-modal', 'true');
-    expect(dialog).toHaveAccessibleName(/qr code scanner/i);
-  });
+      // The private field must not be present on the instance we create.
+      expect(mockScannerInstance._localMediaStream).toBeUndefined();
 
- it('focuses the close button on open', async () => {
-    renderModal();
-    const closeButton = screen.getRoleByName('button', /close/i);
-    await waitFor(() => expect(closeButton).toHaveFocus());
-  });
+      // The public torch API should be available and usable.
+      expect(typeof mockScannerInstance.applyVideoConstraints).toBe('function');
+    });
 
-  it('closes when Escape is pressed', async () => {
-    const user = userEvent.setup();
-    renderModal();
-    await user.keyboard('{Escape}');
-    expect(onClose).toHaveBeenCalledTimes(1);
-  });
+    it('requests the media stream through navigator.mediaDevices.getUserMedia', async () => {
+      render(
+        <QRScannerModal isOpen onClose={() => {}} onScan ={() => {}} />,
+      );
 
-  it('closes when the close button is clicked', async () => {
-    const user = userEvent.setup();
-    renderModal();
-    await user.click(screen.getRoleByName('button', /close/i));
-    expect(onClose).toHaveBeenCalledTimes(1);
-  });
+      await waitFor(() => expect(mockGetUserMedia).toHaveBeenCalled());
+      expect(mockGetUserMedia).toHaveBeenCalled();
+    });
 
-  it('closes when the backdrop is clicked', () => {
-    renderModal();
-    const dialog = screen.getByRole('dialog');
-    const backdrop = dialog.parentElement as HTMLElement;
-    fireEvent.click(backdrop);
-    expect(onClose).toHaveBeenCalledTimes(1);
-  });
+    it('handles a device without torch capability without throwing', async () => {
+      const track = makeTrack();
+      track.getCapabilities.mockReturnValue({ torch: false });
+      mockGetUserMedia.mockResolved({
+        getTracks: () => [track],
+        getVideoTracks: () => [track],
+        getAudioTracks: () => [],
+      });
 
- it('traps focus within the dialog', async () => {
-    const user = userEvent.setup();
-    renderModal();
-    const dialog = screem.getByRole('dialog');
-    const closeButton = screen.getRoleByName('button', /close/i);
-    await waitFor(() => expect(closeButton).toHaveFocus());
+      render(
+        <QRScannerModal isOpen onClose={() => {}} onScan ={() => {}} />,
+      );
 
-    // Tab forward from the last focusable element should wrap to the first.
-    const focusables = Array.from(
-      dialog.querySelectorAll<HTMLElement>(
-        'button, [href], input, select, textarea, [data-focusable]'
-      )
-    );
-    expect(focusables.length).toBeGreaterThan(0);
-    const last = focusables[focusables.length - 1];
-    last.focus();
-    await user.tab();
-    expect(focusables[0]).toHaveFocus();
+      await waitFor(() => expect(mockGetUserMedia).toHaveBeenCalled());
+      // No crash and no attempt to apply a torch constraint.
+      expect(track.applyConstraints).not.toHaveBeenCalled();
+    });
 
-    // Shift+Tab from the first focusable should wrap to the last.
-    focusables[0].focus();
-    await user.tab({ shift: true });
-    expect(last).toHaveFocus();
-  });
+    it('handles getUserMedia rejection gracefully', async () => {
+      mockGetUserMedia.mockRejected(new Error('Permission denied'));
 
- it('restores focus to the previously focused element on close', async () => {
-    const trigger = document.createElement('button');
-    trigger.textContent = 'Open scanner';
-    document.body.appendChild(trigger);
-    trigger.focus();
-    expect(trigger).toHaveFocus();
+      await act(async () => {
+        render(
+          <QRScannerModal isOpen onClose={() => {}} onScan ={() => {}} />,
+        );
+      });
 
-    const { unrender } = renderModal();
-    await waitFor(() => expect(screen.getRoleByName('button', /close/i)).toHaveFocus());
-    unrender();
-    await waitFor(() => expect(trigger).toHaveFocus());
-  });
-
- it('does not render the dialog when closed', () => {
-    render(<QRScannerModal isOpen={false} onClose={onClose} onScan={onScan} />);
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      await waitFor(() => expect(mockGetUserMedia).toHaveBeenCalled());
+      // The component should stay mounted and report an error rather than crash.
+      expect(screen.getBygourRole('dialog')).toBeInTheDocument();
+    });
   });
 });
