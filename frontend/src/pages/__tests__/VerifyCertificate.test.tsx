@@ -19,6 +19,28 @@ vi.mock("html5-qrcode", () => ({
   Html5QrcodeScanner: vi.fn(),
 }));
 
+
+vi.mock("../../components/QRScannerModal", () => ({
+  default: ({ isOpen, onClose, onScanSuccess }: any) => {
+    if (!isOpen) return null;
+    return (
+      <div data-testid="mock-qr-scanner-modal">
+        <button onClick={onClose} aria-label="Mock Close Scanner">Close</button>
+        <button
+          onClick={() => onScanSuccess?.({
+            raw: "SCANNED-SERIAL-999",
+            certificateId: "SCANNED-SERIAL-999",
+            url: "https://stellarcert.org/verify/SCANNED-SERIAL-999"
+          })}
+          aria-label="Mock Trigger Scan"
+        >
+          Scan Code
+        </button>
+      </div>
+    );
+  },
+}));
+
 import VerifyCertificate from "../VerifyCertificate";
 
 const VALID_RESULT = {
@@ -155,5 +177,69 @@ describe("VerifyCertificate share actions (toast, not alert)", () => {
     expect(copied).toContain("Certificate Verified: Jordan Lewis");
     expect(copied).toContain("/verify?serial=CERT-123");
     expect(alertSpy).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("VerifyCertificate QR scanner integration (#102)", () => {
+  beforeEach(() => {
+    verifyMock.mockResolvedValue(VALID_RESULT);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("opens the lazy QRScannerModal when Scan QR Code is clicked", async () => {
+    renderWithProviders(<VerifyCertificate />, {
+      queryClient: createTestQueryClient(),
+      routerEntries: ["/verify"],
+    });
+
+    expect(screen.queryByTestId("mock-qr-scanner-modal")).not.toBeInTheDocument();
+
+    const scanButton = screen.getByRole("button", { name: /Scan QR Code/i });
+    fireEvent.click(scanButton);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-qr-scanner-modal")).toBeInTheDocument();
+    });
+  });
+
+  it("updates serial and closes modal onScanSuccess", async () => {
+    renderWithProviders(<VerifyCertificate />, {
+      queryClient: createTestQueryClient(),
+      routerEntries: ["/verify"],
+    });
+
+    const scanButton = screen.getByRole("button", { name: /Scan QR Code/i });
+    fireEvent.click(scanButton);
+
+    const triggerScan = await screen.findByRole("button", { name: "Mock Trigger Scan" });
+    fireEvent.click(triggerScan);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("mock-qr-scanner-modal")).not.toBeInTheDocument();
+    });
+
+    const input = screen.getByLabelText(/Certificate Serial Number/i) as HTMLInputElement;
+    expect(input.value).toBe("SCANNED-SERIAL-999");
+  });
+
+  it("closes modal when onClose is called", async () => {
+    renderWithProviders(<VerifyCertificate />, {
+      queryClient: createTestQueryClient(),
+      routerEntries: ["/verify"],
+    });
+
+    const scanButton = screen.getByRole("button", { name: /Scan QR Code/i });
+    fireEvent.click(scanButton);
+
+    const closeButton = await screen.findByRole("button", { name: "Mock Close Scanner" });
+    fireEvent.click(closeButton);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("mock-qr-scanner-modal")).not.toBeInTheDocument();
+    });
   });
 });

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import Modal from "./Modal";
+import "./QRScannerModal.css";
 
 interface ScanResult {
   url: string;
@@ -24,6 +25,7 @@ export default function QRScannerModal({
 }: QRScannerModalProps) {
   const scannerRef = useRef<unknown>(null);
   const containerId = "qr-scanner-container";
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   const [status, setStatus] = useState<ScannerStatus>("initializing");
   const [errorMsg, setErrorMsg] = useState<string>("");
@@ -32,6 +34,7 @@ export default function QRScannerModal({
   const [torchOn, setTorchOn] = useState(false);
   const [hasMultipleCameras, setHasMultipleCameras] = useState(false);
   const [facingMode, setFacingMode] = useState<"environment" | "user">("environment");
+  const [dialogEl, setDialogEl] = useState<HTMLDivElement | null>(null);
 
   const stopScanner = useCallback(async () => {
     if (scannerRef.current) {
@@ -133,22 +136,68 @@ export default function QRScannerModal({
     };
   }, [isOpen, facingMode, startScanner, stopScanner]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    closeButtonRef.current?.focus();
+    return () => {
+      previouslyFocused?.focus?.();
+    };
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || !dialogEl) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = dialogEl.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      );
+      if (focusable.length === 0) {
+        event.preventDefault();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      if (event.shiftKey) {
+        if (active === first || !dialogEl.contains(active)) {
+          event.preventDefault();
+          last.focus();
+        }
+      } else if (active === last || !dialogEl.contains(active)) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen, dialogEl, onClose]);
+
   const handleToggleTorch = async () => {
     if (!scannerRef.current) return;
     try {
-      const scanner = scannerRef.current as {
-        _localMediaStream?: {
-          getVideoTracks: () => MediaStreamTrack[];
-        };
-      };
-      const track = scanner._localMediaStream?.getVideoTracks()[0];
+      // Obtain the active video track through the supported DOM API rather
+      // than reaching into html5-qrcode's undocumented `_localMediaStream`.
+      const container = document.getElementById(containerId);
+      const video = container?.querySelector("video") as HTMLVideoElement | null;
+      const stream = video?.srcObject as MediaStream | null;
+      const track = stream?.getVideoTracks()[0];
       if (!track) return;
 
       const capabilities = track.getCapabilities() as { torch?: boolean };
       if (!capabilities.torch) return;
 
       const newVal = !torchOn;
-      await (track as unknown as { applyConstraints: (c: unknown) => Promise<void> }).applyConstraints({ advanced: [{ torch: newVal }] });
+      await track.applyConstraints({
+        advanced: [{ torch: newVal } as unknown as MediaTrackConstraintSet],
+      });
       setTorchOn(newVal);
     } catch {
       // torch not supported
@@ -196,6 +245,11 @@ export default function QRScannerModal({
         }}
       >
         <div
+          ref={setDialogEl}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="qr-scanner-modal-title"
+          aria-label="QR scanner"
           className="relative overflow-hidden rounded-2xl"
           style={{
             background: "linear-gradient(145deg, #13131a 0%, #0d0d12 100%)",
@@ -261,6 +315,7 @@ export default function QRScannerModal({
                 </button>
               )}
               <button
+                ref={closeButtonRef}
                 type="button"
                 onClick={onClose}
                 aria-label="Close QR scanner"
@@ -485,37 +540,6 @@ export default function QRScannerModal({
           </div>
         </div>
       </Modal>
-
-      <style dangerouslySetInnerHTML={{
-        __html: `
-        @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&display=swap');
-
-        @keyframes fadeIn {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
-        @keyframes slideUp {
-          from { opacity: 0; transform: translateY(20px) scale(0.97); }
-          to { opacity: 1; transform: translateY(0) scale(1); }
-        }
-        @keyframes scanLine {
-          0%, 100% { transform: translateY(-80px); opacity: 0.4; }
-          50% { transform: translateY(80px); opacity: 1; }
-        }
-
-        #${containerId} video {
-          width: 100% !important;
-          height: 100% !important;
-          object-fit: cover !important;
-          border-radius: 0 !important;
-        }
-        #${containerId} img {
-          display: none !important;
-        }
-        #${containerId} > div:last-child {
-          display: none !important;
-        }
-      `}} />
     </>
   );
 }
